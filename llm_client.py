@@ -13,9 +13,9 @@ LLM client — two backends:
 import os
 import re
 import subprocess
-from typing import Callable
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def extract_code_block(text: str, lang: str = "") -> str:
     """Extract the content of the first fenced code block matching lang."""
@@ -25,6 +25,7 @@ def extract_code_block(text: str, lang: str = "") -> str:
 
 
 # ── Claude CLI backend ────────────────────────────────────────────────────────
+
 
 def _call_claude_cli(system: str, user: str, model: str | None = None) -> str:
     prompt = f"{system}\n\n{user}"
@@ -47,16 +48,16 @@ def _call_claude_cli(system: str, user: str, model: str | None = None) -> str:
 
 _openai_client = None
 
+
 def _get_openai_client():
     global _openai_client
     if _openai_client is None:
         from openai import OpenAI
+
         base_url = os.environ.get("LLM_BASE_URL", "").strip()
         api_key = os.environ.get("LLM_API_KEY", "").strip() or "no-key"
         if not base_url:
-            raise RuntimeError(
-                "LLM_BASE_URL is not set. Run ./setup.sh to configure your LLM provider."
-            )
+            raise RuntimeError("LLM_BASE_URL is not set. Run ./setup.sh to configure your LLM provider.")
         _openai_client = OpenAI(base_url=base_url, api_key=api_key)
     return _openai_client
 
@@ -87,6 +88,7 @@ def list_models() -> list[str]:
 
 
 # ── Public interface ──────────────────────────────────────────────────────────
+
 
 def call_llm(system: str, user: str, model: str | None = None) -> str:
     backend = os.environ.get("LLM_BACKEND", "openai").strip().lower()

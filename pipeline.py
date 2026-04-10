@@ -1,9 +1,10 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from .llm_client import call_llm as call_claude, extract_code_block
-from .lean_verifier import verify, LeanResult
 from . import prompts
+from .lean_verifier import LeanResult, verify
+from .llm_client import call_llm as call_claude
+from .llm_client import extract_code_block
 
 
 @dataclass
@@ -39,12 +40,14 @@ def run_pipeline(task: str) -> PipelineResult:
         prompts.CODE_GENERATION_USER.format(task=task),
     )
     python_code = extract_code_block(raw, "python") or raw.strip()
-    stages.append(StageResult(
-        name="Code generation",
-        output=python_code,
-        success=bool(python_code),
-        retries=0,
-    ))
+    stages.append(
+        StageResult(
+            name="Code generation",
+            output=python_code,
+            success=bool(python_code),
+            retries=0,
+        )
+    )
 
     # ── Stage 2: Extract formal spec ─────────────────────────────────────────
     raw = call_claude(
@@ -52,12 +55,14 @@ def run_pipeline(task: str) -> PipelineResult:
         prompts.SPEC_EXTRACTION_USER.format(code=python_code),
     )
     spec = raw.strip()
-    stages.append(StageResult(
-        name="Spec extraction",
-        output=spec,
-        success=bool(spec),
-        retries=0,
-    ))
+    stages.append(
+        StageResult(
+            name="Spec extraction",
+            output=spec,
+            success=bool(spec),
+            retries=0,
+        )
+    )
 
     # ── Stage 3: Autoformalize + prove (with retries) ─────────────────────────
     lean_code = ""
@@ -82,34 +87,28 @@ def run_pipeline(task: str) -> PipelineResult:
             )
             proof_retries += 1
 
-        lean_code = (
-            extract_code_block(raw, "lean4")
-            or extract_code_block(raw, "lean")
-            or raw.strip()
-        )
+        lean_code = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean") or raw.strip()
 
         # Proof generation
         proof_raw = call_claude(
             prompts.PROOF_GENERATION_SYSTEM,
             prompts.PROOF_GENERATION_USER.format(theorem=lean_code),
         )
-        lean_code = (
-            extract_code_block(proof_raw, "lean4")
-            or extract_code_block(proof_raw, "lean")
-            or lean_code
-        )
+        lean_code = extract_code_block(proof_raw, "lean4") or extract_code_block(proof_raw, "lean") or lean_code
 
         lean_result = verify(lean_code)
         if lean_result.success:
             break
 
-    stages.append(StageResult(
-        name="Proof generation",
-        output=lean_code,
-        success=lean_result.success if lean_result else False,
-        retries=proof_retries,
-        error=lean_result.output if lean_result and not lean_result.success else "",
-    ))
+    stages.append(
+        StageResult(
+            name="Proof generation",
+            output=lean_code,
+            success=lean_result.success if lean_result else False,
+            retries=proof_retries,
+            error=lean_result.output if lean_result and not lean_result.success else "",
+        )
+    )
 
     return PipelineResult(
         task=task,

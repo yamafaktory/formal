@@ -112,10 +112,10 @@ The `formal` script is the primary interface. All commands talk to `localhost:13
 [PIPELINE] Extracted 5 properties
 [SCREEN  ] ✓ prop_1: VERIFIABLE — discount is always between 0 and 1
 [SCREEN  ] ~ prop_3: UNVERIFIABLE — depends on reference equality
-[VERIFY  ] prop_1 [bound] Formalizing: discount is always between 0 and 1
-[LEAN    ] prop_1 theorem: import Mathlib ...
-[VERIFY  ] prop_1 generating proof (attempt 1/3)...
-[OK      ] prop_1 ✓ verified
+[CACHE   ] prop_1 [bound] cache hit — skipping proof
+[VERIFY  ] prop_2 [monotonicity] Formalizing: higher discount yields lower price
+[LEAN    ] prop_2 theorem: import Mathlib ...
+[VERIFY  ] prop_2 generating proof (attempt 1/3)...
 [FAIL    ] prop_2 ✗ attempt 1 failed: type mismatch
 [VERIFY  ] prop_2 generating proof (attempt 2/3)...
 [OK      ] prop_2 ✓ verified
@@ -229,6 +229,29 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
+| `PROOF_CACHE_DIR` | Directory for cached proof results (default: `results/cache/`) |
+
+## Development
+
+### Linting and formatting
+
+[Ruff](https://docs.astral.sh/ruff/) handles both linting and formatting. Config is in `pyproject.toml`.
+
+```sh
+ruff check .          # lint
+ruff check --fix .    # lint + auto-fix
+ruff format .         # format
+```
+
+Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgrade). Line length: 120.
+
+## Proof cache
+
+Successfully verified proofs are cached to disk. The same property on the same function is never re-proved — on subsequent runs a `[CACHE]` hit is logged and the stored result is returned immediately.
+
+The cache key is a SHA-256 hash of the function source code, property description, kind, and formal spec. Only successful proofs are stored; failed attempts always go through the full LLM + retry loop.
+
+Cache files are written to `results/cache/` (one JSON file per entry). Override with `PROOF_CACHE_DIR`.
 
 ## Limitations
 

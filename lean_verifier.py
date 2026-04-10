@@ -54,9 +54,7 @@ def verify(lean_code: str) -> LeanResult:
     verify_dir = LEAN_PROJECT_DIR / "Verify"
     verify_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(
-        suffix=".lean", mode="w", dir=verify_dir, delete=False, prefix="tmp_"
-    ) as f:
+    with tempfile.NamedTemporaryFile(suffix=".lean", mode="w", dir=verify_dir, delete=False, prefix="tmp_") as f:
         f.write(lean_code)
         tmp_path = Path(f.name)
 

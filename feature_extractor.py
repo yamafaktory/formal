@@ -1,7 +1,8 @@
 import json
-from dataclasses import dataclass, field
-from .llm_client import call_llm as call_claude
+from dataclasses import dataclass
+
 from . import prompts
+from .llm_client import call_llm as call_claude
 
 
 @dataclass
@@ -69,10 +70,7 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
     if not feature.pure_functions:
         return []
 
-    pure_text = "\n\n".join(
-        f"# {f.name}: {f.description}\n{f.code}"
-        for f in feature.pure_functions
-    )
+    pure_text = "\n\n".join(f"# {f.name}: {f.description}\n{f.code}" for f in feature.pure_functions)
 
     raw = call_claude(
         prompts.PROPERTY_EXTRACTION_SYSTEM,
@@ -108,10 +106,9 @@ def screen_properties(properties: list[Property], language: str = "Python") -> l
     if not properties:
         return properties
 
-    props_text = json.dumps([
-        {"id": p.id, "description": p.description, "formal": p.formal, "kind": p.kind}
-        for p in properties
-    ], indent=2)
+    props_text = json.dumps(
+        [{"id": p.id, "description": p.description, "formal": p.formal, "kind": p.kind} for p in properties], indent=2
+    )
 
     raw = call_claude(
         prompts.PROPERTY_SCREENING_SYSTEM,

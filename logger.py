@@ -5,27 +5,31 @@ import sys
 # ── ANSI colours (disabled if not a TTY or NO_COLOR is set) ──────────────────
 _USE_COLOR = sys.stdout.isatty() and not os.getenv("NO_COLOR")
 
-_C = {
-    "reset":   "\033[0m",
-    "bold":    "\033[1m",
-    "grey":    "\033[90m",
-    "cyan":    "\033[36m",
-    "yellow":  "\033[33m",
-    "green":   "\033[32m",
-    "red":     "\033[31m",
-    "magenta": "\033[35m",
-    "blue":    "\033[34m",
-} if _USE_COLOR else {k: "" for k in ["reset","bold","grey","cyan","yellow","green","red","magenta","blue"]}
+_C = (
+    {
+        "reset": "\033[0m",
+        "bold": "\033[1m",
+        "grey": "\033[90m",
+        "cyan": "\033[36m",
+        "yellow": "\033[33m",
+        "green": "\033[32m",
+        "red": "\033[31m",
+        "magenta": "\033[35m",
+        "blue": "\033[34m",
+    }
+    if _USE_COLOR
+    else {k: "" for k in ["reset", "bold", "grey", "cyan", "yellow", "green", "red", "magenta", "blue"]}
+)
 
 
 class _PipelineFormatter(logging.Formatter):
     _PREFIX = {
-        "PIPELINE": ("cyan",    "PIPELINE"),
-        "SCREEN":   ("magenta", "SCREEN  "),
-        "VERIFY":   ("yellow",  "VERIFY  "),
-        "LEAN":     ("grey",    "LEAN    "),
-        "OK":       ("green",   "OK      "),
-        "FAIL":     ("red",     "FAIL    "),
+        "PIPELINE": ("cyan", "PIPELINE"),
+        "SCREEN": ("magenta", "SCREEN  "),
+        "VERIFY": ("yellow", "VERIFY  "),
+        "LEAN": ("grey", "LEAN    "),
+        "OK": ("green", "OK      "),
+        "FAIL": ("red", "FAIL    "),
     }
 
     def format(self, record: logging.LogRecord) -> str:

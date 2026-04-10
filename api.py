@@ -1,17 +1,21 @@
+import json
+import pathlib
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import json, os, pathlib
-from .pipeline import run_pipeline, PipelineResult
+
 from .feature_pipeline import (
+    FeaturePipelineResult,
     run_feature_pipeline,
     run_feature_pipeline_from_file,
-    FeaturePipelineResult,
 )
+from .pipeline import PipelineResult, run_pipeline
 
 app = FastAPI(title="Lean4 Verifier", version="1.0.0")
 
 
 # ── /verify ───────────────────────────────────────────────────────────────────
+
 
 class VerifyRequest(BaseModel):
     task: str
@@ -35,6 +39,7 @@ class VerifyResponse(BaseModel):
 
 
 # ── /verify-feature ───────────────────────────────────────────────────────────
+
 
 class VerifyFeatureRequest(BaseModel):
     code: str | None = None
@@ -72,6 +77,7 @@ class VerifyFeatureResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -85,8 +91,11 @@ def verify_task(req: VerifyRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     if req.save_result:
-        _save("verify", req.task[:40], {"task": result.task, "verified": result.verified,
-                                         "stages": [s.__dict__ for s in result.stages]})
+        _save(
+            "verify",
+            req.task[:40],
+            {"task": result.task, "verified": result.verified, "stages": [s.__dict__ for s in result.stages]},
+        )
 
     lean_code, lean_output = "", ""
     if result.stages:
@@ -127,12 +136,16 @@ def verify_feature(req: VerifyFeatureRequest):
 
     if req.save_result:
         label = (req.file or "inline")[:40]
-        _save("feature", label, {
-            "feature_file": result.feature_file,
-            "verified": result.properties_verified,
-            "total": result.properties_found,
-            "results": [r.__dict__ for r in result.results],
-        })
+        _save(
+            "feature",
+            label,
+            {
+                "feature_file": result.feature_file,
+                "verified": result.properties_verified,
+                "total": result.properties_found,
+                "results": [r.__dict__ for r in result.results],
+            },
+        )
 
     return VerifyFeatureResponse(
         feature_file=result.feature_file,

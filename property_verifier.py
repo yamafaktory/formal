@@ -1,12 +1,12 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
 
-from .llm_client import call_llm as call_claude, extract_code_block
-from .lean_verifier import verify, check_syntax, LeanResult
+from . import prompts, proof_cache
 from .feature_extractor import Property, PureFunction
+from .lean_verifier import LeanResult, check_syntax, verify
+from .llm_client import call_llm as call_claude
+from .llm_client import extract_code_block
 from .logger import get_logger, log
-from . import prompts
 
 _log = get_logger(__name__)
 
@@ -42,13 +42,22 @@ def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":
 
 def verify_property(
     prop: Property,
-    pure_fn: Optional[PureFunction],
+    pure_fn: PureFunction | None,
     max_retries: int = None,
     language: str = "Python",
 ) -> PropertyResult:
     """Autoformalize once, then retry proof generation on failure."""
     max_retries = max_retries or int(os.getenv("MAX_PROOF_RETRIES", "3"))
     function_code = pure_fn.code if pure_fn else ""
+
+    # ── Cache lookup ──────────────────────────────────────────────────────────
+    key = proof_cache.cache_key(function_code, prop.description, prop.kind, prop.formal)
+    cached = proof_cache.load(key)
+    if cached is not None:
+        log(_log, "CACHE", f"{prop.id} [{prop.kind}] cache hit — skipping proof")
+        # Restore the current prop's id in case it differs across runs
+        cached.property_id = prop.id
+        return cached
 
     # ── Step 1: Formalize theorem (once) ─────────────────────────────────────
     log(_log, "VERIFY", f"{prop.id} [{prop.kind}] Formalizing: {prop.description}")
@@ -62,9 +71,7 @@ def verify_property(
             kind=prop.kind,
         ),
     )
-    theorem_with_sorry = (
-        extract_code_block(raw, "lean4") or extract_code_block(raw, "lean")
-    )
+    theorem_with_sorry = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean")
 
     log(_log, "LEAN", f"{prop.id} theorem:\n{theorem_with_sorry}")
     ok, syntax_error = check_syntax(theorem_with_sorry)
@@ -83,7 +90,7 @@ def verify_property(
 
     # ── Step 2: Proof generation loop ────────────────────────────────────────
     proof_code = theorem_with_sorry
-    lean_result: Optional[LeanResult] = None
+    lean_result: LeanResult | None = None
     retries = 0
 
     for attempt in range(max_retries):
@@ -107,11 +114,7 @@ def verify_property(
             )
             retries += 1
 
-        proof_code = (
-            extract_code_block(proof_raw, "lean4")
-            or extract_code_block(proof_raw, "lean")
-            or proof_code
-        )
+        proof_code = extract_code_block(proof_raw, "lean4") or extract_code_block(proof_raw, "lean") or proof_code
         log(_log, "LEAN", f"{prop.id} proof:\n{proof_code}")
         lean_result = verify(proof_code)
         if lean_result.success:
@@ -126,7 +129,7 @@ def verify_property(
     if not verified:
         log(_log, "FAIL", f"{prop.id} ✗ exhausted {max_retries} attempts")
 
-    return PropertyResult(
+    result = PropertyResult(
         property_id=prop.id,
         description=prop.description,
         kind=prop.kind,
@@ -137,10 +140,14 @@ def verify_property(
         retries=retries,
         status="verified" if verified else "failed",
     )
+    if verified:
+        proof_cache.save(key, result)
+    return result
 
 
 def _fake_error(msg: str) -> LeanResult:
     from .lean_verifier import LeanResult
+
     return LeanResult(
         success=False,
         output=msg,

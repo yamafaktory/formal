@@ -1,11 +1,16 @@
 import os
 import pathlib
-from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
-from .feature_extractor import decompose, extract_properties, screen_properties, DecomposedFeature, Property
-from .property_verifier import verify_property, unverifiable_result, PropertyResult
+from .feature_extractor import (
+    Property,
+    decompose,
+    extract_properties,
+    screen_properties,
+)
 from .logger import get_logger, log
+from .property_verifier import PropertyResult, unverifiable_result, verify_property
 
 _log = get_logger(__name__)
 
@@ -105,9 +110,7 @@ def run_feature_pipeline(
         log(_log, "SCREEN", f"~ {p.id}: UNVERIFIABLE — {p.unverifiable_reason}")
 
     # Build results for unverifiable properties immediately
-    unverifiable_results = [
-        unverifiable_result(p, p.unverifiable_reason) for p in unverifiable
-    ]
+    unverifiable_results = [unverifiable_result(p, p.unverifiable_reason) for p in unverifiable]
 
     # ── Step 4: Verify each verifiable property (parallel or sequential) ─────
     fn_map = {f.name: f for f in feature.pure_functions}
@@ -135,7 +138,11 @@ def run_feature_pipeline(
     verified_count = sum(1 for r in all_results if r.status == "verified")
     unverifiable_count = sum(1 for r in all_results if r.status == "unverifiable")
     failed_count = sum(1 for r in all_results if r.status == "failed")
-    log(_log, "PIPELINE", f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}")
+    log(
+        _log,
+        "PIPELINE",
+        f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}",
+    )
 
     return FeaturePipelineResult(
         feature_file=feature_file,
@@ -159,10 +166,20 @@ def run_feature_pipeline_from_file(file_path: str, language: str | None = None) 
 
 
 _EXTENSION_MAP = {
-    ".py": "Python", ".java": "Java", ".kt": "Kotlin", ".ts": "TypeScript",
-    ".tsx": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript",
-    ".go": "Go", ".rs": "Rust", ".cs": "C#", ".cpp": "C++", ".rb": "Ruby",
+    ".py": "Python",
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".cs": "C#",
+    ".cpp": "C++",
+    ".rb": "Ruby",
 }
+
 
 def _detect_language(suffix: str) -> str:
     return _EXTENSION_MAP.get(suffix.lower(), "unknown")

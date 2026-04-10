@@ -1,0 +1,13 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# E: pycodestyle errors
+# F: pyflakes (unused imports, undefined names)
+# I: isort (import ordering)
+# UP: pyupgrade (modernise syntax)
+
+[tool.ruff.format]
+quote-style = "double"
