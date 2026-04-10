@@ -1,0 +1,19 @@
+services:
+  verifier:
+    build: .
+    ports:
+      - "1337:1337"
+    environment:
+      LLM_BACKEND: ${LLM_BACKEND:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL}
+      MAX_PROOF_RETRIES: ${MAX_PROOF_RETRIES:-3}
+      MAX_PARALLEL_PROPERTIES: ${MAX_PARALLEL_PROPERTIES:-4}
+      LEAN_TIMEOUT: ${LEAN_TIMEOUT:-120}
+    volumes:
+      # Mount source so Python changes take effect without rebuild
+      - .:/app/formal:ro
+      # Optional: persist verification results
+      - ./results:/app/results
+    restart: unless-stopped

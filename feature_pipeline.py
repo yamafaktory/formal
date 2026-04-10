@@ -1,0 +1,168 @@
+import os
+import pathlib
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from .feature_extractor import decompose, extract_properties, screen_properties, DecomposedFeature, Property
+from .property_verifier import verify_property, unverifiable_result, PropertyResult
+from .logger import get_logger, log
+
+_log = get_logger(__name__)
+
+
+@dataclass
+class FeaturePipelineResult:
+    feature_file: str
+    feature_summary: str
+    pure_functions: list[str]
+    impure_parts: list[str]
+    properties_found: int
+    properties_verified: int
+    properties_unverifiable: int
+    results: list[PropertyResult]
+
+    @property
+    def overall_score(self) -> str:
+        verifiable_count = self.properties_found - self.properties_unverifiable
+        if verifiable_count == 0:
+            return "no_pure_logic"
+        pct = self.properties_verified / verifiable_count
+        if pct == 1.0:
+            return "full"
+        if pct >= 0.5:
+            return "partial"
+        return "failed"
+
+    def summary(self) -> str:
+        lines = [
+            f"Feature: {self.feature_file}",
+            f"Summary: {self.feature_summary}",
+            f"Pure functions: {', '.join(self.pure_functions) or 'none'}",
+            f"Impure parts: {len(self.impure_parts)} side effects (not verifiable)",
+            "",
+            f"Properties found:       {self.properties_found}",
+            f"Properties verified:    {self.properties_verified}",
+            f"Not verifiable:         {self.properties_unverifiable}",
+            "",
+        ]
+        for r in self.results:
+            if r.status == "verified":
+                icon = "✓"
+            elif r.status == "unverifiable":
+                icon = "~"
+            else:
+                icon = "✗"
+            lines.append(f"  {icon} [{r.kind}] {r.description}")
+            if r.status != "verified" and r.reason:
+                lines.append(f"      → {r.reason}")
+        return "\n".join(lines)
+
+
+def run_feature_pipeline(
+    code: str,
+    feature_file: str = "<inline>",
+    parallel: bool = True,
+    language: str = "Python",
+) -> FeaturePipelineResult:
+    max_retries = int(os.getenv("MAX_PROOF_RETRIES", "3"))
+
+    # ── Step 1: Decompose ────────────────────────────────────────────────────
+    log(_log, "PIPELINE", f"Decomposing feature [{language}]: {feature_file}")
+    feature = decompose(code, language=language)
+    log(_log, "PIPELINE", f"Summary: {feature.feature_summary}")
+    log(_log, "PIPELINE", f"Pure functions: {[f.name for f in feature.pure_functions] or 'none'}")
+    log(_log, "PIPELINE", f"Impure parts: {len(feature.impure_parts)}")
+
+    # Mark side-effect-only features early
+    if not feature.pure_functions:
+        log(_log, "PIPELINE", "No pure functions found — skipping verification")
+        return FeaturePipelineResult(
+            feature_file=feature_file,
+            feature_summary=feature.feature_summary,
+            pure_functions=[],
+            impure_parts=feature.impure_parts,
+            properties_found=0,
+            properties_verified=0,
+            properties_unverifiable=0,
+            results=[],
+        )
+
+    # ── Step 2: Extract properties ───────────────────────────────────────────
+    properties = extract_properties(feature, language=language)
+    feature.properties = properties
+    log(_log, "PIPELINE", f"Extracted {len(properties)} properties")
+
+    # ── Step 3: Screen properties for Lean formalizability ───────────────────
+    log(_log, "PIPELINE", "Screening properties for Lean formalizability...")
+    properties = screen_properties(properties, language=language)
+
+    verifiable = [p for p in properties if p.verifiable]
+    unverifiable = [p for p in properties if not p.verifiable]
+
+    for p in verifiable:
+        log(_log, "SCREEN", f"✓ {p.id}: VERIFIABLE — {p.description}")
+    for p in unverifiable:
+        log(_log, "SCREEN", f"~ {p.id}: UNVERIFIABLE — {p.unverifiable_reason}")
+
+    # Build results for unverifiable properties immediately
+    unverifiable_results = [
+        unverifiable_result(p, p.unverifiable_reason) for p in unverifiable
+    ]
+
+    # ── Step 4: Verify each verifiable property (parallel or sequential) ─────
+    fn_map = {f.name: f for f in feature.pure_functions}
+
+    def _verify_one(prop: Property) -> PropertyResult:
+        fn = fn_map.get(prop.function)
+        return verify_property(prop, fn, max_retries=max_retries, language=language)
+
+    verified_results: list[PropertyResult] = []
+
+    if parallel and len(verifiable) > 1:
+        workers = min(len(verifiable), int(os.getenv("MAX_PARALLEL_PROPERTIES", "4")))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_verify_one, p): p for p in verifiable}
+            for future in as_completed(futures):
+                verified_results.append(future.result())
+    else:
+        verified_results = [_verify_one(p) for p in verifiable]
+
+    # Merge and sort back to original property order
+    all_results = verified_results + unverifiable_results
+    order = {p.id: i for i, p in enumerate(properties)}
+    all_results.sort(key=lambda r: order.get(r.property_id, 999))
+
+    verified_count = sum(1 for r in all_results if r.status == "verified")
+    unverifiable_count = sum(1 for r in all_results if r.status == "unverifiable")
+    failed_count = sum(1 for r in all_results if r.status == "failed")
+    log(_log, "PIPELINE", f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}")
+
+    return FeaturePipelineResult(
+        feature_file=feature_file,
+        feature_summary=feature.feature_summary,
+        pure_functions=[f.name for f in feature.pure_functions],
+        impure_parts=feature.impure_parts,
+        properties_found=len(all_results),
+        properties_verified=verified_count,
+        properties_unverifiable=unverifiable_count,
+        results=all_results,
+    )
+
+
+def run_feature_pipeline_from_file(file_path: str, language: str | None = None) -> FeaturePipelineResult:
+    path = pathlib.Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    code = path.read_text()
+    detected = language or _detect_language(path.suffix)
+    return run_feature_pipeline(code, feature_file=str(path), language=detected)
+
+
+_EXTENSION_MAP = {
+    ".py": "Python", ".java": "Java", ".kt": "Kotlin", ".ts": "TypeScript",
+    ".tsx": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript",
+    ".go": "Go", ".rs": "Rust", ".cs": "C#", ".cpp": "C++", ".rb": "Ruby",
+}
+
+def _detect_language(suffix: str) -> str:
+    return _EXTENSION_MAP.get(suffix.lower(), "unknown")

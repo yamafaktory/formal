@@ -1,0 +1,15 @@
+# Overlay for the Claude Code CLI backend (LLM_BACKEND=claude-cli).
+# Mounts the host claude binary and credentials into the container.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.claude.yml up --build
+#
+# Or set COMPOSE_FILE in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.claude.yml
+
+services:
+  verifier:
+    volumes:
+      - /usr/bin/claude:/usr/bin/claude:ro
+      - /opt/claude-code:/opt/claude-code:ro
+      - ~/.claude:/root/.claude:ro

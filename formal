@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# formal — CLI for the formal verifier
+set -euo pipefail
+
+HOST="${FORMAL_HOST:-http://localhost:1337}"
+CONTAINER="${FORMAL_CONTAINER:-formal-verifier-1}"
+
+_usage() {
+  cat <<EOF
+Usage: formal <command> [options]
+
+Commands:
+  watch               Stream live logs from the verifier container
+  verify <file>       Verify a source file
+  verify --code CODE  Verify inline code (use --lang to set language)
+  status              Check verifier health
+
+Options for verify:
+  --lang LANG         Source language (default: auto-detected from extension)
+  --parallel          Run property verification in parallel (default: true)
+  --full              Show full JSON response
+
+Examples:
+  formal watch
+  formal verify src/main/java/SomeService.java
+  formal verify --code 'def f(x): return x + 1' --lang Python
+  formal status
+EOF
+}
+
+_require_jq() {
+  command -v jq &>/dev/null || { echo "jq is required (brew install jq / apt install jq)"; exit 1; }
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  watch)
+    echo "Watching $CONTAINER logs (Ctrl-C to stop)..."
+    docker logs -f "$CONTAINER" 2>&1
+    ;;
+
+  verify)
+    _require_jq
+    FILE="" CODE="" LANG="" PARALLEL="true" FULL="false"
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --code)     CODE="$2";     shift 2 ;;
+        --lang)     LANG="$2";     shift 2 ;;
+        --parallel) PARALLEL="$2"; shift 2 ;;
+        --full)     FULL="true";   shift   ;;
+        *)          FILE="$1";     shift   ;;
+      esac
+    done
+
+    if [[ -n "$FILE" ]]; then
+      [[ -f "$FILE" ]] || { echo "Error: file not found: $FILE"; exit 1; }
+
+      # Auto-detect language from extension if not given
+      if [[ -z "$LANG" ]]; then
+        EXT="${FILE##*.}"
+        case "$EXT" in
+          java)       LANG="Java" ;;
+          kt|kts)     LANG="Kotlin" ;;
+          py)         LANG="Python" ;;
+          ts|tsx)     LANG="TypeScript" ;;
+          js|jsx|mjs) LANG="JavaScript" ;;
+          go)         LANG="Go" ;;
+          rs)         LANG="Rust" ;;
+          cs)         LANG="C#" ;;
+          cpp|cc|cxx) LANG="C++" ;;
+          rb)         LANG="Ruby" ;;
+          zig|zon)    LANG="Zig" ;;
+          c|h)        LANG="C" ;;
+          *)          LANG="$EXT" ;;
+        esac
+      fi
+
+      # Read file content on the host and pass inline — the verifier runs in
+      # Docker and cannot access host file paths directly.
+      FILE_CODE="$(cat "$FILE")"
+      PAYLOAD=$(jq -n \
+        --arg code "$FILE_CODE" \
+        --arg lang "$LANG" \
+        --arg filename "$(basename "$FILE")" \
+        --argjson parallel "$PARALLEL" \
+        '{code: $code, language: $lang, filename: $filename, parallel: $parallel}')
+    elif [[ -n "$CODE" ]]; then
+      PAYLOAD=$(jq -n \
+        --arg code "$CODE" \
+        --arg lang "${LANG:-Python}" \
+        --argjson parallel "$PARALLEL" \
+        '{code: $code, language: $lang, parallel: $parallel}')
+    else
+      echo "Error: provide a file path or --code"
+      _usage; exit 1
+    fi
+
+    RESPONSE=$(curl -sf -X POST "$HOST/verify-feature" \
+      -H 'Content-Type: application/json' \
+      -d "$PAYLOAD")
+
+    if [[ "$FULL" == "true" ]]; then
+      echo "$RESPONSE" | jq .
+    else
+      DISPLAY_NAME="${FILE:-inline}"
+      echo "$RESPONSE" | jq -r \
+        --arg name "$DISPLAY_NAME" '
+        "─────────────────────────────────────────",
+        "File:    \($name)",
+        "Summary: \(.feature_summary)",
+        "Score:   \(.overall_score)  (\(.properties_verified)/\(.properties_found) verified, \(.properties_unverifiable) unverifiable)",
+        "─────────────────────────────────────────",
+        (.results[] | (
+          if .status == "verified"      then "  ✓ [\(.kind)] \(.description)"
+          elif .status == "unverifiable" then "  ~ [\(.kind)] \(.description)\n      → \(.reason)"
+          else                               "  ✗ [\(.kind)] \(.description)\n      → \(if .reason != "" then .reason else .lean_output | fromjson? | .data // . end)"
+          end
+        )),
+        "─────────────────────────────────────────"
+      '
+    fi
+    ;;
+
+  status)
+    curl -sf "$HOST/health" | jq .
+    ;;
+
+  ""|help|--help|-h)
+    _usage
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    _usage; exit 1
+    ;;
+esac
