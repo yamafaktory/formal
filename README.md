@@ -1,4 +1,4 @@
-# Formal Verifier
+# 🔬 formal
 
 Automatically verifies mathematical properties of pure logic in any feature your AI coding agent writes or modifies, using Lean 4 + Mathlib as the proof backend.
 
