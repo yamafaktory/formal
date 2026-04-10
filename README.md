@@ -260,5 +260,5 @@ Cache files are written to `results/cache/` (one JSON file per entry). Override 
 - **Pure logic only.** Side effects (DB, HTTP, I/O) are excluded by design.
 - **Modeling assumptions.** Floats are modelled as rationals, strings use structural equality. Properties that require IEEE 754 precision or reference semantics are classified `unverifiable`.
 - **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
-- **First build is slow.** Installing Lean 4 + Mathlib oleans takes several minutes.
+- **First build is slow.** Installing Lean 4 + Mathlib oleans and precompiling the warmup module takes several minutes. Subsequent starts are instant.
 - **Not a test replacement.** Formal verification proves properties hold for all inputs; it does not replace integration or end-to-end tests.

@@ -17,6 +17,11 @@ COPY lean_project/lean-toolchain lean_project/lakefile.toml ./
 # Install the pinned Lean version and download prebuilt Mathlib oleans
 RUN lake update && lake exe cache get
 
+# Precompile common Mathlib imports — bakes oleans into the image so the first
+# real proof request hits the cache instead of recompiling from scratch
+COPY lean_project/Warmup.lean ./
+RUN lake build Warmup
+
 # ── Stage 2: Final image ──────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
