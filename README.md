@@ -2,7 +2,10 @@
 
 [![Lint](https://github.com/yamafaktory/formal/actions/workflows/lint.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/lint.yml)
 
-Automatically verifies mathematical properties of pure logic in any feature your AI coding agent writes or modifies, using Lean 4 + Mathlib as the proof backend.
+Formal verification for AI-generated code. Automatically extracts correctness
+properties from pure functions, translates them into Lean 4 theorems, and
+machine-checks them with Mathlib — so you get mathematical proof, not just tests,
+for the logic your AI coding agent produces.
 
 Works with any LLM — Claude, GPT-4, Gemini, Llama, Mistral, or any OpenAI-compatible endpoint.
 
