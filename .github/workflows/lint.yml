@@ -3,6 +3,7 @@ name: Lint
 on:
   push:
   pull_request:
+  workflow_call:
 
 jobs:
   ruff:
@@ -20,9 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mvdan/shfmt-action@v1
-        with:
-          args: -d .
+      - run: |
+          curl -sSL https://github.com/mvdan/sh/releases/latest/download/shfmt_$(uname -s)_amd64 -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+          shfmt -d .
 
   shellcheck:
     runs-on: ubuntu-latest
