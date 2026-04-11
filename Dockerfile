@@ -20,8 +20,7 @@ COPY lean_project/lean-toolchain lean_project/lakefile.toml ./
 RUN echo "[1/3] Resolving Lean toolchain and Mathlib dependencies..." \
     && lake update \
     && echo "[2/3] Fetching prebuilt Mathlib oleans from cache..."
-RUN --mount=type=cache,target=/root/.cache \
-    lake exe cache get \
+RUN lake exe cache get \
     && echo "[2/3] Oleans ready."
 
 # Precompile common Mathlib imports — bakes oleans into the image so the first
