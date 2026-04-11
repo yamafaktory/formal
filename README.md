@@ -47,13 +47,17 @@ Two backends to choose from:
 
 `setup.sh` writes the right `COMPOSE_FILE` to `.env` automatically — no manual config needed. Available models are fetched from `/v1/models`; if unsupported, enter the model name manually.
 
-### 2. Build and start
+### 2. Start
+
+```sh
+docker compose up
+```
+
+Pulls the prebuilt image from GHCR — no local build needed. If you want to build from source instead:
 
 ```sh
 docker compose up --build
 ```
-
-The first build takes several minutes — it installs Lean 4 and downloads prebuilt Mathlib oleans. Subsequent starts are instant.
 
 ```sh
 ./formal status
@@ -263,5 +267,5 @@ Cache files are written to `results/cache/` (one JSON file per entry). Override 
 - **Pure logic only.** Side effects (DB, HTTP, I/O) are excluded by design.
 - **Modeling assumptions.** Floats are modelled as rationals, strings use structural equality. Properties that require IEEE 754 precision or reference semantics are classified `unverifiable`.
 - **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
-- **First build is slow.** Installing Lean 4 + Mathlib oleans and precompiling the warmup module takes several minutes. Subsequent starts are instant.
+- **Building from source is slow.** If you run `--build` locally, installing Lean 4 + Mathlib oleans takes several minutes. The prebuilt GHCR image avoids this.
 - **Not a test replacement.** Formal verification proves properties hold for all inputs; it does not replace integration or end-to-end tests.

@@ -1,8 +1,10 @@
 # ── Stage 1: Install Lean + cache Mathlib oleans ─────────────────────────────
 FROM debian:bookworm-slim AS lean-builder
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates git \
+        apt-utils curl ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install elan (Lean version manager)
@@ -15,19 +17,28 @@ WORKDIR /lean_project
 COPY lean_project/lean-toolchain lean_project/lakefile.toml ./
 
 # Install the pinned Lean version and download prebuilt Mathlib oleans
-RUN lake update && lake exe cache get
+RUN echo "[1/3] Resolving Lean toolchain and Mathlib dependencies..." \
+    && lake update \
+    && echo "[2/3] Fetching prebuilt Mathlib oleans from cache..."
+RUN --mount=type=cache,target=/root/.cache \
+    lake exe cache get \
+    && echo "[2/3] Oleans ready."
 
 # Precompile common Mathlib imports — bakes oleans into the image so the first
 # real proof request hits the cache instead of recompiling from scratch
 COPY lean_project/Warmup.lean ./
-RUN lake build Warmup
+RUN echo "[3/3] Precompiling Mathlib warmup module (this takes a few minutes)..." \
+    && lake build Warmup \
+    && echo "[3/3] Warmup complete. Lean stage done."
 
 # ── Stage 2: Final image ──────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates git \
-        python3 python3-pip \
+        apt-utils curl ca-certificates git \
+        python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy elan + installed Lean toolchain from builder
@@ -41,7 +52,9 @@ COPY lean_project/Verify/.gitkeep /lean_project/Verify/.gitkeep
 # Install Python dependencies
 WORKDIR /app
 COPY requirements.txt .
-RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
+RUN python3 -m venv /venv
+ENV PATH="/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application (build context IS the formal/ package)
 COPY *.py ./formal/

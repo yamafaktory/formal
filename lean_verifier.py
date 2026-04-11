@@ -7,6 +7,49 @@ from pathlib import Path
 
 LEAN_PROJECT_DIR = Path(os.getenv("LEAN_PROJECT_DIR", "/lean_project"))
 LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
+AUTO_TACTIC_TIMEOUT = 20  # seconds for the auto-tactic pre-pass
+
+# Auto-tactics tried before calling the LLM for proof generation.
+# Ordered fastest-first: rfl (instant), omega (linear arith), norm_num
+# (numeric), decide (finite decidable), simp (last resort).
+AUTO_TACTICS = "first | rfl | omega | norm_num | decide | simp"
+
+# ── Lean environment cache ─────────────────────────────────────────────────────
+# Running `lake env lean` on every verification call re-invokes `lake` just to
+# set environment variables. We capture those variables once at first use and
+# call `lean` directly afterwards, saving ~100 ms per call.
+
+_lean_env: dict | None = None
+_lean_env_tried: bool = False
+
+
+def _get_lean_env() -> dict | None:
+    """Return the lake-managed environment, or None on failure (caller falls back)."""
+    global _lean_env, _lean_env_tried
+    if _lean_env_tried:
+        return _lean_env
+    _lean_env_tried = True
+    try:
+        result = subprocess.run(
+            ["lake", "env", "env"],
+            capture_output=True,
+            text=True,
+            cwd=str(LEAN_PROJECT_DIR),
+            timeout=30,
+        )
+        if result.returncode == 0:
+            env = dict(os.environ)
+            for line in result.stdout.splitlines():
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    env[k] = v
+            _lean_env = env
+    except Exception:
+        pass  # fall back to lake env lean per-call
+    return _lean_env
+
+
+# ── Data types ─────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -46,8 +89,11 @@ class LeanResult:
         return "Review Lean 4 syntax and ensure all imports are present."
 
 
-def verify(lean_code: str) -> LeanResult:
-    """Write lean_code to a temp file and verify it with `lake env lean --json`."""
+# ── Verification ───────────────────────────────────────────────────────────────
+
+
+def verify(lean_code: str, timeout: int | None = None) -> LeanResult:
+    """Write lean_code to a temp file and verify it with lean --json."""
     if not lean_code or not lean_code.strip():
         return LeanResult(success=False, output="Empty Lean code", errors=[])
 
@@ -58,13 +104,24 @@ def verify(lean_code: str) -> LeanResult:
         f.write(lean_code)
         tmp_path = Path(f.name)
 
+    effective_timeout = timeout if timeout is not None else LEAN_TIMEOUT
+    lean_env = _get_lean_env()
+
+    if lean_env is not None:
+        cmd = ["lean", "--json", str(tmp_path)]
+        env = lean_env
+    else:
+        cmd = ["lake", "env", "lean", "--json", str(tmp_path)]
+        env = None
+
     try:
         result = subprocess.run(
-            ["lake", "env", "lean", "--json", str(tmp_path)],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=LEAN_TIMEOUT,
+            timeout=effective_timeout,
             cwd=str(LEAN_PROJECT_DIR),
+            env=env,
         )
 
         errors: list[dict] = []
@@ -100,7 +157,7 @@ def verify(lean_code: str) -> LeanResult:
     except subprocess.TimeoutExpired:
         return LeanResult(
             success=False,
-            output=f"Lean verification timed out after {LEAN_TIMEOUT}s",
+            output=f"Lean verification timed out after {effective_timeout}s",
             errors=[{"severity": "error", "data": "timeout", "line": 0, "col": 0}],
         )
     finally:
@@ -115,3 +172,10 @@ def check_syntax(lean_code: str) -> tuple[bool, str]:
     if not any(kw in lean_code for kw in required):
         return False, "Code must contain at least one of: import, theorem, lemma, def, example"
     return True, ""
+
+
+def with_auto_tactics(lean_code: str) -> str:
+    """Replace sorry placeholders with fast auto-tactics for a quick proof attempt."""
+    replaced = lean_code.replace(":= by sorry", f":= by {AUTO_TACTICS}")
+    replaced = replaced.replace("by\n  sorry", f"by {AUTO_TACTICS}")
+    return replaced

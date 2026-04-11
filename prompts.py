@@ -301,6 +301,55 @@ For "result is member of original list" proofs on length-1 guarded functions:
 Output ONLY a lean4 code block."""
 
 
+PROPERTY_FORMALIZE_AND_PROVE_USER = """Formalize this property as a Lean 4 theorem AND provide a complete proof.
+No sorry.
+
+Source language: {language}
+Function code:
+{function_code}
+
+Property:
+- Description: {description}
+- Formal statement: {formal}
+- Kind: {kind}
+
+Modeling rules:
+- Translate SEMANTICS, not syntax. Re-implement the logic in Lean 4 from scratch.
+- NEVER leave a type opaque. Every value must have a concrete Lean 4 type:
+    numbers          →  Nat, Int, or Rat
+    equality checks  →  = (Lean's structural equality)
+    strings          →  String (use = for comparisons)
+    lists / arrays   →  List T
+    sets             →  Finset T
+    maps             →  Finset (K × V) or K → Option V
+    optional / null  →  Option T
+    booleans         →  Bool or decidable Prop
+- Import Mathlib at the top. Re-implement the function, then state and prove the theorem.
+- For functions that throw on invalid input: model as Option T or add a precondition hypothesis.
+
+Proof tactics:
+- `rfl` for definitional equality
+- `omega` for linear arithmetic on Nat/Int
+- `norm_num` for numeric computations
+- `simp [f]` to unfold and simplify — but NEVER add tactics after simp if it closes the goal
+- `linarith` for linear arithmetic on ℚ/ℝ
+- `decide` for decidable propositions on small finite types
+- `aesop` as a last resort for structural goals
+
+Mathlib API (use EXACTLY these names):
+  List.length_singleton    : [a].length = 1
+  List.length_eq_one       : l.length = 1 ↔ ∃ a, l = [a]
+  List.mem_singleton       : a ∈ [b] ↔ a = b
+  List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
+  List.mem_cons_self       : a ∈ a :: l
+  List.head?_cons          : List.head? (a :: l) = some a
+  List.head?_nil           : List.head? ([] : List α) = none
+  List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
+  Option.some_injective    : some a = some b → a = b
+
+Output ONLY a lean4 code block with the complete theorem and proof."""
+
+
 PROPERTY_RETRY_USER = """The Lean proof failed with this error:
 
 {error}

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from . import prompts, proof_cache
 from .feature_extractor import Property, PureFunction
-from .lean_verifier import LeanResult, check_syntax, verify
+from .lean_verifier import AUTO_TACTIC_TIMEOUT, LeanResult, check_syntax, verify, with_auto_tactics
 from .llm_client import call_llm as call_claude
 from .llm_client import extract_code_block
 from .logger import get_logger, log
@@ -59,11 +59,11 @@ def verify_property(
         cached.property_id = prop.id
         return cached
 
-    # ── Step 1: Formalize theorem (once) ─────────────────────────────────────
-    log(_log, "VERIFY", f"{prop.id} [{prop.kind}] Formalizing: {prop.description}")
+    # ── Step 1: Formalize AND prove in one LLM call ───────────────────────────
+    log(_log, "VERIFY", f"{prop.id} [{prop.kind}] Formalizing+proving: {prop.description}")
     raw = call_claude(
         prompts.AUTOFORMALIZE_SYSTEM,
-        prompts.PROPERTY_FORMALIZE_USER.format(
+        prompts.PROPERTY_FORMALIZE_AND_PROVE_USER.format(
             language=language,
             function_code=function_code,
             description=prop.description,
@@ -71,10 +71,10 @@ def verify_property(
             kind=prop.kind,
         ),
     )
-    theorem_with_sorry = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean")
+    proof_code = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean")
 
-    log(_log, "LEAN", f"{prop.id} theorem:\n{theorem_with_sorry}")
-    ok, syntax_error = check_syntax(theorem_with_sorry)
+    log(_log, "LEAN", f"{prop.id} formalized:\n{proof_code}")
+    ok, syntax_error = check_syntax(proof_code)
     if not ok:
         return PropertyResult(
             property_id=prop.id,
@@ -82,38 +82,62 @@ def verify_property(
             kind=prop.kind,
             function=prop.function,
             verified=False,
-            lean_code=theorem_with_sorry,
+            lean_code=proof_code,
             lean_output=syntax_error,
             retries=0,
             reason=f"Syntax error in formalization: {syntax_error}",
         )
 
-    # ── Step 2: Proof generation loop ────────────────────────────────────────
-    proof_code = theorem_with_sorry
+    # ── Step 2: Auto-tactic pre-pass (if LLM left any sorry) ─────────────────
+    # Fast tactics (rfl, omega, norm_num, decide, simp) close ~30% of properties
+    # without any further LLM call.
+    if "sorry" in proof_code:
+        auto_code = with_auto_tactics(proof_code)
+        log(_log, "VERIFY", f"{prop.id} trying auto-tactics (timeout {AUTO_TACTIC_TIMEOUT}s)...")
+        auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
+        if auto_result.success:
+            log(_log, "OK", f"{prop.id} ✓ auto-proved")
+            result = PropertyResult(
+                property_id=prop.id,
+                description=prop.description,
+                kind=prop.kind,
+                function=prop.function,
+                verified=True,
+                lean_code=auto_code,
+                lean_output=auto_result.output,
+                retries=0,
+                status="verified",
+            )
+            proof_cache.save(key, result)
+            return result
+
+    # ── Step 3: Lean verify + retry loop ─────────────────────────────────────
     lean_result: LeanResult | None = None
     retries = 0
 
-    for attempt in range(max_retries):
-        log(_log, "VERIFY", f"{prop.id} generating proof (attempt {attempt + 1}/{max_retries})...")
-        if attempt == 0:
-            proof_raw = call_claude(
-                prompts.PROOF_GENERATION_SYSTEM,
-                prompts.PROOF_GENERATION_USER.format(theorem=theorem_with_sorry),
-            )
-        else:
-            err = lean_result.first_error or {}
-            proof_raw = call_claude(
-                prompts.PROOF_GENERATION_SYSTEM,
-                prompts.PROOF_RETRY_USER.format(
-                    error=err.get("data", "unknown error"),
-                    line=err.get("line", "?"),
-                    col=err.get("col", "?"),
-                    hint=lean_result.hint_for_error(),
-                    current=proof_code,
-                ),
-            )
-            retries += 1
+    lean_result = verify(proof_code)
+    if lean_result.success:
+        log(_log, "OK", f"{prop.id} ✓ verified")
 
+    for attempt in range(max_retries - 1):  # one attempt already used above
+        if lean_result and lean_result.success:
+            break
+        err = (lean_result.first_error or {}).get("data", "unknown") if lean_result else "no result"
+        log(_log, "FAIL", f"{prop.id} ✗ attempt {attempt + 1} failed: {err}")
+        log(_log, "VERIFY", f"{prop.id} generating proof (attempt {attempt + 2}/{max_retries})...")
+
+        err_dict = lean_result.first_error or {} if lean_result else {}
+        proof_raw = call_claude(
+            prompts.PROOF_GENERATION_SYSTEM,
+            prompts.PROOF_RETRY_USER.format(
+                error=err_dict.get("data", "unknown error"),
+                line=err_dict.get("line", "?"),
+                col=err_dict.get("col", "?"),
+                hint=lean_result.hint_for_error() if lean_result else "",
+                current=proof_code,
+            ),
+        )
+        retries += 1
         proof_code = extract_code_block(proof_raw, "lean4") or extract_code_block(proof_raw, "lean") or proof_code
         log(_log, "LEAN", f"{prop.id} proof:\n{proof_code}")
         lean_result = verify(proof_code)
@@ -122,7 +146,7 @@ def verify_property(
             break
         else:
             err = (lean_result.first_error or {}).get("data", "unknown")
-            log(_log, "FAIL", f"{prop.id} ✗ attempt {attempt + 1} failed: {err}")
+            log(_log, "FAIL", f"{prop.id} ✗ attempt {attempt + 2} failed: {err}")
 
     verified = lean_result.success if lean_result else False
     output = lean_result.output if lean_result else "No result"

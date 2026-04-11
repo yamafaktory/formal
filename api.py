@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 
 from fastapi import FastAPI, HTTPException
@@ -10,6 +11,8 @@ from .feature_pipeline import (
     run_feature_pipeline_from_file,
 )
 from .pipeline import PipelineResult, run_pipeline
+
+logger = logging.getLogger("formal.api")
 
 app = FastAPI(title="Lean4 Verifier", version="1.0.0")
 
@@ -132,6 +135,7 @@ def verify_feature(req: VerifyFeatureRequest):
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.exception("Unhandled error in /verify-feature")
         raise HTTPException(status_code=500, detail=str(e))
 
     if req.save_result:

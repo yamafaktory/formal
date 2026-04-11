@@ -117,7 +117,22 @@ def run_feature_pipeline(
 
     def _verify_one(prop: Property) -> PropertyResult:
         fn = fn_map.get(prop.function)
-        return verify_property(prop, fn, max_retries=max_retries, language=language)
+        try:
+            return verify_property(prop, fn, max_retries=max_retries, language=language)
+        except Exception as e:
+            log(_log, "FAIL", f"{prop.id} ✗ unexpected error: {e}")
+            return PropertyResult(
+                property_id=prop.id,
+                description=prop.description,
+                kind=prop.kind,
+                function=prop.function,
+                verified=False,
+                lean_code="",
+                lean_output=str(e),
+                retries=0,
+                reason=f"Unexpected error: {e}",
+                status="failed",
+            )
 
     verified_results: list[PropertyResult] = []
 

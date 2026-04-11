@@ -11,10 +11,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .property_verifier import PropertyResult
+if TYPE_CHECKING:
+    from .property_verifier import PropertyResult
 
-_CACHE_DIR = Path(os.getenv("PROOF_CACHE_DIR", Path(__file__).parent / "results" / "cache"))
+_CACHE_DIR = Path(os.getenv("PROOF_CACHE_DIR", "/app/results/cache"))
 
 
 def cache_key(function_code: str, description: str, kind: str, formal: str) -> str:
@@ -22,7 +24,9 @@ def cache_key(function_code: str, description: str, kind: str, formal: str) -> s
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def load(key: str) -> PropertyResult | None:
+def load(key: str) -> "PropertyResult | None":
+    from .property_verifier import PropertyResult
+
     path = _CACHE_DIR / f"{key}.json"
     if not path.exists():
         return None
@@ -33,7 +37,7 @@ def load(key: str) -> PropertyResult | None:
         return None
 
 
-def save(key: str, result: PropertyResult) -> None:
+def save(key: str, result: "PropertyResult") -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _CACHE_DIR / f"{key}.json"
     path.write_text(json.dumps(result.__dict__, indent=2))
