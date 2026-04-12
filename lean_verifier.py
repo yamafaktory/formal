@@ -100,7 +100,12 @@ class LeanResult:
                 return (
                     "You are indexing a list with a numeric literal used as `Fin n` where `n` is a variable — "
                     "Lean cannot synthesize `OfNat (Fin n)` for a non-concrete bound. "
-                    "Use `List.head?`, `List.head!`, or case on the list to extract the element instead of `List.get`."
+                    "Case on the list structure instead of using `List.get`."
+                )
+            if "Inhabited" in data:
+                return (
+                    "`List.head!` and `l[0]!` require an `Inhabited` instance which the domain type may not have. "
+                    "Use `List.head?` (returns `Option`) or case on the list structure to extract the element safely."
                 )
             return "A typeclass instance is missing. Check your imports."
         if "declaration uses 'sorry'" in data:
@@ -111,7 +116,17 @@ class LeanResult:
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
             )
         if "application type mismatch" in data:
-            return "Wrong number or type of arguments. Check the function signature."
+            if "sort 'Type'" in data and "sort 'Prop'" in data:
+                return (
+                    "You passed a value where a proof is expected. "
+                    "The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). "
+                    "Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis."
+                )
+            return (
+                "The argument has the wrong type. If you are passing a struct where a field value is expected "
+                "(e.g. a `Share` where a `String` is needed), access the field explicitly (e.g. `.id`). "
+                "Check what type the goal expects and adjust accordingly."
+            )
         return "Review Lean 4 syntax and ensure all imports are present."
 
 
