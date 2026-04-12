@@ -29,7 +29,8 @@ def extract_code_block(text: str, lang: str = "") -> str:
 
 def _call_cli(system: str, user: str, model: str | None = None) -> str:
     prompt = f"{system}\n\n{user}"
-    cmd = ["claude", "-p", prompt]
+    cli_cmd = os.getenv("LLM_CLI_CMD", "claude")
+    cmd = [cli_cmd, "-p", prompt]
     if model:
         cmd += ["--model", model]
 

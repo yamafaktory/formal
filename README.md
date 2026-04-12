@@ -276,6 +276,7 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | Variable | Description |
 |---|---|
 | `LLM_BACKEND` | `claude-cli` or `openai` (set by `setup.sh`) |
+| `HOST_CLAUDE_CONFIG_DIR` | Host path to the Claude config directory to mount into the container (default: `~/.claude`). Use this to select a different account, e.g. `~/.claude-work`. |
 | `LLM_BASE_URL` | Base URL of any OpenAI-compatible endpoint |
 | `LLM_API_KEY` | API key (leave empty for local models) |
 | `LLM_MODEL` | Model name as accepted by the provider |

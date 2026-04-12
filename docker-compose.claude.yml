@@ -6,10 +6,16 @@
 #
 # Or set COMPOSE_FILE in .env:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.claude.yml
+#
+# To use a non-default Claude config directory (e.g. a work account):
+#   HOST_CLAUDE_CONFIG_DIR=~/.claude-work   # host path to mount
+# The container will use CLAUDE_CONFIG_DIR=/root/.claude-config regardless.
 
 services:
   verifier:
+    environment:
+      CLAUDE_CONFIG_DIR: /root/.claude-config
     volumes:
       - /usr/bin/claude:/usr/bin/claude:ro
       - /opt/claude-code:/opt/claude-code:ro
-      - ~/.claude:/root/.claude:ro
+      - ${HOST_CLAUDE_CONFIG_DIR:-~/.claude}:/root/.claude-config:ro

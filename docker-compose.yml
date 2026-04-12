@@ -6,6 +6,7 @@ services:
       - "1337:1337"
     environment:
       LLM_BACKEND: ${LLM_BACKEND:-openai}
+      LLM_CLI_CMD: ${LLM_CLI_CMD:-claude}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL}

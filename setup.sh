@@ -27,14 +27,22 @@ _upsert() {
 
 # ── Option 1: Claude Code CLI ─────────────────────────────────────────────────
 if [[ "$BACKEND_CHOICE" == "1" ]]; then
-	if ! command -v claude &>/dev/null; then
-		echo "Error: 'claude' binary not found. Install Claude Code first."
+	echo ""
+	echo -n "Claude config directory (default: ~/.claude, e.g. ~/.claude-work for a work account): "
+	read -r CLAUDE_CONFIG_INPUT
+	CLAUDE_CONFIG_INPUT="${CLAUDE_CONFIG_INPUT:-~/.claude}"
+	# Expand ~ manually since it won't expand inside quotes later
+	HOST_CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_INPUT/#\~/$HOME}"
+
+	if [[ ! -d "$HOST_CLAUDE_CONFIG_DIR" ]]; then
+		echo "Error: '$HOST_CLAUDE_CONFIG_DIR' is not a directory."
 		exit 1
 	fi
 
 	echo ""
 	echo "Fetching available models via claude CLI..."
-	MODELS=$(claude -p "List only the model IDs you support, one per line, no explanation." \
+	MODELS=$(CLAUDE_CONFIG_DIR="$HOST_CLAUDE_CONFIG_DIR" claude -p \
+		"List only the model IDs you support, one per line, no explanation." \
 		2>/dev/null | grep -E "^claude" | sort || true)
 
 	LLM_MODEL=""
@@ -64,16 +72,18 @@ if [[ "$BACKEND_CHOICE" == "1" ]]; then
 	fi
 
 	_upsert "LLM_BACKEND" "claude-cli" "$ENV_FILE"
+	_upsert "HOST_CLAUDE_CONFIG_DIR" "$HOST_CLAUDE_CONFIG_DIR" "$ENV_FILE"
 	_upsert "LLM_MODEL" "$LLM_MODEL" "$ENV_FILE"
 	_upsert "COMPOSE_FILE" "docker-compose.yml:docker-compose.claude.yml" "$ENV_FILE"
 	# Remove OpenAI-specific keys if switching backends
-	sed -i '/^LLM_BASE_URL=/d; /^LLM_API_KEY=/d' "$ENV_FILE" 2>/dev/null || true
+	sed -i '/^LLM_BASE_URL=/d; /^LLM_API_KEY=/d; /^LLM_CLI_CMD=/d' "$ENV_FILE" 2>/dev/null || true
 
 	cat <<EOF
 
 Saved to $ENV_FILE
-  LLM_BACKEND = claude-cli
-  LLM_MODEL   = $LLM_MODEL
+  LLM_BACKEND           = claude-cli
+  HOST_CLAUDE_CONFIG_DIR = $HOST_CLAUDE_CONFIG_DIR
+  LLM_MODEL             = $LLM_MODEL
 
 Run:  docker compose up --build
 EOF
