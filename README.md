@@ -1,6 +1,7 @@
 # 🔬 formal
 
 [![Lint](https://github.com/yamafaktory/formal/actions/workflows/lint.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/lint.yml)
+[![Publish Docker image](https://github.com/yamafaktory/formal/actions/workflows/publish.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/publish.yml)
 
 Formal verification for AI-generated code. Automatically extracts correctness
 properties from pure functions, translates them into Lean 4 theorems, and
