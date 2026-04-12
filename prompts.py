@@ -235,7 +235,9 @@ Return a JSON object:
       "description": "human-readable property description",
       "function": "which pure function this applies to",
       "kind": "one of: bound, identity, monotonicity, commutativity, idempotency, invariant",
-      "formal": "mathematical statement, e.g. forall x, f(x) <= x"
+      "formal": "mathematical statement, e.g. forall x, f(x) <= x",
+      "preconditions": ["what must hold on inputs, e.g. 'n > 0', 'list is non-empty'"],
+      "assumptions": ["modeling assumptions, e.g. 'no overflow', 'elements are comparable', 'floats as rationals'"]
     }}
   ]
 }}
@@ -316,6 +318,11 @@ Property:
 - Description: {description}
 - Formal statement: {formal}
 - Kind: {kind}
+- Preconditions: {preconditions}
+- Assumptions: {assumptions}
+
+The preconditions must appear as explicit hypotheses in the theorem signature (e.g. `(h : n > 0)`).
+The assumptions must appear as comments above the theorem so they are auditable.
 
 Modeling rules (apply to any source language):
 - Translate SEMANTICS, not syntax. Re-implement the logic in Lean 4 from scratch.
@@ -382,6 +389,11 @@ Property:
 - Description: {description}
 - Formal statement: {formal}
 - Kind: {kind}
+- Preconditions: {preconditions}
+- Assumptions: {assumptions}
+
+The preconditions must appear as explicit hypotheses in the theorem signature (e.g. `(h : n > 0)`).
+The assumptions must appear as comments above the theorem so they are auditable.
 
 Modeling rules:
 - Translate SEMANTICS, not syntax. Re-implement the logic in Lean 4 from scratch.

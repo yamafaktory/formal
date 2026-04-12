@@ -3,8 +3,7 @@ from dataclasses import dataclass
 
 from . import prompts
 from .lean_verifier import LeanResult, verify
-from .llm_client import call_llm as call_claude
-from .llm_client import extract_code_block
+from .llm_client import call_llm, extract_code_block
 
 
 @dataclass
@@ -35,7 +34,7 @@ def run_pipeline(task: str) -> PipelineResult:
     max_retries = int(os.getenv("MAX_PROOF_RETRIES", "3"))
 
     # ── Stage 1: Generate Python code ────────────────────────────────────────
-    raw = call_claude(
+    raw = call_llm(
         prompts.CODE_GENERATION_SYSTEM,
         prompts.CODE_GENERATION_USER.format(task=task),
     )
@@ -50,7 +49,7 @@ def run_pipeline(task: str) -> PipelineResult:
     )
 
     # ── Stage 2: Extract formal spec ─────────────────────────────────────────
-    raw = call_claude(
+    raw = call_llm(
         prompts.SPEC_EXTRACTION_SYSTEM,
         prompts.SPEC_EXTRACTION_USER.format(code=python_code),
     )
@@ -72,13 +71,13 @@ def run_pipeline(task: str) -> PipelineResult:
     for attempt in range(max_retries):
         # Autoformalize
         if attempt == 0:
-            raw = call_claude(
+            raw = call_llm(
                 prompts.AUTOFORMALIZE_SYSTEM,
                 prompts.AUTOFORMALIZE_USER.format(spec=spec),
             )
         else:
             err = lean_result.first_error or {}
-            raw = call_claude(
+            raw = call_llm(
                 prompts.AUTOFORMALIZE_SYSTEM,
                 prompts.AUTOFORMALIZE_RETRY_USER.format(
                     error=err.get("data", "unknown error"),
@@ -90,7 +89,7 @@ def run_pipeline(task: str) -> PipelineResult:
         lean_code = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean") or raw.strip()
 
         # Proof generation
-        proof_raw = call_claude(
+        proof_raw = call_llm(
             prompts.PROOF_GENERATION_SYSTEM,
             prompts.PROOF_GENERATION_USER.format(theorem=lean_code),
         )

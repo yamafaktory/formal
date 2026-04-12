@@ -1,27 +1,58 @@
-# 🔬 formal
+# formal
 
 [![Lint](https://github.com/yamafaktory/formal/actions/workflows/lint.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/lint.yml)
 [![Publish Docker image](https://github.com/yamafaktory/formal/actions/workflows/publish.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/publish.yml)
 
-Formal verification for AI-generated code. Automatically extracts correctness
-properties from pure functions, translates them into Lean 4 theorems, and
-machine-checks them with Mathlib — so you get mathematical proof, not just tests,
-for the logic your AI coding agent produces.
+An LLM-driven property checker for code, backed by Lean 4 as a proof engine.
 
-Works with any LLM — Claude, GPT-4, Gemini, Llama, Mistral, or any OpenAI-compatible endpoint.
+Point it at a file, and it will: identify pure functions, generate properties those
+functions should satisfy, translate them into Lean 4 theorems, and attempt to prove
+them with Mathlib. Properties that Lean accepts are mechanically verified — but only
+within the limits described below.
+
+Works with any LLM backend — Claude, GPT-4, Gemini, Llama, Mistral, or any OpenAI-compatible endpoint.
+
+## What this actually is
+
+The pipeline has three LLM steps before Lean ever runs:
+
+1. **Decomposition** — the LLM reads your code and identifies which parts are pure functions
+2. **Property extraction** — the LLM generates properties it believes those functions satisfy, along with explicit preconditions and modeling assumptions
+3. **Formalization** — the LLM translates each property into a Lean 4 theorem
+
+Only then does Lean check the proof. Lean is mechanically sound — it cannot be fooled — but it only checks what it is given. If the LLM misunderstood your function, or generated a property that is technically true but misses the point, Lean will happily prove the wrong thing.
+
+**What "verified" means here:** Lean accepted a proof of a theorem that the LLM derived from your code. This is a meaningful signal — LLMs make logical errors and Lean catches them — but it is not equivalent to a certified compiler or a formal proof that your source code is correct.
+
+**What this is useful for:**
+- Catching logical errors in AI-generated code that tests might miss
+- Surfacing the assumptions an LLM makes about your code (now shown explicitly)
+- Increasing confidence in pure domain logic: calculations, transformations, validations
+- Getting a structured, machine-checked view of what properties hold under stated assumptions
+
+**What this does not give you:**
+- A guarantee that your source code is correct — only that a Lean model of it satisfies generated properties
+- Complete coverage — the LLM picks which properties to check and may miss important ones
+- Traditional formal verification — that requires a certified translation from source to proof, which this does not have
 
 ## How it works
 
 ```
 Your code (any language)
-  → LLM extracts pure functions
-  → LLM screens each property for Lean formalizability
-  → LLM translates verifiable properties into Lean 4 theorems
-  → Lean 4 + Mathlib proves or rejects each theorem (with retries)
+  → LLM: extract pure functions, identify side effects
+  → LLM: generate properties with explicit preconditions and assumptions
+  → LLM: translate each property into a Lean 4 theorem + proof
+  → Lean 4 + Mathlib: accept or reject each proof (with retries)
   → Results: verified / failed / unverifiable
 ```
 
-Side effects (DB calls, HTTP, I/O) are excluded — only pure, deterministic logic is verified. Properties that depend on reference equality, reflection, or other runtime behaviour are classified as `unverifiable` (not a bug, not a failure).
+Side effects (DB calls, HTTP, I/O) are excluded — only pure, deterministic logic is
+checked. Properties that depend on reference equality, reflection, or runtime behaviour
+are classified as `unverifiable` (not a bug, not a failure — a modeling limit).
+
+Every property now carries explicit **preconditions** (what must hold on inputs) and
+**assumptions** (modeling choices made during translation). These are shown in the
+output so you can judge whether the LLM's interpretation matches your intent.
 
 ## Setup
 
@@ -31,7 +62,7 @@ Side effects (DB calls, HTTP, I/O) are excluded — only pure, deterministic log
 ./setup.sh
 ```
 
-Two backends to choose from:
+Two backends:
 
 **1 — Claude Code CLI** (uses your local `claude` binary and Pro/Max plan, no API key needed)
 
@@ -46,7 +77,8 @@ Two backends to choose from:
 | LM Studio | `http://localhost:1234/v1` |
 | Any other | Any OpenAI-compatible endpoint |
 
-`setup.sh` writes the right `COMPOSE_FILE` to `.env` automatically — no manual config needed. Available models are fetched from `/v1/models`; if unsupported, enter the model name manually.
+`setup.sh` writes the right `COMPOSE_FILE` to `.env` automatically. Available models
+are fetched from `/v1/models`; if unsupported, enter the model name manually.
 
 ### 2. Start
 
@@ -54,7 +86,7 @@ Two backends to choose from:
 docker compose up
 ```
 
-Pulls the prebuilt image from GHCR — no local build needed. If you want to build from source instead:
+Pulls the prebuilt image from GHCR — no local build needed. To build from source:
 
 ```sh
 docker compose up --build
@@ -67,12 +99,13 @@ docker compose up --build
 
 ### 3. Add this to your project's AI agent instructions
 
-For Claude Code, add to your `CLAUDE.md`. For Cursor, Copilot, or other agents, add to the equivalent instructions file.
+For Claude Code, add to your `CLAUDE.md`. For Cursor, Copilot, or other agents, add
+to the equivalent instructions file.
 
-```markdown
+````markdown
 ## Formal Verification
 
-A formal verifier runs at http://localhost:1337. After implementing any feature
+A property checker runs at http://localhost:1337. After implementing any feature
 that contains non-trivial pure logic (calculations, transformations, validations,
 business rules), verify it:
 
@@ -86,10 +119,13 @@ calculations, volume computations, data transformations, validation functions.
 **When to skip:** pure I/O code, controller wiring, configuration, tests.
 
 Results:
-- `full` — all properties proved
+- `full` — all properties proved under stated assumptions
 - `partial` / `failed` — investigate unverified properties; may indicate a logic bug
 - `unverifiable` — modeling limitation (reference equality, reflection, etc.), not a bug
-```
+
+Review the preconditions and assumptions in the output. If they do not match your
+intent, the proof result may not reflect real behaviour.
+````
 
 ## CLI
 
@@ -141,13 +177,18 @@ Summary: Applies discount and computes final price
 Score:   full  (4/5 verified, 1 unverifiable)
 ─────────────────────────────────────────
   ✓ [bound] discount is always between 0 and 1
-  ✓ [identity] zero discount returns original price
+      Preconditions: discount is a float
+      Assumptions:   floats modeled as rationals, no NaN or Inf
   ✓ [monotonicity] higher discount yields lower price
-  ✓ [invariant] price is always positive
+      Preconditions: price > 0, 0 <= discount <= 1
+      Assumptions:   floats modeled as rationals
   ~ [invariant] bundleId reference matches stored entity
       → depends on JVM reference equality, not structural equality
 ─────────────────────────────────────────
 ```
+
+Preconditions and assumptions are shown for every property so you can verify that
+the LLM's interpretation of your code matches what you intended.
 
 ## API reference
 
@@ -165,7 +206,7 @@ curl -X POST http://localhost:1337/verify-feature \
   -d '{"code": "...", "language": "TypeScript"}'
 ```
 
-Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#, C++, Ruby, Zig, C.
+Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#, C++, Ruby.
 
 **Response:**
 
@@ -184,6 +225,8 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
       "kind": "bound",
       "status": "verified",
       "verified": true,
+      "preconditions": ["discount is a float"],
+      "assumptions": ["floats modeled as rationals", "no NaN or Inf"],
       "lean_code": "...",
       "lean_output": "...",
       "retries": 0,
@@ -206,8 +249,8 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
 
 | Status | Meaning |
 |---|---|
-| `verified` | Lean 4 accepted the proof |
-| `failed` | Proof could not be found — may indicate a logic bug |
+| `verified` | Lean 4 accepted the proof under stated preconditions and assumptions |
+| `failed` | Proof could not be found — may indicate a logic bug or a bad translation |
 | `unverifiable` | Property cannot be modelled in Lean 4 (not a bug) |
 
 ### `POST /verify`
@@ -257,16 +300,29 @@ Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgra
 
 ## Proof cache
 
-Successfully verified proofs are cached to disk. The same property on the same function is never re-proved — on subsequent runs a `[CACHE]` hit is logged and the stored result is returned immediately.
+Successfully verified proofs are cached to disk. The same property on the same
+function is never re-proved — on subsequent runs a `[CACHE]` hit is logged and
+the stored result is returned immediately.
 
-The cache key is a SHA-256 hash of the function source code, property description, kind, and formal spec. Only successful proofs are stored; failed attempts always go through the full LLM + retry loop.
+The cache key is a SHA-256 hash of the function source code, property description,
+kind, and formal spec. Only successful proofs are cached; failed attempts always go
+through the full LLM + retry loop.
 
-Cache files are written to `results/cache/` (one JSON file per entry). Override with `PROOF_CACHE_DIR`.
+Cache files are written to `results/cache/` (one JSON file per entry). Override with
+`PROOF_CACHE_DIR`.
 
 ## Limitations
 
+- **LLM-driven semantics.** Property extraction, formalization, and proof generation
+  all go through an LLM. The LLM can misread code, miss properties, or generate
+  theorems that are true but irrelevant. Lean only checks what it is given.
+- **Preconditions and assumptions may be wrong.** Review them in the output. A proof
+  built on a wrong assumption is not evidence that your code is correct.
 - **Pure logic only.** Side effects (DB, HTTP, I/O) are excluded by design.
-- **Modeling assumptions.** Floats are modelled as rationals, strings use structural equality. Properties that require IEEE 754 precision or reference semantics are classified `unverifiable`.
+- **Modeling limits.** Floats are modelled as rationals; strings use structural
+  equality. IEEE 754 precision and reference semantics cannot be modelled.
+- **Not a test replacement.** This checks properties for all inputs under stated
+  assumptions; it does not replace integration or end-to-end tests.
 - **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
-- **Building from source is slow.** If you run `--build` locally, installing Lean 4 + Mathlib oleans takes several minutes. The prebuilt GHCR image avoids this.
-- **Not a test replacement.** Formal verification proves properties hold for all inputs; it does not replace integration or end-to-end tests.
+- **Building from source is slow.** Installing Lean 4 + Mathlib oleans takes several
+  minutes locally. The prebuilt GHCR image avoids this.

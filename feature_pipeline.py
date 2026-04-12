@@ -59,6 +59,10 @@ class FeaturePipelineResult:
             else:
                 icon = "✗"
             lines.append(f"  {icon} [{r.kind}] {r.description}")
+            if r.preconditions:
+                lines.append(f"      Preconditions: {', '.join(r.preconditions)}")
+            if r.assumptions:
+                lines.append(f"      Assumptions:   {', '.join(r.assumptions)}")
             if r.status != "verified" and r.reason:
                 lines.append(f"      → {r.reason}")
         return "\n".join(lines)

@@ -1,12 +1,11 @@
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import prompts, proof_cache
 from .feature_extractor import Property, PureFunction
 from .lean_verifier import AUTO_TACTIC_TIMEOUT, LeanResult, check_syntax, verify, with_auto_tactics
-from .llm_client import call_llm as call_claude
-from .llm_client import extract_code_block
+from .llm_client import call_llm, extract_code_block
 from .logger import get_logger, log
 
 _log = get_logger(__name__)
@@ -31,6 +30,8 @@ class PropertyResult:
     retries: int
     reason: str = ""
     status: str = "failed"  # "verified" | "failed" | "unverifiable"
+    preconditions: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
 
 
 def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":
@@ -45,6 +46,8 @@ def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":
         retries=0,
         reason=reason,
         status="unverifiable",
+        preconditions=prop.preconditions,
+        assumptions=prop.assumptions,
     )
 
 
@@ -71,7 +74,7 @@ def verify_property(
 
     # ── Step 1: Formalize AND prove in one LLM call ───────────────────────────
     log(_log, "VERIFY", f"{prop.id} [{prop.kind}] Formalizing+proving: {prop.description}")
-    raw = call_claude(
+    raw = call_llm(
         prompts.AUTOFORMALIZE_SYSTEM,
         prompts.PROPERTY_FORMALIZE_AND_PROVE_USER.format(
             language=language,
@@ -79,6 +82,8 @@ def verify_property(
             description=prop.description,
             formal=prop.formal,
             kind=prop.kind,
+            preconditions="\n".join(f"- {p}" for p in prop.preconditions) or "none",
+            assumptions="\n".join(f"- {a}" for a in prop.assumptions) or "none",
         ),
     )
     proof_code = extract_code_block(raw, "lean4") or extract_code_block(raw, "lean")
@@ -96,6 +101,8 @@ def verify_property(
             lean_output=syntax_error,
             retries=0,
             reason=f"Syntax error in formalization: {syntax_error}",
+            preconditions=prop.preconditions,
+            assumptions=prop.assumptions,
         )
 
     # ── Step 2: Auto-tactic pre-pass (if LLM left any sorry) ─────────────────
@@ -117,6 +124,8 @@ def verify_property(
                 lean_output=auto_result.output,
                 retries=0,
                 status="verified",
+                preconditions=prop.preconditions,
+                assumptions=prop.assumptions,
             )
             proof_cache.save(key, result)
             return result
@@ -146,7 +155,7 @@ def verify_property(
         log(_log, "VERIFY", f"{prop.id} generating proof (attempt {attempt + 2}/{max_retries})...")
 
         err_dict = lean_result.first_error or {} if lean_result else {}
-        proof_raw = call_claude(
+        proof_raw = call_llm(
             prompts.PROOF_GENERATION_SYSTEM,
             prompts.PROOF_RETRY_USER.format(
                 error=err_dict.get("data", "unknown error"),
@@ -183,6 +192,8 @@ def verify_property(
         lean_output=output,
         retries=retries,
         status="verified" if verified else "failed",
+        preconditions=prop.preconditions,
+        assumptions=prop.assumptions,
     )
     if verified:
         proof_cache.save(key, result)

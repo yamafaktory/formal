@@ -27,7 +27,7 @@ def extract_code_block(text: str, lang: str = "") -> str:
 # ── Claude CLI backend ────────────────────────────────────────────────────────
 
 
-def _call_claude_cli(system: str, user: str, model: str | None = None) -> str:
+def _call_cli(system: str, user: str, model: str | None = None) -> str:
     prompt = f"{system}\n\n{user}"
     cmd = ["claude", "-p", prompt]
     if model:
@@ -43,7 +43,7 @@ def _call_claude_cli(system: str, user: str, model: str | None = None) -> str:
         last_error = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
         if attempt == 0:
             continue  # one retry for transient failures
-    raise RuntimeError(f"claude CLI error: {last_error}")
+    raise RuntimeError(f"LLM CLI error: {last_error}")
 
 
 # ── OpenAI-compatible backend ─────────────────────────────────────────────────
@@ -95,5 +95,5 @@ def list_models() -> list[str]:
 def call_llm(system: str, user: str, model: str | None = None) -> str:
     backend = os.environ.get("LLM_BACKEND", "openai").strip().lower()
     if backend == "claude-cli":
-        return _call_claude_cli(system, user, model)
+        return _call_cli(system, user, model)
     return _call_openai(system, user, model)

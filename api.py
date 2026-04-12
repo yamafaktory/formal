@@ -64,6 +64,8 @@ class PropertyResultOut(BaseModel):
     lean_output: str
     retries: int
     reason: str
+    preconditions: list[str]
+    assumptions: list[str]
 
 
 class VerifyFeatureResponse(BaseModel):

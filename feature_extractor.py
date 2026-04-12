@@ -1,8 +1,8 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import prompts
-from .llm_client import call_llm as call_claude
+from .llm_client import call_llm
 
 
 @dataclass
@@ -19,6 +19,8 @@ class Property:
     function: str
     kind: str
     formal: str
+    preconditions: list[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
     # Set by screening step
     verifiable: bool = True
     unverifiable_reason: str = ""
@@ -34,7 +36,7 @@ class DecomposedFeature:
 
 def decompose(code: str, language: str = "Python") -> DecomposedFeature:
     """Step 1 — Split feature into pure functions and side effects."""
-    raw = call_claude(
+    raw = call_llm(
         prompts.DECOMPOSE_SYSTEM,
         prompts.DECOMPOSE_USER.format(code=code, language=language),
     )
@@ -72,7 +74,7 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
 
     pure_text = "\n\n".join(f"# {f.name}: {f.description}\n{f.code}" for f in feature.pure_functions)
 
-    raw = call_claude(
+    raw = call_llm(
         prompts.PROPERTY_EXTRACTION_SYSTEM,
         prompts.PROPERTY_EXTRACTION_USER.format(
             pure_functions=pure_text,
@@ -92,6 +94,8 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
             function=p.get("function", ""),
             kind=p.get("kind", "invariant"),
             formal=p.get("formal", ""),
+            preconditions=p.get("preconditions", []),
+            assumptions=p.get("assumptions", []),
         )
         for i, p in enumerate(data.get("properties", []))
     ]
@@ -110,7 +114,7 @@ def screen_properties(properties: list[Property], language: str = "Python") -> l
         [{"id": p.id, "description": p.description, "formal": p.formal, "kind": p.kind} for p in properties], indent=2
     )
 
-    raw = call_claude(
+    raw = call_llm(
         prompts.PROPERTY_SCREENING_SYSTEM,
         prompts.PROPERTY_SCREENING_USER.format(
             language=language,
