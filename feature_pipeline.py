@@ -1,5 +1,6 @@
 import os
 import pathlib
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
@@ -69,6 +70,7 @@ def run_feature_pipeline(
     parallel: bool = True,
     language: str = "Python",
 ) -> FeaturePipelineResult:
+    _t0 = time.monotonic()
     max_retries = int(os.getenv("MAX_PROOF_RETRIES", "3"))
 
     # ── Step 1: Decompose ────────────────────────────────────────────────────
@@ -153,10 +155,14 @@ def run_feature_pipeline(
     verified_count = sum(1 for r in all_results if r.status == "verified")
     unverifiable_count = sum(1 for r in all_results if r.status == "unverifiable")
     failed_count = sum(1 for r in all_results if r.status == "failed")
+    elapsed = time.monotonic() - _t0
+    m, s = divmod(int(elapsed), 60)
+    elapsed_str = f"{m}m {s}s" if m else f"{s}s"
     log(
         _log,
         "PIPELINE",
-        f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}",
+        f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}"
+        f" — total: {elapsed_str}",
     )
 
     return FeaturePipelineResult(

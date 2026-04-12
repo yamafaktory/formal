@@ -1,4 +1,5 @@
 import os
+import time
 from dataclasses import dataclass
 
 from . import prompts, proof_cache
@@ -9,6 +10,13 @@ from .llm_client import extract_code_block
 from .logger import get_logger, log
 
 _log = get_logger(__name__)
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m {s}s"
 
 
 @dataclass
@@ -47,6 +55,7 @@ def verify_property(
     language: str = "Python",
 ) -> PropertyResult:
     """Autoformalize once, then retry proof generation on failure."""
+    _t0 = time.monotonic()
     max_retries = max_retries or int(os.getenv("MAX_PROOF_RETRIES", "3"))
     function_code = pure_fn.code if pure_fn else ""
 
@@ -54,7 +63,8 @@ def verify_property(
     key = proof_cache.cache_key(function_code, prop.description, prop.kind, prop.formal)
     cached = proof_cache.load(key)
     if cached is not None:
-        log(_log, "CACHE", f"{prop.id} [{prop.kind}] cache hit — skipping proof")
+        elapsed = _fmt_elapsed(time.monotonic() - _t0)
+        log(_log, "CACHE", f"{prop.id} [{prop.kind}] cache hit — skipping proof ({elapsed})")
         # Restore the current prop's id in case it differs across runs
         cached.property_id = prop.id
         return cached
@@ -96,7 +106,7 @@ def verify_property(
         log(_log, "VERIFY", f"{prop.id} trying auto-tactics (timeout {AUTO_TACTIC_TIMEOUT}s)...")
         auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
         if auto_result.success:
-            log(_log, "OK", f"{prop.id} ✓ auto-proved")
+            log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - _t0)})")
             result = PropertyResult(
                 property_id=prop.id,
                 description=prop.description,
@@ -118,7 +128,7 @@ def verify_property(
 
     lean_result = verify(proof_code)
     if lean_result.success:
-        log(_log, "OK", f"{prop.id} ✓ verified")
+        log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
 
     for attempt in range(max_retries - 1):  # one attempt already used above
         if lean_result and lean_result.success:
@@ -151,7 +161,7 @@ def verify_property(
         log(_log, "LEAN", f"{prop.id} proof:\n{proof_code}")
         lean_result = verify(proof_code)
         if lean_result.success:
-            log(_log, "OK", f"{prop.id} ✓ verified")
+            log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
             break
         else:
             err = (lean_result.first_error or {}).get("data", "unknown")
@@ -159,8 +169,9 @@ def verify_property(
 
     verified = lean_result.success if lean_result else False
     output = lean_result.output if lean_result else "No result"
+    elapsed = _fmt_elapsed(time.monotonic() - _t0)
     if not verified:
-        log(_log, "FAIL", f"{prop.id} ✗ exhausted {max_retries} attempts")
+        log(_log, "FAIL", f"{prop.id} ✗ exhausted {max_retries} attempts ({elapsed})")
 
     result = PropertyResult(
         property_id=prop.id,
