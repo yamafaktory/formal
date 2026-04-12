@@ -79,10 +79,12 @@ class LeanResult:
             )
         if "split_ifs" in data and "no if-then-else" in data:
             return (
-                "`split_ifs` requires a visible `if`-`then`-`else` in the goal or hypotheses — "
-                "there is none here. The function has already been unfolded and the branches resolved. "
-                "Use `rcases h with ⟨h1, h2, ...⟩` or `obtain` to destructure conjunctions and existentials, "
-                "then close the goal with `exact` or `simp`."
+                "`split_ifs` requires a visible `if`-`then`-`else` — there is none here. "
+                "Do NOT call `split_ifs`. Instead: "
+                "(1) use `obtain ⟨h1, h2⟩ := h` to split a conjunction hypothesis, "
+                "(2) then case on the list to reduce it to a singleton "
+                "(`cases l with | nil => simp at h1 | cons a t => cases t with | nil => ... | cons b t => omega`), "
+                "(3) then `simp` to close the membership goal."
             )
         if "constructor" in data and "no applicable constructor" in data:
             return (
@@ -91,12 +93,17 @@ class LeanResult:
             )
         if "simp made no progress" in data:
             return (
-                "simp cannot simplify the target. Try these alternatives: "
-                "`omega` for length/arithmetic goals; "
-                "`simp only [List.length_nil, List.length_cons]` for list length; "
-                "`norm_num` for numeric equalities; "
-                "`contradiction` or `exact absurd h (by simp)` if the hypothesis is contradictory; "
-                "or `unfold f at h` to manually expand a definition before simplifying."
+                "simp cannot simplify the target. Common causes and fixes: "
+                "(1) Branch order after `split_ifs` depends on the guard shape: "
+                "for `if !boolField then none else body`, the FIRST branch has `hGuard: !boolField = true` "
+                "(meaning bool is FALSE, function returns none) — `simp at h` closes `h: none = some _` THERE, "
+                "and the SECOND branch is the real-content branch. "
+                "For a plain `if cond then body else none`, it is the opposite: first branch is real content. "
+                "Check which branch you are in and move `simp at h` accordingly. "
+                "(2) For list length contradictions: `simp [List.length_cons] at h` then `omega`. "
+                "(3) `unfold f at h` or `delta f at h` to expand a definition simp cannot see through. "
+                "(4) If `simp` makes no progress after `generalize`, the hypothesis still contains an unsimplified "
+                "`if`-expression — use `split_ifs at h` BEFORE `generalize` to eliminate the guard first."
             )
         if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
             import re as _re

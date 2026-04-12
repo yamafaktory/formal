@@ -91,6 +91,14 @@ Critical rules:
   Use `decide`, `cases x <;> simp`, or `simp [Bool.eq_true_iff_ne_false]` to normalise.
 - To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
   If `simp [f]` makes no progress on a hypothesis `h`, try `unfold f at h` or `delta f at h`.
+- `split_ifs at h with hcond` branch ordering depends on the guard shape:
+  • Plain `if cond then body else none`:
+      FIRST `·` = TRUE branch (real content)
+      LAST  `·` = FALSE branch (none — close with `simp at h`)
+  • Negated `if !boolField then none else body`:
+      FIRST `·` = `!boolField = true` (bool is FALSE, function returns none — close with `simp at h`)
+      SECOND `·` = real content
+  Never put `simp at h` in the real-content branch — it may make no progress or leave goals unsolved.
 
 Mathlib API reference — use EXACTLY these names, do not guess alternatives:
 
@@ -131,7 +139,7 @@ Key tactic patterns:
       cases t with
       | nil => -- l is now [a]; continue proof
         ...
-      | cons b t => simp at h; omega
+      | cons b t => simp [List.length_cons] at h  -- or: omega
 - Prove membership after reducing to [a]:
     simp  -- preferred: handles membership goals automatically
     -- alternative: exact List.mem_cons_self  (NO arguments — all are implicit)
@@ -149,11 +157,29 @@ Proof templates for membership goals (use these patterns directly):
         simp at h   -- simplifies h: result = a (or similar)
         subst h     -- replaces result with a everywhere
         simp        -- closes a ∈ [a]  ← ONLY simp here; List.mem_cons_self takes NO args
-      | cons b t => simp at h; omega
+      | cons b t => simp [List.length_cons] at h  -- or: omega
 
 (B) "result of List.find? on filtered list ∈ original list":
     have hmem_filter := List.find?_mem h       -- a ∈ l.filter p
     exact ⟨_, List.mem_of_mem_filter hmem_filter, rfl⟩
+
+(C) "result of a negated-bool-guarded filter+match is a member of the original list"
+    -- Function shape: if !boolField then none else match (list.filter pred) with | [s] => some s.field | _ => none
+    -- IMPORTANT: split_ifs on `!bool` reverses branch order — first branch is the `none` branch:
+    --   first  · hGuard: !boolField = true  (bool is FALSE) → h: none = some _ → simp at h
+    --   second · hGuard: ¬(!boolField)      (bool is TRUE)  → match content
+    unfold f at h
+    split_ifs at h with hGuard
+    · simp at h              -- none = some _ contradiction
+    · generalize hf : list.filter pred = fl at h
+      cases fl with
+      | nil => simp at h
+      | cons a t =>
+        cases t with
+        | nil =>
+          simp at h          -- some a.field = some result  →  a.field = result
+          exact ⟨a, List.mem_of_mem_filter (by rw [hf]; simp), h⟩
+        | cons b rest => simp at h
 
 Theorem to prove:
 {theorem}
@@ -336,7 +362,7 @@ Proof templates for membership goals:
       | nil =>
         simp at h; subst h
         simp       -- closes a ∈ [a] — use simp ONLY, NEVER List.mem_cons_self with args
-      | cons b t => simp at h; omega
+      | cons b t => simp [List.length_cons] at h  -- or: omega
 
 (B) List.find? result on a filtered list ∈ original list:
     have hmem_filter := List.find?_mem h
@@ -404,13 +430,31 @@ Proof templates for common membership goals:
         simp at h  -- simplifies to: result = a
         subst h    -- replaces result with a everywhere
         simp       -- closes: a ∈ [a]  ← use simp ONLY, never List.mem_cons_self with args
-      | cons b t => simp at h; omega
+      | cons b t => simp [List.length_cons] at h  -- or: omega
 
 (B) "result of List.find? on a filtered list belongs to the original list"
     -- h : List.find? p (l.filter q) = some a
     have hmem_filter : a ∈ l.filter q := List.find?_mem h
     have hmem : a ∈ l := List.mem_of_mem_filter hmem_filter
     exact ⟨a, hmem, rfl⟩  -- or whatever the goal shape requires
+
+(C) "result of a negated-bool-guarded filter+match is a member of the original list"
+    -- Function shape: if !boolField then none else match (list.filter pred) with | [s] => some s.field | _ => none
+    -- IMPORTANT: split_ifs on `!bool` reverses branch order — first branch is the `none` branch:
+    --   first  · hGuard: !boolField = true  (bool is FALSE) → h: none = some _ → simp at h
+    --   second · hGuard: ¬(!boolField)      (bool is TRUE)  → match content
+    unfold f at h
+    split_ifs at h with hGuard
+    · simp at h              -- none = some _ contradiction
+    · generalize hf : list.filter pred = fl at h
+      cases fl with
+      | nil => simp at h
+      | cons a t =>
+        cases t with
+        | nil =>
+          simp at h          -- some a.field = some result  →  a.field = result
+          exact ⟨a, List.mem_of_mem_filter (by rw [hf]; simp), h⟩
+        | cons b rest => simp at h
 
 Output ONLY a lean4 code block with the complete theorem and proof."""
 

@@ -33,15 +33,17 @@ def _call_claude_cli(system: str, user: str, model: str | None = None) -> str:
     if model:
         cmd += ["--model", model]
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=int(os.getenv("LLM_TIMEOUT", "120")),
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"claude CLI error: {result.stderr.strip()}")
-    return result.stdout.strip()
+    timeout = int(os.getenv("LLM_TIMEOUT", "120"))
+    last_error = ""
+    for attempt in range(2):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        # Prefer stderr; fall back to stdout; fall back to exit code
+        last_error = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        if attempt == 0:
+            continue  # one retry for transient failures
+    raise RuntimeError(f"claude CLI error: {last_error}")
 
 
 # ── OpenAI-compatible backend ─────────────────────────────────────────────────
