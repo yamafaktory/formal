@@ -68,7 +68,7 @@ def decompose(code: str, language: str = "Python") -> DecomposedFeature:
 
 
 def extract_properties(feature: DecomposedFeature, language: str = "Python") -> list[Property]:
-    """Step 2 — Extract verifiable properties from pure functions."""
+    """Step 2 — Extract and screen properties in a single LLM call."""
     if not feature.pure_functions:
         return []
 
@@ -77,6 +77,7 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
     raw = call_llm(
         prompts.PROPERTY_EXTRACTION_SYSTEM,
         prompts.PROPERTY_EXTRACTION_USER.format(
+            language=language,
             pure_functions=pure_text,
             feature_summary=feature.feature_summary,
         ),
@@ -96,47 +97,11 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
             formal=p.get("formal", ""),
             preconditions=p.get("preconditions", []),
             assumptions=p.get("assumptions", []),
+            verifiable=p.get("verifiable", True),
+            unverifiable_reason=p.get("unverifiable_reason", ""),
         )
         for i, p in enumerate(data.get("properties", []))
     ]
-
-
-def screen_properties(properties: list[Property], language: str = "Python") -> list[Property]:
-    """Step 3 — Pre-screen properties for Lean 4 formalizability.
-
-    Marks each property as verifiable or unverifiable before attempting Lean.
-    This avoids wasting retries on properties that cannot be modelled mathematically.
-    """
-    if not properties:
-        return properties
-
-    props_text = json.dumps(
-        [{"id": p.id, "description": p.description, "formal": p.formal, "kind": p.kind} for p in properties], indent=2
-    )
-
-    raw = call_llm(
-        prompts.PROPERTY_SCREENING_SYSTEM,
-        prompts.PROPERTY_SCREENING_USER.format(
-            language=language,
-            properties=props_text,
-        ),
-    )
-
-    try:
-        data = json.loads(_clean_json(raw))
-    except json.JSONDecodeError:
-        # If screening fails, assume all are verifiable
-        return properties
-
-    assessments = {a["id"]: a for a in data.get("assessments", [])}
-
-    for prop in properties:
-        assessment = assessments.get(prop.id, {})
-        prop.verifiable = assessment.get("verifiable", True)
-        if not prop.verifiable:
-            prop.unverifiable_reason = assessment.get("reason", "Could not be formalized in Lean 4")
-
-    return properties
 
 
 def _clean_json(text: str) -> str:

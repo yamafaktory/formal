@@ -8,7 +8,6 @@ from .feature_extractor import (
     Property,
     decompose,
     extract_properties,
-    screen_properties,
 )
 from .logger import get_logger, log
 from .property_verifier import PropertyResult, unverifiable_result, verify_property
@@ -98,14 +97,10 @@ def run_feature_pipeline(
             results=[],
         )
 
-    # ── Step 2: Extract properties ───────────────────────────────────────────
+    # ── Step 2: Extract and screen properties ───────────────────────────────
     properties = extract_properties(feature, language=language)
     feature.properties = properties
     log(_log, "PIPELINE", f"Extracted {len(properties)} properties")
-
-    # ── Step 3: Screen properties for Lean formalizability ───────────────────
-    log(_log, "PIPELINE", "Screening properties for Lean formalizability...")
-    properties = screen_properties(properties, language=language)
 
     verifiable = [p for p in properties if p.verifiable]
     unverifiable = [p for p in properties if not p.verifiable]
@@ -118,7 +113,7 @@ def run_feature_pipeline(
     # Build results for unverifiable properties immediately
     unverifiable_results = [unverifiable_result(p, p.unverifiable_reason) for p in unverifiable]
 
-    # ── Step 4: Verify each verifiable property (parallel or sequential) ─────
+    # ── Step 3: Verify each verifiable property (parallel or sequential) ─────
     fn_map = {f.name: f for f in feature.pure_functions}
 
     def _verify_one(prop: Property) -> PropertyResult:

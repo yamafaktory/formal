@@ -220,45 +220,16 @@ Feature code:
 {code}"""
 
 
-PROPERTY_EXTRACTION_SYSTEM = """You are an expert at identifying formal properties of code.
+PROPERTY_EXTRACTION_SYSTEM = """You are an expert in formal verification and Lean 4.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
-PROPERTY_EXTRACTION_USER = """Given these pure functions extracted from a feature, identify verifiable properties.
+PROPERTY_EXTRACTION_USER = """Given these pure {language} functions, identify properties worth verifying in Lean 4,
+and assess each one for Lean formalizability in a single pass.
 
 Pure functions:
 {pure_functions}
 
 Feature summary: {feature_summary}
-
-Return a JSON object:
-{{
-  "properties": [
-    {{
-      "id": "prop_1",
-      "description": "human-readable property description",
-      "function": "which pure function this applies to",
-      "kind": "one of: bound, identity, monotonicity, commutativity, idempotency, invariant",
-      "formal": "mathematical statement, e.g. forall x, f(x) <= x",
-      "preconditions": ["what must hold on inputs, e.g. 'n > 0', 'list is non-empty'"],
-      "assumptions": ["modeling assumptions, e.g. 'no overflow', 'elements are comparable', 'floats as rationals'"]
-    }}
-  ]
-}}
-
-Focus on properties that are:
-- Mathematically precise (not vague)
-- Actually checkable by Lean 4
-- Meaningful for correctness (not trivial)
-
-Aim for 2-5 properties per pure function. Max 10 total."""
-
-
-# ── Property screening ────────────────────────────────────────────────────────
-
-PROPERTY_SCREENING_SYSTEM = """You are an expert in formal verification and Lean 4.
-Respond ONLY with valid JSON. No markdown, no explanation."""
-
-PROPERTY_SCREENING_USER = """Assess whether each property can be formally verified in Lean 4.
 
 A property is VERIFIABLE if:
 - It can be expressed purely in terms of mathematical structures
@@ -274,39 +245,40 @@ A property is VERIFIABLE if:
   (memory layout, JVM internals, hash codes, reference identity, etc.)
 
 Modeling assumptions applied during verification:
-- Floating-point types (float, double, Float, f64…) are modeled as Rat (rationals).
-  This means NaN, Inf, and IEEE 754 rounding DO NOT EXIST in the model.
-  Any property that would hold over rationals is therefore verifiable.
+- Floating-point types are modeled as Rat (rationals) — NaN, Inf, IEEE 754 rounding do not exist.
 - String equality is structural (= on String), not reference equality.
 - Collections are modeled as Finset or List with standard membership.
 
-A property is UNVERIFIABLE only if it fundamentally depends on something
-outside these models:
+A property is UNVERIFIABLE only if it fundamentally depends on something outside these models:
 - Reference/pointer identity (not value equality)
 - Runtime type information or reflection
 - Hash codes or memory addresses
 - External state, I/O, or time
-- Language-specific runtime behaviour with no mathematical counterpart
 
-When in doubt, mark as VERIFIABLE — ordering, bounds, identity, idempotency,
-and monotonicity properties are almost always verifiable under these models.
-
-Source language: {language}
-
-Properties to assess:
-{properties}
+When in doubt, mark as verifiable — ordering, bounds, identity, idempotency, and
+monotonicity properties are almost always verifiable under these models.
 
 Return a JSON object:
 {{
-  "assessments": [
+  "properties": [
     {{
       "id": "prop_1",
+      "description": "human-readable property description",
+      "function": "which pure function this applies to",
+      "kind": "one of: bound, identity, monotonicity, commutativity, idempotency, invariant",
+      "formal": "mathematical statement, e.g. forall x, f(x) <= x",
+      "preconditions": ["what must hold on inputs, e.g. 'n > 0', 'list is non-empty'"],
+      "assumptions": ["modeling assumptions, e.g. 'no overflow', 'elements are comparable', 'floats as rationals'"],
       "verifiable": true,
-      "lean_type_mapping": "brief note on how each type maps to Lean 4",
-      "reason": "one sentence — why it is or is not verifiable"
+      "unverifiable_reason": ""
     }}
   ]
-}}"""
+}}
+
+Focus on properties that are mathematically precise and meaningful for correctness (not trivial).
+Aim for 2-5 properties per pure function. Max 10 total.
+Set verifiable=false and explain in unverifiable_reason only for properties that genuinely cannot
+be modelled in Lean 4 under the assumptions above."""
 
 
 # ── Property formalization ────────────────────────────────────────────────────
