@@ -85,7 +85,8 @@ Saved to $ENV_FILE
   HOST_CLAUDE_CONFIG_DIR = $HOST_CLAUDE_CONFIG_DIR
   LLM_MODEL             = $LLM_MODEL
 
-Run:  docker compose up --build
+Run:  docker compose up          # pulls prebuilt image from GHCR
+      docker compose up --build  # or build locally from source
 EOF
 
 # ── Option 2: OpenAI-compatible API ──────────────────────────────────────────
@@ -159,7 +160,8 @@ Saved to $ENV_FILE
   LLM_BASE_URL = $LLM_BASE_URL
   LLM_MODEL    = $LLM_MODEL
 
-Run:  docker compose up --build
+Run:  docker compose up          # pulls prebuilt image from GHCR
+      docker compose up --build  # or build locally from source
 EOF
 
 else

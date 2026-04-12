@@ -124,6 +124,13 @@ class LeanResult:
                 "the definition and casing on the structure."
             )
         if "type mismatch" in data:
+            if "expected to have type" in data and "true = true" in data:
+                return (
+                    "The goal has already been reduced to `true = true` (the field was unfolded to `true`), "
+                    "but you passed a hypothesis `h : x.field = true` where `true = true` is expected. "
+                    "Don't use `exact h` here — close the goal with `rfl` instead. "
+                    "If the goal still contains the field name, use `simp [h]` to rewrite it first."
+                )
             if "Bool" in data and ("= false" in data or "= true" in data):
                 return (
                     "Bool equality goals like `x = true` and `¬(x = false)` are not automatically interchangeable. "

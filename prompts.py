@@ -89,6 +89,9 @@ Critical rules:
   A space (`x .fieldName`) makes Lean parse it as function application and will fail.
 - For Bool goals: `x = true` and `¬(x = false)` are NOT automatically interchangeable.
   Use `decide`, `cases x <;> simp`, or `simp [Bool.eq_true_iff_ne_false]` to normalise.
+- If a hypothesis is `h : x.field = true` and the goal is `true = true`, do NOT write
+  `exact h` — the field was already unfolded to `true`, so just use `rfl`. If the goal
+  still contains the field name, use `simp [h]` to rewrite first.
 - To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
   If `simp [f]` makes no progress on a hypothesis `h`, try `unfold f at h` or `delta f at h`.
 - `split_ifs at h with hcond` branch ordering depends on the guard shape:
