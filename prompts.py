@@ -92,7 +92,7 @@ List:
   List.length_nil          : [].length = 0
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l   (direct proof, no iff)
+  List.mem_cons_self       : a ∈ a :: l   (use as `exact List.mem_cons_self _ _` or just `simp`)
   List.mem_nil_iff         : a ∈ ([] : List α) ↔ False
   List.mem_append          : a ∈ l ++ m ↔ a ∈ l ∨ a ∈ m
   List.head?_cons          : List.head? (a :: l) = some a
@@ -123,8 +123,8 @@ Key tactic patterns:
         ...
       | cons b t => simp at h; omega
 - Prove membership after reducing to [a]:
-    exact List.mem_cons_self a []
-    -- or: simp
+    simp  -- preferred: handles membership goals automatically
+    -- alternative: exact List.mem_cons_self _ _  (use _ wildcards, NOT explicit a [])
 - For `f [a] ∈ [a]` where f returns the only element: after casing to [a],
   unfold f, then `simp [List.head?_cons, List.mem_singleton]`
 
@@ -290,7 +290,7 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.length_singleton    : [a].length = 1
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l   (direct proof term)
+  List.mem_cons_self       : a ∈ a :: l   (use as `exact List.mem_cons_self _ _` or just `simp`)
   List.head?_cons          : List.head? (a :: l) = some a
   List.head?_nil           : List.head? ([] : List α) = none
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
@@ -302,7 +302,7 @@ For "result is member of original list" proofs on length-1 guarded functions:
     | nil => simp at h
     | cons a t =>
       cases t with
-      | nil => exact List.mem_cons_self a []
+      | nil => simp  -- or: exact List.mem_cons_self _ _
       | cons b t => simp at h; omega
 
 Output ONLY a lean4 code block."""
