@@ -67,6 +67,12 @@ class LeanResult:
             return ""
         data = self.errors[0].get("data", "")
         if "No goals" in data or "no goals" in data:
+            if "cases" in data or "Cases" in data:
+                return (
+                    "One of the `cases` (or `match`) branches already closed its goal before all its "
+                    "tactics ran. Each branch must be proved independently — remove any tactics that "
+                    "appear after the goal is already closed in that branch."
+                )
             return (
                 "simp (or a previous tactic) already closed the goal. "
                 "Remove every tactic that comes after it — there is nothing left to prove."
@@ -75,6 +81,11 @@ class LeanResult:
             return (
                 "The goal is not a conjunction/disjunction — `constructor` does not apply. "
                 "Use `exact h`, `assumption`, `linarith`, or `omega` to close it directly."
+            )
+        if "simp made no progress" in data:
+            return (
+                "simp cannot unfold or simplify with that lemma. "
+                "Replace `simp [lemma]` with `exact lemma ...`, `apply lemma`, or `rw [lemma]` to apply it directly."
             )
         if "unknown identifier" in data or "unknown tactic" in data:
             return "Check that the identifier/tactic is in scope and spelled correctly."
