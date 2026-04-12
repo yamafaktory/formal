@@ -77,6 +77,13 @@ class LeanResult:
                 "simp (or a previous tactic) already closed the goal. "
                 "Remove every tactic that comes after it — there is nothing left to prove."
             )
+        if "split_ifs" in data and "no if-then-else" in data:
+            return (
+                "`split_ifs` requires a visible `if`-`then`-`else` in the goal or hypotheses — "
+                "there is none here. The function has already been unfolded and the branches resolved. "
+                "Use `rcases h with ⟨h1, h2, ...⟩` or `obtain` to destructure conjunctions and existentials, "
+                "then close the goal with `exact` or `simp`."
+            )
         if "constructor" in data and "no applicable constructor" in data:
             return (
                 "The goal is not a conjunction/disjunction — `constructor` does not apply. "
@@ -92,6 +99,18 @@ class LeanResult:
                 "or `unfold f at h` to manually expand a definition before simplifying."
             )
         if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
+            import re as _re
+
+            # Distinguish missing local hypotheses (e.g. h2, hne) from missing Mathlib names
+            local_hyp = _re.search(r"[Uu]nknown identifier [`']([a-z_][a-zA-Z0-9_']*)[`']", data)
+            if local_hyp and "." not in local_hyp.group(1):
+                return (
+                    f"`{local_hyp.group(1)}` is not in the local context — it was never introduced. "
+                    "`split_ifs with h1 h2` only names as many hypotheses as there are if-conditions split "
+                    "in that goal; some branches may have fewer. "
+                    "Use `simp [hypothesis]` to discharge conditions directly, or check the goal state "
+                    "to see which names were actually introduced."
+                )
             return (
                 "That identifier or constant does not exist in Mathlib. Do not guess lemma names. "
                 "Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding "
@@ -126,10 +145,16 @@ class LeanResult:
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
         if "function expected" in data or "Function expected" in data:
+            if "∃" in data or "Exists" in data:
+                return (
+                    "The term already has an existential type — you cannot apply it as a function. "
+                    "To extract the witnesses, use `obtain ⟨a, b, h⟩ := term` instead of `term arg`."
+                )
             if "mem_cons_self" in data:
                 return (
-                    "`List.mem_cons_self` takes only implicit arguments — do NOT pass `a` or `[]` explicitly. "
-                    "Use `simp` to close membership goals, or write `exact List.mem_cons_self` with no arguments."
+                    "`List.mem_cons_self` takes only implicit arguments — do NOT pass any arguments, "
+                    "not even `_` wildcards. Write `exact List.mem_cons_self` with nothing after it, "
+                    "or just use `simp` to close the membership goal."
                 )
             if ".id" in data or "field" in data.lower():
                 return (
@@ -142,6 +167,18 @@ class LeanResult:
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
             )
         if "application type mismatch" in data:
+            if "Option" in data and "has type" in data and "expected to have type" in data:
+                # Both sides are Option but with different inner types — field extraction needed
+                import re as _re
+
+                has_type = _re.search(r"has type\s+Option (\S+)", data)
+                exp_type = _re.search(r"expected to have type\s+Option (\S+)", data)
+                if has_type and exp_type and has_type.group(1) != exp_type.group(1):
+                    return (
+                        f"You have `Option {has_type.group(1)}` but `Option {exp_type.group(1)}` is needed. "
+                        "Extract the field from inside the Option with `.map`: "
+                        "e.g. `list.head?.map (·.id)` instead of `list.head?`."
+                    )
             if "isSome" in data and "Option" in data:
                 return (
                     "`Option.get` requires an explicit proof argument `h : o.isSome = true` — "
@@ -149,16 +186,18 @@ class LeanResult:
                     "Use pattern matching instead: `rcases o with _ | v` "
                     "or `match o with | some v => ... | none => ...`"
                 )
-            if "sort 'Type'" in data and "sort 'Prop'" in data:
+            if "sort 'Type" in data and "sort 'Prop'" in data:
                 return (
                     "You passed a value where a proof is expected. "
                     "The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). "
                     "Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis."
                 )
             return (
-                "The argument has the wrong type. If you are passing a struct where a field value is expected "
-                "(e.g. a `Share` where a `String` is needed), access the field explicitly (e.g. `.id`). "
-                "Check what type the goal expects and adjust accordingly."
+                "The argument has the wrong type. Common causes: "
+                "(1) Applying an induction hypothesis with the wrong proof — check that the evidence you pass "
+                "matches exactly what the IH expects (e.g. a proof about `List.find? tl`, not `some x = some y`). "
+                "(2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). "
+                "Read the expected type in the error and find or derive a proof of exactly that type."
             )
         return "Review Lean 4 syntax and ensure all imports are present."
 

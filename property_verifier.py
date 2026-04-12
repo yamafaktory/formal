@@ -114,6 +114,7 @@ def verify_property(
     # ── Step 3: Lean verify + retry loop ─────────────────────────────────────
     lean_result: LeanResult | None = None
     retries = 0
+    prev_error: str | None = None
 
     lean_result = verify(proof_code)
     if lean_result.success:
@@ -124,6 +125,14 @@ def verify_property(
             break
         err = (lean_result.first_error or {}).get("data", "unknown") if lean_result else "no result"
         log(_log, "FAIL", f"{prop.id} ✗ attempt {attempt + 1} failed: {err}")
+
+        # If the error is identical to the previous attempt the LLM is stuck —
+        # another retry with the same hint won't help, so bail out early.
+        if err == prev_error:
+            log(_log, "FAIL", f"{prop.id} ✗ same error twice — giving up early")
+            break
+        prev_error = err
+
         log(_log, "VERIFY", f"{prop.id} generating proof (attempt {attempt + 2}/{max_retries})...")
 
         err_dict = lean_result.first_error or {} if lean_result else {}

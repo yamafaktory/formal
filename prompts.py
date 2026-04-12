@@ -110,6 +110,8 @@ List:
   List.singleton_append    : [a] ++ l = a :: l
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length  (or use: List.length_pos)
   List.ne_nil_of_length_pos: 0 < l.length → l ≠ []
+  List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
+  List.find?_mem           : List.find? p l = some a → a ∈ l
 
 Option:
   Option.some_injective    : some a = some b → a = b
@@ -135,6 +137,23 @@ Key tactic patterns:
     -- alternative: exact List.mem_cons_self  (NO arguments — all are implicit)
 - For `f [a] ∈ [a]` where f returns the only element: after casing to [a],
   unfold f, then `simp [List.head?_cons, List.mem_singleton]`
+
+Proof templates for membership goals (use these patterns directly):
+
+(A) "result of singleton-guarded function ∈ input list" — case on the list, then simp:
+    cases l with
+    | nil => simp at h
+    | cons a t =>
+      cases t with
+      | nil =>
+        simp at h   -- simplifies h: result = a (or similar)
+        subst h     -- replaces result with a everywhere
+        simp        -- closes a ∈ [a]  ← ONLY simp here; List.mem_cons_self takes NO args
+      | cons b t => simp at h; omega
+
+(B) "result of List.find? on filtered list ∈ original list":
+    have hmem_filter := List.find?_mem h       -- a ∈ l.filter p
+    exact ⟨_, List.mem_of_mem_filter hmem_filter, rfl⟩
 
 Theorem to prove:
 {theorem}
@@ -304,14 +323,24 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
   Option.some_injective    : some a = some b → a = b
 
-For "result is member of original list" proofs on length-1 guarded functions:
-  Add hypothesis `(h : l.length = 1)`, then case on the list:
+  List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
+  List.find?_mem           : List.find? p l = some a → a ∈ l
+
+Proof templates for membership goals:
+
+(A) Singleton-guarded function result ∈ list:
     cases l with
     | nil => simp at h
     | cons a t =>
       cases t with
-      | nil => simp  -- or: exact List.mem_cons_self _ _
+      | nil =>
+        simp at h; subst h
+        simp       -- closes a ∈ [a] — use simp ONLY, NEVER List.mem_cons_self with args
       | cons b t => simp at h; omega
+
+(B) List.find? result on a filtered list ∈ original list:
+    have hmem_filter := List.find?_mem h
+    exact ⟨_, List.mem_of_mem_filter hmem_filter, rfl⟩
 
 Output ONLY a lean4 code block."""
 
@@ -355,11 +384,33 @@ Mathlib API (use EXACTLY these names):
   List.length_singleton    : [a].length = 1
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l
+  List.mem_cons_self       : a ∈ a :: l   (implicit args only — use `simp` or `exact List.mem_cons_self`, NO args)
   List.head?_cons          : List.head? (a :: l) = some a
   List.head?_nil           : List.head? ([] : List α) = none
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
+  List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
+  List.find?_mem           : List.find? p l = some a → a ∈ l
   Option.some_injective    : some a = some b → a = b
+
+Proof templates for common membership goals:
+
+(A) "result of a singleton-guarded function is a member of the list"
+    -- After casing to [a] and simplifying h to result = a:
+    cases l with
+    | nil => simp at h
+    | cons a t =>
+      cases t with
+      | nil =>
+        simp at h  -- simplifies to: result = a
+        subst h    -- replaces result with a everywhere
+        simp       -- closes: a ∈ [a]  ← use simp ONLY, never List.mem_cons_self with args
+      | cons b t => simp at h; omega
+
+(B) "result of List.find? on a filtered list belongs to the original list"
+    -- h : List.find? p (l.filter q) = some a
+    have hmem_filter : a ∈ l.filter q := List.find?_mem h
+    have hmem : a ∈ l := List.mem_of_mem_filter hmem_filter
+    exact ⟨a, hmem, rfl⟩  -- or whatever the goal shape requires
 
 Output ONLY a lean4 code block with the complete theorem and proof."""
 
