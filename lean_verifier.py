@@ -94,6 +94,11 @@ class LeanResult:
                 "the definition and casing on the structure."
             )
         if "type mismatch" in data:
+            if "Bool" in data and ("= false" in data or "= true" in data):
+                return (
+                    "Bool equality goals like `x = true` and `¬(x = false)` are not automatically interchangeable. "
+                    "Use `decide`, `simp [Bool.eq_true_iff_ne_false]`, or `cases x <;> simp` to normalise."
+                )
             return "The types don't match. Check your annotations and coercions."
         if "failed to synthesize" in data:
             if "OfNat" in data and "Fin" in data:

@@ -83,6 +83,10 @@ Critical rules:
 - Use `linarith` for linear arithmetic on ℚ/ℝ
 - Use `decide` for decidable propositions on small finite types
 - Use `induction n` for natural number induction
+- For Bool goals: `x = true` and `¬(x = false)` are NOT automatically interchangeable.
+  Use `decide`, `cases x <;> simp`, or `simp [Bool.eq_true_iff_ne_false]` to normalise.
+- To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
+  If `simp [f]` makes no progress on a hypothesis `h`, try `unfold f at h` or `delta f at h`.
 
 Mathlib API reference — use EXACTLY these names, do not guess alternatives:
 
