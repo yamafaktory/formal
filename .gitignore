@@ -1,3 +1,6 @@
 .env
 results/
 .ruff_cache/
+.pytest_cache/
+__pycache__/
+

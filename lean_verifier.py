@@ -123,6 +123,39 @@ class LeanResult:
                 "Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding "
                 "the definition and casing on the structure."
             )
+        if "application type mismatch" in data:
+            if "Option" in data and "has type" in data and "expected to have type" in data:
+                # Both sides are Option but with different inner types — field extraction needed
+                import re as _re
+
+                has_type = _re.search(r"has type\s+Option (\S+)", data)
+                exp_type = _re.search(r"expected to have type\s+Option (\S+)", data)
+                if has_type and exp_type and has_type.group(1) != exp_type.group(1):
+                    return (
+                        f"You have `Option {has_type.group(1)}` but `Option {exp_type.group(1)}` is needed. "
+                        "Extract the field from inside the Option with `.map`: "
+                        "e.g. `list.head?.map (·.id)` instead of `list.head?`."
+                    )
+            if "isSome" in data and "Option" in data:
+                return (
+                    "`Option.get` requires an explicit proof argument `h : o.isSome = true` — "
+                    "it is NOT the same as `Option.get!`. "
+                    "Use pattern matching instead: `rcases o with _ | v` "
+                    "or `match o with | some v => ... | none => ...`"
+                )
+            if "sort 'Type" in data and "sort 'Prop'" in data:
+                return (
+                    "You passed a value where a proof is expected. "
+                    "The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). "
+                    "Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis."
+                )
+            return (
+                "The argument has the wrong type. Common causes: "
+                "(1) Applying an induction hypothesis with the wrong proof — check that the evidence you pass "
+                "matches exactly what the IH expects (e.g. a proof about `List.find? tl`, not `some x = some y`). "
+                "(2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). "
+                "Read the expected type in the error and find or derive a proof of exactly that type."
+            )
         if "type mismatch" in data:
             if "expected to have type" in data and "true = true" in data:
                 return (
@@ -179,39 +212,6 @@ class LeanResult:
             return (
                 "You applied too many arguments — the term is already a value or proposition, not a function. "
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
-            )
-        if "application type mismatch" in data:
-            if "Option" in data and "has type" in data and "expected to have type" in data:
-                # Both sides are Option but with different inner types — field extraction needed
-                import re as _re
-
-                has_type = _re.search(r"has type\s+Option (\S+)", data)
-                exp_type = _re.search(r"expected to have type\s+Option (\S+)", data)
-                if has_type and exp_type and has_type.group(1) != exp_type.group(1):
-                    return (
-                        f"You have `Option {has_type.group(1)}` but `Option {exp_type.group(1)}` is needed. "
-                        "Extract the field from inside the Option with `.map`: "
-                        "e.g. `list.head?.map (·.id)` instead of `list.head?`."
-                    )
-            if "isSome" in data and "Option" in data:
-                return (
-                    "`Option.get` requires an explicit proof argument `h : o.isSome = true` — "
-                    "it is NOT the same as `Option.get!`. "
-                    "Use pattern matching instead: `rcases o with _ | v` "
-                    "or `match o with | some v => ... | none => ...`"
-                )
-            if "sort 'Type" in data and "sort 'Prop'" in data:
-                return (
-                    "You passed a value where a proof is expected. "
-                    "The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). "
-                    "Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis."
-                )
-            return (
-                "The argument has the wrong type. Common causes: "
-                "(1) Applying an induction hypothesis with the wrong proof — check that the evidence you pass "
-                "matches exactly what the IH expects (e.g. a proof about `List.find? tl`, not `some x = some y`). "
-                "(2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). "
-                "Read the expected type in the error and find or derive a proof of exactly that type."
             )
         return "Review Lean 4 syntax and ensure all imports are present."
 
