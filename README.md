@@ -1,6 +1,6 @@
 # formal
 
-[![Lint](https://github.com/yamafaktory/formal/actions/workflows/lint.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/lint.yml)
+[![Checks](https://github.com/yamafaktory/formal/actions/workflows/checks.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/checks.yml)
 [![Publish Docker image](https://github.com/yamafaktory/formal/actions/workflows/publish.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/publish.yml)
 
 An LLM-driven property checker for code, backed by Lean 4 as a proof engine.

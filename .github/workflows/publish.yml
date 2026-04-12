@@ -6,12 +6,12 @@ on:
     tags: ["v*"]
 
 jobs:
-  lint:
-    uses: ./.github/workflows/lint.yml
+  checks:
+    uses: ./.github/workflows/checks.yml
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: lint
+    needs: checks
     permissions:
       contents: read
       packages: write
