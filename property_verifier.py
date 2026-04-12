@@ -63,7 +63,9 @@ def verify_property(
     function_code = pure_fn.code if pure_fn else ""
 
     # ── Cache lookup ──────────────────────────────────────────────────────────
-    key = proof_cache.cache_key(function_code, prop.description, prop.kind, prop.formal)
+    key = proof_cache.cache_key(
+        function_code, prop.description, prop.kind, prop.formal, prop.preconditions, prop.assumptions
+    )
     cached = proof_cache.load(key)
     if cached is not None:
         elapsed = _fmt_elapsed(time.monotonic() - _t0)

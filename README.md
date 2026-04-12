@@ -284,6 +284,7 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
 | `PROOF_CACHE_DIR` | Directory for cached proof results (default: `results/cache/`) |
+| `PROOF_CACHE_TTL_DAYS` | Cache entries older than this are deleted on the next save (default: `7`) |
 
 ## Development
 
@@ -306,11 +307,16 @@ function is never re-proved — on subsequent runs a `[CACHE]` hit is logged and
 the stored result is returned immediately.
 
 The cache key is a SHA-256 hash of the function source code, property description,
-kind, and formal spec. Only successful proofs are cached; failed attempts always go
-through the full LLM + retry loop.
+kind, formal spec, preconditions, and assumptions. Any change to these inputs
+produces a new key; the old entry becomes an orphan and will be cleaned up by
+the TTL eviction.
 
-Cache files are written to `results/cache/` (one JSON file per entry). Override with
-`PROOF_CACHE_DIR`.
+Only successful proofs are cached; failed attempts always go through the full
+LLM + retry loop.
+
+Cache files are written to `results/cache/` (one JSON file per entry). Entries
+older than `PROOF_CACHE_TTL_DAYS` (default: 7) are deleted automatically on the
+next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CACHE_DIR`.
 
 ## Limitations
 

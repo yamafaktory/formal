@@ -74,6 +74,7 @@ if [[ "$BACKEND_CHOICE" == "1" ]]; then
 	_upsert "LLM_BACKEND" "claude-cli" "$ENV_FILE"
 	_upsert "HOST_CLAUDE_CONFIG_DIR" "$HOST_CLAUDE_CONFIG_DIR" "$ENV_FILE"
 	_upsert "LLM_MODEL" "$LLM_MODEL" "$ENV_FILE"
+	_upsert "PROOF_CACHE_TTL_DAYS" "7" "$ENV_FILE"
 	_upsert "COMPOSE_FILE" "docker-compose.yml:docker-compose.claude.yml" "$ENV_FILE"
 	# Remove OpenAI-specific keys if switching backends
 	sed -i '/^LLM_BASE_URL=/d; /^LLM_API_KEY=/d; /^LLM_CLI_CMD=/d' "$ENV_FILE" 2>/dev/null || true
@@ -152,6 +153,7 @@ elif [[ "$BACKEND_CHOICE" == "2" ]]; then
 	_upsert "LLM_BASE_URL" "$LLM_BASE_URL" "$ENV_FILE"
 	_upsert "LLM_API_KEY" "$LLM_API_KEY" "$ENV_FILE"
 	_upsert "LLM_MODEL" "$LLM_MODEL" "$ENV_FILE"
+	_upsert "PROOF_CACHE_TTL_DAYS" "7" "$ENV_FILE"
 	_upsert "COMPOSE_FILE" "docker-compose.yml" "$ENV_FILE"
 
 	cat <<EOF
