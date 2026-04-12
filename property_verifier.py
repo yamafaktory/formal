@@ -32,6 +32,7 @@ class PropertyResult:
     status: str = "failed"  # "verified" | "failed" | "unverifiable"
     preconditions: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    cached: bool = False
 
 
 def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":
@@ -70,8 +71,8 @@ def verify_property(
     if cached is not None:
         elapsed = _fmt_elapsed(time.monotonic() - _t0)
         log(_log, "CACHE", f"{prop.id} [{prop.kind}] cache hit — skipping proof ({elapsed})")
-        # Restore the current prop's id in case it differs across runs
         cached.property_id = prop.id
+        cached.cached = True
         return cached
 
     # ── Step 1: Formalize AND prove in one LLM call ───────────────────────────

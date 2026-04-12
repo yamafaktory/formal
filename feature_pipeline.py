@@ -57,7 +57,8 @@ class FeaturePipelineResult:
                 icon = "~"
             else:
                 icon = "✗"
-            lines.append(f"  {icon} [{r.kind}] {r.description}")
+            cached_marker = " [cached]" if r.cached else ""
+            lines.append(f"  {icon} [{r.kind}] {r.description}{cached_marker}")
             if r.preconditions:
                 lines.append(f"      Preconditions: {', '.join(r.preconditions)}")
             if r.assumptions:

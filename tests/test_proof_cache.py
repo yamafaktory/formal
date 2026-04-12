@@ -95,6 +95,14 @@ class TestSaveLoad:
         path.write_text("not valid json{{{")
         assert load("bad") is None
 
+    def test_loaded_result_has_cached_false(self, tmp_cache):
+        result = make_result()
+        key = cache_key("code", "desc", "kind", "formal", [], [])
+        save(key, result)
+        loaded = load(key)
+        # Saved result has cached=False; caller marks it True after loading
+        assert loaded.cached is False
+
     def test_preconditions_and_assumptions_survive_roundtrip(self, tmp_cache):
         result = make_result(preconditions=["n > 0"], assumptions=["floats as rationals"])
         key = cache_key("code", "desc", "kind", "formal", ["n > 0"], ["floats as rationals"])

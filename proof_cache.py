@@ -4,6 +4,7 @@ Cache key is a SHA-256 hash of the inputs that determine a proof:
   - pure function source code
   - property description, kind, and formal spec
   - preconditions and assumptions (affect the generated Lean theorem shape)
+  - a short hash of the proof-generation prompts (invalidates on prompt changes)
 
 Only successful (verified) results are cached — failures are always retried.
 """
@@ -19,6 +20,24 @@ if TYPE_CHECKING:
 
 _CACHE_DIR = Path(os.getenv("PROOF_CACHE_DIR", "/app/results/cache"))
 _CACHE_TTL_DAYS = int(os.getenv("PROOF_CACHE_TTL_DAYS", "7"))
+
+
+def _prompt_hash() -> str:
+    """Short hash of proof-generation prompts — changes when prompts are edited."""
+    from . import prompts
+
+    content = "\n".join(
+        [
+            prompts.AUTOFORMALIZE_SYSTEM,
+            prompts.PROPERTY_FORMALIZE_AND_PROVE_USER,
+            prompts.PROOF_GENERATION_SYSTEM,
+            prompts.PROOF_RETRY_USER,
+        ]
+    )
+    return hashlib.sha256(content.encode()).hexdigest()[:8]
+
+
+_PROMPT_HASH = _prompt_hash()
 
 
 def _evict_expired() -> None:
@@ -41,7 +60,7 @@ def cache_key(
     preconditions: list[str],
     assumptions: list[str],
 ) -> str:
-    payload = "\n".join([function_code, description, kind, formal, *preconditions, *assumptions])
+    payload = "\n".join([_PROMPT_HASH, function_code, description, kind, formal, *preconditions, *assumptions])
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

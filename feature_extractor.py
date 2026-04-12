@@ -36,13 +36,17 @@ class DecomposedFeature:
 
 def decompose(code: str, language: str = "Python") -> DecomposedFeature:
     """Step 1 — Split feature into pure functions and side effects."""
-    raw = call_llm(
-        prompts.DECOMPOSE_SYSTEM,
-        prompts.DECOMPOSE_USER.format(code=code, language=language),
-    )
-    try:
-        data = json.loads(_clean_json(raw))
-    except json.JSONDecodeError:
+    system = prompts.DECOMPOSE_SYSTEM
+    user = prompts.DECOMPOSE_USER.format(code=code, language=language)
+    data = None
+    for _ in range(2):
+        raw = call_llm(system, user)
+        try:
+            data = json.loads(_clean_json(raw))
+            break
+        except json.JSONDecodeError:
+            continue
+    if data is None:
         return DecomposedFeature(
             feature_summary="Could not parse feature",
             pure_functions=[],
@@ -74,18 +78,21 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
 
     pure_text = "\n\n".join(f"# {f.name}: {f.description}\n{f.code}" for f in feature.pure_functions)
 
-    raw = call_llm(
-        prompts.PROPERTY_EXTRACTION_SYSTEM,
-        prompts.PROPERTY_EXTRACTION_USER.format(
-            language=language,
-            pure_functions=pure_text,
-            feature_summary=feature.feature_summary,
-        ),
+    system = prompts.PROPERTY_EXTRACTION_SYSTEM
+    user = prompts.PROPERTY_EXTRACTION_USER.format(
+        language=language,
+        pure_functions=pure_text,
+        feature_summary=feature.feature_summary,
     )
-
-    try:
-        data = json.loads(_clean_json(raw))
-    except json.JSONDecodeError:
+    data = None
+    for _ in range(2):
+        raw = call_llm(system, user)
+        try:
+            data = json.loads(_clean_json(raw))
+            break
+        except json.JSONDecodeError:
+            continue
+    if data is None:
         return []
 
     return [

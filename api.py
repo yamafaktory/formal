@@ -66,6 +66,7 @@ class PropertyResultOut(BaseModel):
     reason: str
     preconditions: list[str]
     assumptions: list[str]
+    cached: bool
 
 
 class VerifyFeatureResponse(BaseModel):

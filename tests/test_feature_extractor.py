@@ -103,6 +103,17 @@ class TestExtractProperties:
             props = extract_properties(make_feature())
         assert props == []
 
+    def test_retries_once_on_json_parse_error(self):
+        responses = iter(["not valid json", llm_response([VALID_PROPERTY])])
+        with patch("formal.feature_extractor.call_llm", side_effect=responses):
+            props = extract_properties(make_feature())
+        assert len(props) == 1
+
+    def test_gives_up_after_two_parse_errors(self):
+        with patch("formal.feature_extractor.call_llm", return_value="not valid json"):
+            props = extract_properties(make_feature())
+        assert props == []
+
     def test_returns_empty_on_llm_returning_empty_properties(self):
         with patch("formal.feature_extractor.call_llm", return_value=llm_response([])):
             props = extract_properties(make_feature())
