@@ -87,14 +87,29 @@ class LeanResult:
                 "simp cannot unfold or simplify with that lemma. "
                 "Replace `simp [lemma]` with `exact lemma ...`, `apply lemma`, or `rw [lemma]` to apply it directly."
             )
-        if "unknown identifier" in data or "unknown tactic" in data:
-            return "Check that the identifier/tactic is in scope and spelled correctly."
+        if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
+            return (
+                "That identifier or constant does not exist in Mathlib. Do not guess lemma names. "
+                "Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding "
+                "the definition and casing on the structure."
+            )
         if "type mismatch" in data:
             return "The types don't match. Check your annotations and coercions."
         if "failed to synthesize" in data:
+            if "OfNat" in data and "Fin" in data:
+                return (
+                    "You are indexing a list with a numeric literal used as `Fin n` where `n` is a variable — "
+                    "Lean cannot synthesize `OfNat (Fin n)` for a non-concrete bound. "
+                    "Use `List.head?`, `List.head!`, or case on the list to extract the element instead of `List.get`."
+                )
             return "A typeclass instance is missing. Check your imports."
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
+        if "function expected" in data or "Function expected" in data:
+            return (
+                "You applied too many arguments — the term is already a value or proposition, not a function. "
+                "Remove the extra argument(s) and use `exact` to close the goal directly."
+            )
         if "application type mismatch" in data:
             return "Wrong number or type of arguments. Check the function signature."
         return "Review Lean 4 syntax and ensure all imports are present."

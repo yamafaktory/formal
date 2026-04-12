@@ -88,7 +88,6 @@ Mathlib API reference — use EXACTLY these names, do not guess alternatives:
 
 List:
   List.length_singleton    : [a].length = 1
-  List.length_eq_one       : l.length = 1 ↔ ∃ a, l = [a]
   List.length_cons         : (a :: l).length = l.length + 1
   List.length_nil          : [].length = 0
   List.mem_singleton       : a ∈ [b] ↔ a = b
@@ -115,13 +114,18 @@ Nat / Int arithmetic:
   Nat.le_of_lt_succ        : n < m + 1 → n ≤ m
 
 Key tactic patterns:
-- Destructure a length-1 list into a concrete singleton:
-    obtain ⟨a, rfl⟩ := List.length_eq_one.mp h
-    -- after this, the list variable is replaced by [a] everywhere
-- Prove membership after destructuring to [a]:
+- Destructure a length-1 list into a concrete singleton (do NOT use List.length_eq_one):
+    cases l with
+    | nil => simp at h
+    | cons a t =>
+      cases t with
+      | nil => -- l is now [a]; continue proof
+        ...
+      | cons b t => simp at h; omega
+- Prove membership after reducing to [a]:
     exact List.mem_cons_self a []
     -- or: simp
-- For `f [a] ∈ [a]` where f returns the only element: after `obtain ⟨a, rfl⟩`,
+- For `f [a] ∈ [a]` where f returns the only element: after casing to [a],
   unfold f, then `simp [List.head?_cons, List.mem_singleton]`
 
 Theorem to prove:
@@ -284,7 +288,6 @@ Modeling rules (apply to any source language):
 
 Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.length_singleton    : [a].length = 1
-  List.length_eq_one       : l.length = 1 ↔ ∃ a, l = [a]
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
   List.mem_cons_self       : a ∈ a :: l   (direct proof term)
@@ -294,9 +297,13 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   Option.some_injective    : some a = some b → a = b
 
 For "result is member of original list" proofs on length-1 guarded functions:
-  Add hypothesis `(h : l.length = 1)`, then in the proof:
-  `obtain ⟨a, rfl⟩ := List.length_eq_one.mp h` rewrites l to [a],
-  then `exact List.mem_cons_self a []` closes the membership goal.
+  Add hypothesis `(h : l.length = 1)`, then case on the list:
+    cases l with
+    | nil => simp at h
+    | cons a t =>
+      cases t with
+      | nil => exact List.mem_cons_self a []
+      | cons b t => simp at h; omega
 
 Output ONLY a lean4 code block."""
 
@@ -338,7 +345,6 @@ Proof tactics:
 
 Mathlib API (use EXACTLY these names):
   List.length_singleton    : [a].length = 1
-  List.length_eq_one       : l.length = 1 ↔ ∃ a, l = [a]
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
   List.mem_cons_self       : a ∈ a :: l
@@ -373,11 +379,9 @@ Fix the proof. The error is at line {line}, column {col}.
 
 Hint: {hint}
 
-If the error is `unknown identifier` or `unknown constant` for a List/Option lemma,
-use only these verified Mathlib names:
-  List.length_singleton, List.length_eq_one, List.mem_singleton, List.mem_cons,
-  List.head?_cons, List.head?_nil, List.length_pos_of_ne_nil,
-  Option.some_injective, Option.get_some
+If the error is `unknown identifier` or `unknown constant`, do not guess lemma names.
+Instead prove the goal using `simp`, `omega`, `decide`, `rfl`, or by unfolding the
+definition and casing on the structure — tactics that do not rely on specific lemma names.
 
 Current code:
 {current}
