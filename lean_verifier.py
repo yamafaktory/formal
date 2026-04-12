@@ -84,8 +84,12 @@ class LeanResult:
             )
         if "simp made no progress" in data:
             return (
-                "simp cannot unfold or simplify with that lemma. "
-                "Replace `simp [lemma]` with `exact lemma ...`, `apply lemma`, or `rw [lemma]` to apply it directly."
+                "simp cannot simplify the target. Try these alternatives: "
+                "`omega` for length/arithmetic goals; "
+                "`simp only [List.length_nil, List.length_cons]` for list length; "
+                "`norm_num` for numeric equalities; "
+                "`contradiction` or `exact absurd h (by simp)` if the hypothesis is contradictory; "
+                "or `unfold f at h` to manually expand a definition before simplifying."
             )
         if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
             return (
@@ -100,6 +104,12 @@ class LeanResult:
                     "Use `decide`, `simp [Bool.eq_true_iff_ne_false]`, or `cases x <;> simp` to normalise."
                 )
             return "The types don't match. Check your annotations and coercions."
+        if "failed to generate" in data and "Inhabited" in data:
+            return (
+                "The type has no default value so `Inhabited` cannot be derived — do NOT add `deriving Inhabited`. "
+                "Avoid `List.head!` and `l[0]!` entirely. Use `List.head?` (returns `Option`) "
+                "or case on the list structure to extract the element safely."
+            )
         if "failed to synthesize" in data:
             if "OfNat" in data and "Fin" in data:
                 return (
@@ -116,11 +126,29 @@ class LeanResult:
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
         if "function expected" in data or "Function expected" in data:
+            if "mem_cons_self" in data:
+                return (
+                    "`List.mem_cons_self` takes only implicit arguments — do NOT pass `a` or `[]` explicitly. "
+                    "Use `simp` to close membership goals, or write `exact List.mem_cons_self` with no arguments."
+                )
+            if ".id" in data or "field" in data.lower():
+                return (
+                    "Lean parsed a space before `.field` as function application. "
+                    "Write field access without a space: `x.id` not `x .id`. "
+                    "Also avoid `head!` — use `List.head?` or case on the list instead."
+                )
             return (
                 "You applied too many arguments — the term is already a value or proposition, not a function. "
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
             )
         if "application type mismatch" in data:
+            if "isSome" in data and "Option" in data:
+                return (
+                    "`Option.get` requires an explicit proof argument `h : o.isSome = true` — "
+                    "it is NOT the same as `Option.get!`. "
+                    "Use pattern matching instead: `rcases o with _ | v` "
+                    "or `match o with | some v => ... | none => ...`"
+                )
             if "sort 'Type'" in data and "sort 'Prop'" in data:
                 return (
                     "You passed a value where a proof is expected. "

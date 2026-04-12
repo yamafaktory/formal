@@ -83,6 +83,10 @@ Critical rules:
 - Use `linarith` for linear arithmetic on ℚ/ℝ
 - Use `decide` for decidable propositions on small finite types
 - Use `induction n` for natural number induction
+- NEVER use `List.head!` or `l[0]!` — they require an `Inhabited` instance that domain types
+  rarely have. Use `List.head?` (returns `Option`) or case on the list structure instead.
+- When accessing a field with dot notation, write `x.fieldName` with NO space before the dot.
+  A space (`x .fieldName`) makes Lean parse it as function application and will fail.
 - For Bool goals: `x = true` and `¬(x = false)` are NOT automatically interchangeable.
   Use `decide`, `cases x <;> simp`, or `simp [Bool.eq_true_iff_ne_false]` to normalise.
 - To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
@@ -96,7 +100,7 @@ List:
   List.length_nil          : [].length = 0
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l   (use as `exact List.mem_cons_self _ _` or just `simp`)
+  List.mem_cons_self       : a ∈ a :: l   (implicit args only — use `simp` or `exact List.mem_cons_self`)
   List.mem_nil_iff         : a ∈ ([] : List α) ↔ False
   List.mem_append          : a ∈ l ++ m ↔ a ∈ l ∨ a ∈ m
   List.head?_cons          : List.head? (a :: l) = some a
@@ -128,7 +132,7 @@ Key tactic patterns:
       | cons b t => simp at h; omega
 - Prove membership after reducing to [a]:
     simp  -- preferred: handles membership goals automatically
-    -- alternative: exact List.mem_cons_self _ _  (use _ wildcards, NOT explicit a [])
+    -- alternative: exact List.mem_cons_self  (NO arguments — all are implicit)
 - For `f [a] ∈ [a]` where f returns the only element: after casing to [a],
   unfold f, then `simp [List.head?_cons, List.mem_singleton]`
 
@@ -294,7 +298,7 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.length_singleton    : [a].length = 1
   List.mem_singleton       : a ∈ [b] ↔ a = b
   List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l   (use as `exact List.mem_cons_self _ _` or just `simp`)
+  List.mem_cons_self       : a ∈ a :: l   (implicit args only — use `simp` or `exact List.mem_cons_self`)
   List.head?_cons          : List.head? (a :: l) = some a
   List.head?_nil           : List.head? ([] : List α) = none
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
