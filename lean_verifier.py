@@ -75,22 +75,34 @@ class LeanResult:
                 "or add `all_goals decide` at the end to close all such goals at once. "
                 "Do NOT use `omega` — it cannot evaluate un-reduced string literal lengths."
             )
+        if "not definitionally equal" in data and "isPrefixOf" in data:
+            return (
+                "`String.isPrefixOf` is implemented externally (C FFI) and is NOT definitionally "
+                "reducible — `rfl` fails at the `String` level. "
+                "But `List.isPrefixOf` IS definitionally reducible. "
+                "Convert to `List.isPrefixOf` first, then close with `rfl`:\n"
+                "  simp only [String.isPrefixOf, String.toList_append]\n"
+                "  rfl\n"
+                "After `simp only [String.isPrefixOf, String.toList_append]`, the goal is at the "
+                "`List Char` level where Lean's kernel can step through each concrete character "
+                "in the prefix definitionally, so `rfl` succeeds even with a free-variable suffix. "
+                "If `rfl` still fails, use `simp [List.isPrefixOf]` as a fallback — but prefer `rfl` "
+                "since `simp [List.isPrefixOf]` can loop. "
+                "Do NOT use `decide` or `native_decide` — they require ground terms."
+            )
         if "unsolved goals" in data and "isPrefixOf" in data and "++" in data:
             return (
-                "The goal `p.isPrefixOf (p ++ rest) = true` was not closed by simp. "
-                "IMPORTANT: `String.isPrefixOf_iff` and `String.isPrefixOf_append_left` do NOT exist "
-                "in Mathlib — do not use them. "
-                "Try these strategies in order until one compiles:\n"
-                "(1) List-level — unfold to List.isPrefixOf and use the List lemma:\n"
+                "The goal `p.isPrefixOf (p ++ rest) = true` was not closed. "
+                "IMPORTANT: `String.isPrefixOf_iff`, `String.isPrefixOf_append_left`, and "
+                "`List.isPrefixOf_append_left` do NOT exist in Mathlib — do not use them.\n"
+                "`String.isPrefixOf` is @[extern] (C FFI) and not definitionally reducible, but "
+                "`List.isPrefixOf` IS. Convert to List level then close with `rfl`:\n"
                 "  simp only [String.isPrefixOf, String.toList_append]\n"
-                "  exact List.isPrefixOf_append_left _ _\n"
-                "(2) Full simp unfold:\n"
-                "  simp [String.isPrefixOf, List.isPrefixOf, String.append]\n"
-                "(3) Induction on p.toList:\n"
-                "  induction p.toList with\n"
-                "  | nil => simp [String.isPrefixOf]\n"
-                "  | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih\n"
-                "Do NOT use `decide` — free variables make the goal non-ground."
+                "  rfl\n"
+                "After `simp only`, Lean's kernel reduces `List.isPrefixOf` character-by-character "
+                "through the concrete prefix, so `rfl` closes the goal even with free-variable suffixes. "
+                "Do NOT use `decide` or `simp [List.isPrefixOf]` — `decide` needs ground terms "
+                "and `simp [List.isPrefixOf]` can loop on this goal."
             )
         if "No goals" in data or "no goals" in data:
             if "cases" in data or "Cases" in data:
@@ -174,8 +186,13 @@ class LeanResult:
                     "Nat.pow_add": "`pow_add : a ^ (m + n) = a ^ m * a ^ n` (no `Nat.` prefix needed)",
                     "Nat.pow_mul": "`pow_mul : a ^ (m * n) = (a ^ m) ^ n` (no `Nat.` prefix needed)",
                     "pow_le_pow_right": (
-                        "`Nat.pow_le_pow_right (h : 0 < base) : n ≤ m → base^n ≤ base^m` for Nat, "
-                        "or `pow_le_pow_right (h : 1 ≤ base) : n ≤ m → base^n ≤ base^m` for ordered semirings"
+                        "For Nat: `Nat.pow_le_pow_right (h : 0 < base) (hle : n ≤ m) : base^n ≤ base^m`. "
+                        "For general ordered semirings the bare `pow_le_pow_right` may not exist in this "
+                        "Mathlib version. Use the `gcongr` tactic instead — it handles power monotonicity "
+                        "goals automatically without needing the exact lemma name:\n"
+                        "  gcongr  -- closes `x^n ≤ x^m` when `n ≤ m` and `1 ≤ x` are in context\n"
+                        "Or decompose manually: `apply pow_le_pow_of_le_one` / `apply pow_le_one` "
+                        "for base ≤ 1 cases."
                     ),
                     "pow_le_pow_left": ("`pow_le_pow_left (h : 0 ≤ a) (hab : a ≤ b) (n : ℕ) : a^n ≤ b^n`"),
                     "List.length_eq_one": (
@@ -191,6 +208,25 @@ class LeanResult:
                         "  exact (List.append_inj h hlen).1\n"
                         "`List.append_inj h hlen` requires the two PREFIX lengths to be equal, "
                         "then gives `prefix_l = prefix_r ∧ suffix_l = suffix_r`."
+                    ),
+                    "String.length_mk": (
+                        "`String.length_mk` does not exist in Mathlib. "
+                        "String literal lengths are definitionally equal to their character count — "
+                        'use `show "literal".length = N from rfl` inline in a `simp only` call:\n'
+                        "  simp only [String.length_append,\n"
+                        '    show "PREFIX".length = N from rfl,\n'
+                        '    show "SUFFIX".length = K from rfl]\n'
+                        "  omega\n"
+                        "Do NOT use `simp [String.length]` — it unfolds recursively and loops."
+                    ),
+                    "List.isPrefixOf_append_left": (
+                        "`List.isPrefixOf_append_left` does not exist in Mathlib. "
+                        "To prove `p.isPrefixOf (p ++ rest) = true`, unfold to `List.isPrefixOf` "
+                        "and let simp reduce character-by-character:\n"
+                        "  simp only [String.isPrefixOf, String.toList_append]  -- if still at String level\n"
+                        "  simp [List.isPrefixOf]\n"
+                        "This works even with free-variable suffixes because simp steps through "
+                        "each concrete character in the prefix and closes after the last one."
                     ),
                     "List.append_left_cancel": (
                         "`List.append_left_cancel` does not exist in Mathlib. "
@@ -273,12 +309,18 @@ class LeanResult:
                 arrow_match = _re.search(r"has type\s+(.+?)\s+→", data)
                 required = arrow_match.group(1).strip() if arrow_match else "the required hypothesis"
                 return (
-                    f"`{ih_name}` is a function — it still needs its hypothesis argument before it becomes a proof. "
-                    f"You must apply it: `{ih_name} (proof_of_{required.replace(' ', '_')})` where the argument "
-                    f"proves `{required}`. "
-                    f"Common proofs for arithmetic preconditions: `Nat.le_add_right n k` (proves `n ≤ n + k`), "
-                    f"`Nat.le_refl n` (proves `n ≤ n`), or `by omega`. "
-                    f"Do NOT pass `{ih_name}` to `le_trans` or other lemmas without applying it first."
+                    f"`{ih_name}` is a function (type: `{required} → ...`) — you must apply it to a "
+                    f"proof of `{required}` before passing it anywhere.\n"
+                    f"WRONG:  `le_trans {ih_name} ...`  ← {ih_name} is not yet a proof, it's still a function\n"
+                    f"RIGHT:  `le_trans ({ih_name} (by omega)) ...`  ← apply {ih_name} first\n"
+                    f"Common proofs for arithmetic preconditions:\n"
+                    f"  `by omega`                    — works for any linear arithmetic goal\n"
+                    f"  `Nat.le_add_right n k`        — proves `n ≤ n + k`\n"
+                    f"  `Nat.le_refl n`               — proves `n ≤ n`\n"
+                    f"If the induction is over a difference `k` obtained via `obtain ⟨k, rfl⟩`, "
+                    f"also consider replacing the whole induction with `gcongr` — for monotonicity "
+                    f"goals like `a ^ m ≤ a ^ n` with `ha : 1 ≤ a` and `hmn : m ≤ n` in context, "
+                    f"`gcongr` closes the goal in one step without any induction."
                 )
             return (
                 "The argument has the wrong type. Common causes: "
@@ -323,26 +365,33 @@ class LeanResult:
         if "Expected type must not contain free variables" in data:
             return (
                 "`decide` cannot work when the goal contains free variables. "
-                "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` — "
+                "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` alone — "
                 "that also fails to close goals with free-variable strings. "
-                "NOTE: `String.isPrefixOf_append_left` and `String.isPrefixOf_iff` do NOT exist in Mathlib.\n"
-                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals, "
-                "use the List-level strategy:\n"
+                "NOTE: `String.isPrefixOf_append_left`, `List.isPrefixOf_append_left`, and "
+                "`String.isPrefixOf_iff` do NOT exist in Mathlib — do not use any of them.\n"
+                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:\n"
                 "  simp only [String.isPrefixOf, String.toList_append]\n"
-                "  exact List.isPrefixOf_append_left _ _\n"
-                "Or induction on p.toList:\n"
-                "  induction p.toList with\n"
-                "  | nil => simp [String.isPrefixOf]\n"
-                "  | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih\n"
+                "  simp [List.isPrefixOf]\n"
+                "This works because the prefix characters are concrete — simp reduces them one-by-one "
+                "regardless of free variables in the suffix.\n"
                 "For non-string goals with free variables: use `simp`, `omega`, `ring`, or `linarith`."
             )
         if "omega could not prove" in data and ".length" in data:
             return (
-                '`omega` cannot evaluate string or list literal lengths (e.g. `"WEIGHTED_SUM((".length`) — '
-                "they are not automatically reduced to numbers. "
-                "Fix: run `simp only [String.length_mk, List.length]` or `norm_num` first to reduce all "
-                "literal `.length` calls to concrete numbers, then `omega` for the remaining arithmetic. "
-                "Alternatively, use `simp [String.length, String.append_length]` to normalise the whole goal."
+                '`omega` cannot evaluate string literal lengths (e.g. `"WEIGHTED_SUM((".length`) — '
+                "they appear as opaque variables to omega. "
+                "String literal lengths are definitionally equal to their character count and can be "
+                "reduced inline with `show ... from rfl`. Use this exact pattern:\n"
+                "  simp only [String.length_append,\n"
+                '    show "PREFIX".length = N from rfl,\n'
+                '    show "MID".length = M from rfl,\n'
+                '    show "SUFFIX".length = K from rfl]\n'
+                "  omega\n"
+                "Replace each literal and its count (N, M, K) with the actual strings and their "
+                "character counts. Count carefully — every character including spaces and punctuation.\n"
+                "IMPORTANT: do NOT use `simp [String.length]` or `simp [String.length_append, "
+                "String.length]` — `String.length` unfolds recursively and causes maximum recursion depth errors.\n"
+                "Also do NOT use `String.length_mk` — it does not exist in Mathlib."
             )
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."

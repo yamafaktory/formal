@@ -163,9 +163,11 @@ Nat / Int arithmetic:
   Nat.succ_ne_zero         : Nat.succ n ≠ 0
   Nat.lt_irrefl            : ¬ n < n
   Nat.le_of_lt_succ        : n < m + 1 → n ≤ m
-  Nat.pow_le_pow_right     : 0 < x → n ≤ m → x ^ n ≤ x ^ m   (Nat only)
-  pow_le_pow_right         : 1 ≤ x → n ≤ m → x ^ n ≤ x ^ m   (ordered semiring)
+  Nat.pow_le_pow_right     : 0 < x → n ≤ m → x ^ n ≤ x ^ m   (Nat only — use this)
   pow_le_pow_left          : 0 ≤ a → a ≤ b → ∀ n, a ^ n ≤ b ^ n
+  -- NOTE: bare `pow_le_pow_right` (no Nat. prefix) may not exist in this Mathlib version.
+  -- For power monotonicity in ordered semirings, prefer the `gcongr` tactic — it closes
+  -- `x^n ≤ x^m` automatically when `n ≤ m` and `1 ≤ x` are in context.
   pow_add                  : a ^ (m + n) = a ^ m * a ^ n
   pow_mul                  : a ^ (m * n) = (a ^ m) ^ n
   mul_pow                  : (a * b) ^ n = a ^ n * b ^ n
@@ -252,6 +254,12 @@ Return a JSON object with:
 
 Rules:
 - Pure functions: no DB, no I/O, no HTTP, no global state, same input always gives same output
+- A function is STILL PURE if it takes interface or abstract class parameters and only READS from
+  them (calls their getter/query methods). Reading from an interface argument is not a side effect.
+  Example: `print(Expression left, Expression right)` that calls `left.getType()` and returns a
+  String is pure — it has no I/O and no global state mutation.
+- Private helper methods that compute strings, numbers, or booleans from their arguments are
+  almost always pure — classify them as pure unless they explicitly do I/O or mutate state.
 - If a function mixes pure and impure, extract just the pure computation as a new helper
 - If nothing is pure, return empty pure_functions array
 - Preserve the original {language} syntax when extracting pure function code
@@ -297,7 +305,7 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 
 String properties — verifiability rules:
 - `startsWith` / `isPrefixOf` with free-variable strings: mark verifiable=true.
-  Add to assumptions: "Proof via List.isPrefixOf_append_left after simp [String.isPrefixOf, String.toList_append]"
+  Add to assumptions: "Proof: simp only [String.isPrefixOf, String.toList_append]; rfl"
 - String injectivity WITHOUT a separator precondition (e.g. f(a,b) = prefix++a++mid++b is injective
   because prefix and mid are unique delimiters): mark verifiable=true.
   Add to assumptions: "Proof via String.toList_append + List.append_inj"
@@ -388,7 +396,10 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
 
 String length:
   String.length_append     : (s ++ t).length = s.length + t.length
-  -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat
+  -- For literal lengths: use `show "foo".length = 3 from rfl` inline in simp only, then omega.
+  --   simp only [String.length_append, show "PREFIX".length = N from rfl, ...]
+  --   omega
+  -- Do NOT use `simp [String.length]` — it recurses infinitely. `String.length_mk` does not exist.
   -- NEVER use `omega` on goals involving un-reduced String.length literals
 
 Modeling notes:
@@ -398,7 +409,8 @@ Modeling notes:
   then use `List.append_inj h rfl` (for prefix stripping) and `List.append_inj h hlen` (for suffix).
   NOTE: `List.append_left_cancel` and `List.append_right_cancel` do NOT exist in Mathlib.
 - Do NOT use `decide` on goals containing free variables — `decide` only works on closed, fully
-  concrete propositions. For `String.startsWith` goals: `simp [String.startsWith, String.isPrefixOf]`.
+  concrete propositions. For `p.isPrefixOf (p ++ rest)` goals:
+  `simp only [String.isPrefixOf, String.toList_append]; rfl`
 
 Proof templates for membership goals:
 
@@ -474,18 +486,19 @@ Mathlib API (use EXACTLY these names):
 
 String length / prefix:
   String.length_append          : (s ++ t).length = s.length + t.length
-  List.isPrefixOf_append_left   : l.isPrefixOf (l ++ m) = true   (List-level; use this)
-  -- NOTE: `String.isPrefixOf_append_left` and `String.isPrefixOf_iff` do NOT exist in Mathlib.
-  -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat before omega
+  -- NOTE: `String.isPrefixOf_append_left`, `List.isPrefixOf_append_left`, and
+  --        `String.isPrefixOf_iff` do NOT exist in Mathlib — do not use any of them.
+  -- For literal lengths: use `show "foo".length = 3 from rfl` inline in simp only, then omega.
+  --   simp only [String.length_append, show "PREFIX".length = N from rfl, ...]
+  --   omega
+  -- Do NOT use `simp [String.length]` — it recurses infinitely. `String.length_mk` does not exist. before omega
   -- NEVER call `omega` on goals with un-reduced String.length literal expressions
-  -- For `p.isPrefixOf (p ++ rest) = true` — strategies in order:
-  --   (1) simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _
-  --   (2) simp [String.isPrefixOf, List.isPrefixOf, String.append]
-  --   (3) induction p.toList with
-  --         | nil => simp [String.isPrefixOf]
-  --         | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih
-  --   Do NOT use `decide` (free variable in rest)
-  --   Do NOT use `String.isPrefixOf_append_left` or `String.isPrefixOf_iff` — they do not exist
+  -- For `p.isPrefixOf (p ++ rest) = true` — use this two-step pattern:
+  --   simp only [String.isPrefixOf, String.toList_append]  -- converts to List.isPrefixOf level
+  --   rfl                                                  -- kernel reduces char-by-char, closes goal
+  -- String.isPrefixOf is @[extern] (not definitionally reducible); List.isPrefixOf IS.
+  -- After simp only, rfl closes the goal even with free-variable suffixes.
+  -- Do NOT use `decide` (needs ground terms) or `simp [List.isPrefixOf]` (can loop).
 
 Modeling notes:
 - NEVER model a simple collection wrapper (e.g. an aggregation class that just holds a list) as a
@@ -503,11 +516,15 @@ Modeling notes:
   propositions. Do NOT combine `simp [String.startsWith, String.isPrefixOf]` with `decide` —
   the simp leaves free variables and decide will time out.
   For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:
-    NOTE: `String.isPrefixOf_append_left`, `String.isPrefixOf_iff`, `String.startsWith_iff_isPrefixOf`
-    do NOT exist in Mathlib. Use the List-level strategy:
+    NOTE: `String.isPrefixOf_append_left`, `List.isPrefixOf_append_left`, `String.isPrefixOf_iff`,
+    and `String.startsWith_iff_isPrefixOf` do NOT exist in Mathlib.
+    String.isPrefixOf is @[extern] (C FFI) — NOT definitionally reducible. List.isPrefixOf IS.
+    Use this two-step pattern:
     simp only [String.isPrefixOf, String.toList_append]
-    exact List.isPrefixOf_append_left _ _
-    -- or induction on p.toList if that lemma is not found.
+    rfl
+    -- After simp only, the goal is at List.isPrefixOf level; Lean's kernel reduces char-by-char
+    -- and rfl closes it even with free-variable suffixes.
+    -- Do NOT use simp [List.isPrefixOf] — it can loop on this goal.
 - Mathlib lemmas (e.g. `List.length_append`) are propositions, not functions. Apply them with
   `simp [List.length_append]` or `rw [List.length_append]` — never write `List.length_append l`.
 
