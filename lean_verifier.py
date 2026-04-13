@@ -74,8 +74,19 @@ class LeanResult:
                     "appear after the goal is already closed in that branch."
                 )
             return (
-                "simp (or a previous tactic) already closed the goal. "
-                "Remove every tactic that comes after it — there is nothing left to prove."
+                "A tactic ran but there were no goals left — an earlier tactic already closed everything. "
+                "Common causes:\n"
+                "(1) A tactic like `simp at h`, `exact`, or `rw` closed the goal and you have extra "
+                "tactics after it. Remove them.\n"
+                "(2) In an `iff` proof with `constructor` + `split_ifs at h`, if `simp at h` in one "
+                "branch fails to close by contradiction (e.g. `h : Except.ok X = Except.error ()`), "
+                "that sub-goal leaks out and the backward-direction `·` bullet ends up on the wrong goal. "
+                "Fix: replace bare `simp at h` with `exact absurd h (by simp)` or `simp [Except.ok.injEq] at h` "
+                "to guarantee the contradiction closes the branch.\n"
+                "(3) For the backward direction of `iff` with `if-then-else`: prefer\n"
+                "    `simp only [functionName, if_pos h]`\n"
+                "  over `unfold` + `rw [if_pos h]` — the `rw` closes the goal automatically "
+                "via rfl, leaving nothing for subsequent tactics."
             )
         if "split_ifs" in data and "no if-then-else" in data:
             return (
@@ -87,9 +98,21 @@ class LeanResult:
                 "(3) then `simp` to close the membership goal."
             )
         if "constructor" in data and "no applicable constructor" in data:
+            # Check if it looks like an arithmetic goal in a list-induction cons case
+            if "zipWith" in data or "sum" in data or ("*" in data and "=" in data):
+                return (
+                    "The goal is an arithmetic equation — `constructor` does not apply here. "
+                    "In a list-induction cons case with a 'all elements satisfy P' hypothesis, "
+                    "the pattern is: (1) extract the head fact with "
+                    "`have hhead := hweights _ (by simp)` (or `List.mem_cons_self`), "
+                    "(2) build the tail hypothesis with "
+                    "`have htail : ∀ x ∈ tl, P x := fun x hx => hweights x (by simp [hx])`, "
+                    "(3) apply the IH to the tail, "
+                    "(4) close with `simp [hhead, mul_zero, ih]` or `linarith`/`ring`."
+                )
             return (
                 "The goal is not a conjunction/disjunction — `constructor` does not apply. "
-                "Use `exact h`, `assumption`, `linarith`, or `omega` to close it directly."
+                "Use `exact h`, `assumption`, `linarith`, `ring`, or `omega` to close it directly."
             )
         if "simp made no progress" in data:
             return (
@@ -198,6 +221,29 @@ class LeanResult:
                     "Use `List.head?` (returns `Option`) or case on the list structure to extract the element safely."
                 )
             return "A typeclass instance is missing. Check your imports."
+        if "Expected type must not contain free variables" in data:
+            return (
+                "`decide` cannot work when the goal contains free variables. "
+                "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` — "
+                "that also fails to close goals with free-variable strings. "
+                "For `(prefix ++ rest).startsWith prefix` goals, use the suffix-witness approach:\n"
+                "  simp only [String.startsWith_iff_isPrefixOf]\n"
+                "  exact ⟨rest, by simp [String.append_assoc]⟩\n"
+                "If `String.startsWith_iff_isPrefixOf` is not available, try:\n"
+                "  apply String.isPrefixOf_self_append  -- or String.startsWith_append_right\n"
+                "If no direct lemma works, convert to List Char:\n"
+                "  simp only [String.startsWith, String.isPrefixOf, String.toList_append]\n"
+                "  exact List.isPrefixOf_append _ _\n"
+                "For non-string goals with free variables: use `simp`, `omega`, `ring`, or `linarith`."
+            )
+        if "omega could not prove" in data and ".length" in data:
+            return (
+                '`omega` cannot evaluate string or list literal lengths (e.g. `"WEIGHTED_SUM((".length`) — '
+                "they are not automatically reduced to numbers. "
+                "Fix: run `simp only [String.length_mk, List.length]` or `norm_num` first to reduce all "
+                "literal `.length` calls to concrete numbers, then `omega` for the remaining arithmetic. "
+                "Alternatively, use `simp [String.length, String.append_length]` to normalise the whole goal."
+            )
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
         if data == "timeout":
@@ -220,15 +266,29 @@ class LeanResult:
                 )
             if "mem_cons_self" in data:
                 return (
-                    "`List.mem_cons_self` takes only implicit arguments — do NOT pass any arguments, "
-                    "not even `_` wildcards. Write `exact List.mem_cons_self` with nothing after it, "
-                    "or just use `simp` to close the membership goal."
+                    "`List.mem_cons_self` takes ZERO explicit arguments — all its parameters are implicit. "
+                    "Writing `List.mem_cons_self w` or `List.mem_cons_self _ _` is WRONG and will always fail. "
+                    "Correct forms:\n"
+                    "  · To close a goal `a ∈ a :: l`:  `exact List.mem_cons_self`  (nothing after it)\n"
+                    "  · To pass as proof to another lemma, e.g. `hweights _ proof`:  "
+                    "use `hweights _ (List.mem_cons_self)` — NO args after `mem_cons_self`, "
+                    "or use an anonymous proof: `hweights _ (by simp)`."
                 )
             if ".id" in data or "field" in data.lower():
                 return (
                     "Lean parsed a space before `.field` as function application. "
                     "Write field access without a space: `x.id` not `x .id`. "
                     "Also avoid `head!` — use `List.head?` or case on the list instead."
+                )
+            # Detect Mathlib lemma (has type `... = ...`) being applied as a function
+            if "has type" in data and ("= " in data or "↔" in data):
+                import re as _re
+
+                lemma_name = _re.search(r"Function expected at\s+(\S+)", data)
+                name = lemma_name.group(1) if lemma_name else "that lemma"
+                return (
+                    f"`{name}` is a theorem/proposition, not a function — you cannot apply it to arguments. "
+                    f"Use `simp [{name}]` or `rw [{name}]` to rewrite with it instead of passing arguments directly."
                 )
             return (
                 "You applied too many arguments — the term is already a value or proposition, not a function. "

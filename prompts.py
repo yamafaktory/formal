@@ -74,6 +74,21 @@ Critical rules:
     simp [f]
     exact something  ← will crash with "no goals" if simp already closed it
 - After `simp` leaves a residual goal, use `linarith` or `omega`, not `constructor`
+- For arithmetic goals (equality or inequality involving +, *, sum, etc.) NEVER use `constructor` —
+  use `ring`, `linarith`, `omega`, or `simp [...]` with the relevant lemmas
+- When a hypothesis `h : Except.ok X = Except.error Y` (or `h : some X = none`) is a contradiction,
+  do NOT rely on bare `simp at h` — it may leave the goal open. Use instead:
+    `exact absurd h (by simp)` or `simp [Except.ok.injEq] at h` or `cases h`
+  These guarantee the branch is closed.
+- For `iff` goals whose function uses `if cond then A else B`:
+  · Forward direction (A = B → cond): `unfold f at h; split_ifs at h with hc; · exact hc; · simp [Except.ok.injEq] at h`
+  · Backward direction (cond → f x = A): prefer `simp only [f, if_pos h]` in ONE step —
+    do NOT `unfold f` then `rw [if_pos h]`; rw closes via rfl automatically and any tactic after will crash.
+    Alternatively: `unfold f; split_ifs with hc; · rfl; · exact absurd h hc`
+- In list-induction cons cases with `hweights : ∀ x ∈ hd :: tl, x = 0` (or similar), extract facts
+  with `have h1 := hweights _ (by simp)` for the head and
+  `have h2 : ∀ x ∈ tl, x = 0 := fun x hx => hweights x (by simp [hx])` for the tail,
+  then apply the IH to the tail and close with `simp [h1, mul_zero, ih_result]` or `ring`
 - For max/min bound proofs use: `exact le_max_left _ _`, `exact le_max_right _ _`,
   `exact min_le_left _ _`, `exact min_le_right _ _`
 - For goals that are already a hypothesis, use `exact h` or `assumption`, not `constructor`
@@ -255,6 +270,12 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 - Hash codes or memory addresses
 - External state, I/O, or time
 
+String properties that are hard to verify in Lean (still mark verifiable=true, but note in assumptions):
+- `startsWith` / `isPrefixOf` with free-variable strings: `decide` and bare `simp` both fail.
+  Add to assumptions: "Proof via suffix witness: simp [String.startsWith_iff_isPrefixOf]; exact ⟨rest, by simp⟩"
+- String injectivity (f(a,b)=f(a',b') → a=a' ∧ b=b'): requires converting to List Char.
+  Add to assumptions: "Proof via String.toList_append + List.append_inj_iff"
+
 When in doubt, mark as verifiable — ordering, bounds, identity, idempotency, and
 monotonicity properties are almost always verifiable under these models.
 
@@ -335,11 +356,18 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
   List.find?_mem           : List.find? p l = some a → a ∈ l
 
+String length:
+  String.length_append     : (s ++ t).length = s.length + t.length
+  -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat
+  -- NEVER use `omega` on goals involving un-reduced String.length literals
+
 Modeling notes:
 - NEVER model a simple collection wrapper as a Lean struct with a `.data` field. Represent it
   directly as `List T` — struct wrappers cause `++` to differ from `List.append`, breaking lemmas.
 - For string injectivity proofs: reduce to `List Char` via `String.ext_iff` / `String.toList_append`,
   then use `List.append_inj_iff` or manual cancel lemmas.
+- Do NOT use `decide` on goals containing free variables — `decide` only works on closed, fully
+  concrete propositions. For `String.startsWith` goals: `simp [String.startsWith, String.isPrefixOf]`.
 
 Proof templates for membership goals:
 
@@ -413,6 +441,11 @@ Mathlib API (use EXACTLY these names):
   List.countP_append       : List.countP p (l ++ m) = List.countP p l + List.countP p m
   Option.some_injective    : some a = some b → a = b
 
+String length:
+  String.length_append     : (s ++ t).length = s.length + t.length
+  -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat before omega
+  -- NEVER call `omega` on goals with un-reduced String.length literal expressions
+
 Modeling notes:
 - NEVER model a simple collection wrapper (e.g. an aggregation class that just holds a list) as a
   Lean struct with a `.data` field. Instead, represent it directly as `List T` or `Finset T`.
@@ -423,6 +456,15 @@ Modeling notes:
   list append injectivity (`List.append_inj_iff` or manual `List.append_left_cancel`).
   This is a hard property in Lean — prefer `ring`/`omega` when the property can be rephrased
   as arithmetic instead.
+- Do NOT use `decide` on goals that contain free variables — it only works on closed, ground
+  propositions. Do NOT combine `simp [String.startsWith, String.isPrefixOf]` with `decide` —
+  the simp leaves free variables and decide will time out.
+  For `(prefix ++ rest).startsWith prefix` goals, use the suffix-witness pattern:
+    simp only [String.startsWith_iff_isPrefixOf]
+    exact ⟨rest, by simp [String.append_assoc]⟩
+  or try `apply String.isPrefixOf_self_append` / `String.startsWith_append_right` directly.
+- Mathlib lemmas (e.g. `List.length_append`) are propositions, not functions. Apply them with
+  `simp [List.length_append]` or `rw [List.length_append]` — never write `List.length_append l`.
 
 Proof templates for common membership goals:
 
