@@ -118,6 +118,10 @@ Critical rules:
 - If a hypothesis is `h : x.field = true` and the goal is `true = true`, do NOT write
   `exact h` — the field was already unfolded to `true`, so just use `rfl`. If the goal
   still contains the field name, use `simp [h]` to rewrite first.
+- NEVER use square brackets for regular hypotheses in theorem signatures. Square brackets
+  `[h : T]` are ONLY for typeclass arguments. For all other hypotheses use round brackets:
+  `(h : op = PLUS)`, `(hn : n > 0)`, etc.
+  Wrong: `theorem foo [h : op = PLUS]`  Right: `theorem foo (h : op = PLUS)`
 - To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
   If `simp [f]` makes no progress on a hypothesis `h`, try `unfold f at h` or `delta f at h`.
 - `split_ifs at h with hcond` branch ordering depends on the guard shape:
@@ -293,10 +297,10 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 
 String properties — verifiability rules:
 - `startsWith` / `isPrefixOf` with free-variable strings: mark verifiable=true.
-  Add to assumptions: "Proof via suffix witness: simp [String.startsWith_iff_isPrefixOf]; exact ⟨rest, by simp⟩"
+  Add to assumptions: "Proof via List.isPrefixOf_append_left after simp [String.isPrefixOf, String.toList_append]"
 - String injectivity WITHOUT a separator precondition (e.g. f(a,b) = prefix++a++mid++b is injective
   because prefix and mid are unique delimiters): mark verifiable=true.
-  Add to assumptions: "Proof via String.toList_append + List.append_inj_iff"
+  Add to assumptions: "Proof via String.toList_append + List.append_inj"
 - String injectivity WITH a separator precondition (the proof requires assuming the separator does
   NOT appear inside either input string): mark verifiable=FALSE.
   unverifiable_reason: "Separator-precondition string injectivity requires substring-absence reasoning
@@ -391,7 +395,8 @@ Modeling notes:
 - NEVER model a simple collection wrapper as a Lean struct with a `.data` field. Represent it
   directly as `List T` — struct wrappers cause `++` to differ from `List.append`, breaking lemmas.
 - For string injectivity proofs: reduce to `List Char` via `String.ext_iff` / `String.toList_append`,
-  then use `List.append_inj_iff` or manual cancel lemmas.
+  then use `List.append_inj h rfl` (for prefix stripping) and `List.append_inj h hlen` (for suffix).
+  NOTE: `List.append_left_cancel` and `List.append_right_cancel` do NOT exist in Mathlib.
 - Do NOT use `decide` on goals containing free variables — `decide` only works on closed, fully
   concrete propositions. For `String.startsWith` goals: `simp [String.startsWith, String.isPrefixOf]`.
 
@@ -469,15 +474,18 @@ Mathlib API (use EXACTLY these names):
 
 String length / prefix:
   String.length_append          : (s ++ t).length = s.length + t.length
-  String.isPrefixOf_append_left : s.isPrefixOf (s ++ t) = true   (try first; name may vary)
-  List.isPrefixOf_append_left   : l.isPrefixOf (l ++ m) = true   (list-level fallback)
+  List.isPrefixOf_append_left   : l.isPrefixOf (l ++ m) = true   (List-level; use this)
+  -- NOTE: `String.isPrefixOf_append_left` and `String.isPrefixOf_iff` do NOT exist in Mathlib.
   -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat before omega
   -- NEVER call `omega` on goals with un-reduced String.length literal expressions
-  -- For `p.isPrefixOf (p ++ rest) = true` — three strategies in order:
-  --   (1) exact String.isPrefixOf_append_left _ _
-  --   (2) simp only [String.isPrefixOf_iff]; exact ⟨rest, by simp [String.append_assoc]⟩
-  --   (3) simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _
+  -- For `p.isPrefixOf (p ++ rest) = true` — strategies in order:
+  --   (1) simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _
+  --   (2) simp [String.isPrefixOf, List.isPrefixOf, String.append]
+  --   (3) induction p.toList with
+  --         | nil => simp [String.isPrefixOf]
+  --         | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih
   --   Do NOT use `decide` (free variable in rest)
+  --   Do NOT use `String.isPrefixOf_append_left` or `String.isPrefixOf_iff` — they do not exist
 
 Modeling notes:
 - NEVER model a simple collection wrapper (e.g. an aggregation class that just holds a list) as a
@@ -486,16 +494,20 @@ Modeling notes:
   won't apply without extra unwrapping. Just use the list directly.
 - For string injectivity (proving f(a,b) = f(a',b') → a=a' ∧ b=b' for a format function):
   reduce strings to `List Char` using `String.ext_iff` and `String.toList_append`, then use
-  list append injectivity (`List.append_inj_iff` or manual `List.append_left_cancel`).
+  `List.append_inj h rfl` to strip a fixed prefix (gives `prefix=prefix ∧ rest_l=rest_r`, take `.2`),
+  and get length equality via `congr_arg List.length` + omega before stripping a variable-length suffix.
+  NOTE: `List.append_left_cancel`, `List.append_right_cancel`, and `List.append_inj_iff` do NOT exist.
   This is a hard property in Lean — prefer `ring`/`omega` when the property can be rephrased
   as arithmetic instead.
 - Do NOT use `decide` on goals that contain free variables — it only works on closed, ground
   propositions. Do NOT combine `simp [String.startsWith, String.isPrefixOf]` with `decide` —
   the simp leaves free variables and decide will time out.
-  For `(prefix ++ rest).startsWith prefix` goals, use the suffix-witness pattern:
-    simp only [String.startsWith_iff_isPrefixOf]
-    exact ⟨rest, by simp [String.append_assoc]⟩
-  or try `apply String.isPrefixOf_self_append` / `String.startsWith_append_right` directly.
+  For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:
+    NOTE: `String.isPrefixOf_append_left`, `String.isPrefixOf_iff`, `String.startsWith_iff_isPrefixOf`
+    do NOT exist in Mathlib. Use the List-level strategy:
+    simp only [String.isPrefixOf, String.toList_append]
+    exact List.isPrefixOf_append_left _ _
+    -- or induction on p.toList if that lemma is not found.
 - Mathlib lemmas (e.g. `List.length_append`) are propositions, not functions. Apply them with
   `simp [List.length_append]` or `rw [List.length_append]` — never write `List.length_append l`.
 
@@ -538,23 +550,27 @@ Proof templates for common goals:
         | cons b rest => simp at h
 
 (D) "format function is injective: PREFIX ++ w ++ SUFFIX = PREFIX ++ w' ++ SUFFIX → w = w'"
-    -- Use List.append_left_cancel and List.append_right_cancel via String.toList:
-    --   String.ext_iff     : s = t ↔ s.toList = t.toList
-    --   String.toList_append: (s ++ t).toList = s.toList ++ t.toList
-    --   List.append_left_cancel  : l ++ m = l ++ n → m = n   (strip fixed prefix)
-    --   List.append_right_cancel : l ++ m = n ++ m → l = n   (strip fixed suffix)
+    -- Use List.append_inj (the ONLY reliable cancel lemma — left_cancel and right_cancel do not exist):
+    --   String.ext_iff       : s = t ↔ s.toList = t.toList
+    --   String.toList_append : (s ++ t).toList = s.toList ++ t.toList
+    --   List.append_inj h hl : l₁ ++ r₁ = l₂ ++ r₂ → l₁.length = l₂.length → l₁ = l₂ ∧ r₁ = r₂
+    --   NOTE: List.append_left_cancel and List.append_right_cancel do NOT exist in Mathlib.
     intro h
     -- Convert the String equality to List Char equality
     rw [String.ext_iff] at h
     simp only [String.toList_append] at h
-    -- Strip the fixed prefix (e.g. "PREFIX".toList) with:
-    have h1 := List.append_left_cancel h   -- strips PREFIX from both sides
-    -- Strip the fixed suffix (e.g. "SUFFIX".toList) with:
-    have h2 := List.append_right_cancel h1  -- strips SUFFIX from both sides
-    -- h2 : w.toList = w'.toList  →  conclude w = w':
-    constructor
-    · exact String.ext h2
-    · ...  -- similarly for v if needed
+    -- Reassociate so the fixed prefix is isolated on the left:
+    simp only [List.append_assoc] at h
+    -- Strip the fixed prefix: both sides start with "PREFIX".toList, so lengths are rfl:
+    have h1 : w.toList ++ "SUFFIX".toList = w'.toList ++ "SUFFIX".toList :=
+      (List.append_inj h rfl).2
+    -- Strip the fixed suffix: need length equality of w.toList and w'.toList first:
+    have hlen : w.toList.length = w'.toList.length := by
+      have := congr_arg List.length h1
+      simp [List.length_append] at this; omega
+    have h2 : w.toList = w'.toList := (List.append_inj h1 hlen).1
+    -- Conclude w = w':
+    exact String.ext h2
     -- NOTE: this only works when there is NO ambiguous split point (i.e. the separator
     -- cannot appear inside w). If a separator precondition is needed, mark as unverifiable.
 

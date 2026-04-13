@@ -78,16 +78,18 @@ class LeanResult:
         if "unsolved goals" in data and "isPrefixOf" in data and "++" in data:
             return (
                 "The goal `p.isPrefixOf (p ++ rest) = true` was not closed by simp. "
+                "IMPORTANT: `String.isPrefixOf_iff` and `String.isPrefixOf_append_left` do NOT exist "
+                "in Mathlib — do not use them. "
                 "Try these strategies in order until one compiles:\n"
-                "(1) Direct lemma (if it exists):\n"
-                "  exact String.isPrefixOf_append_left _ _\n"
-                "(2) Existence-witness form (most portable — does not depend on a specific lemma name):\n"
-                "  rw [show (p ++ rest).isPrefixOf = _ from rfl]  -- skip if already in final form\n"
-                "  simp only [String.isPrefixOf_iff]\n"
-                "  exact ⟨rest, by simp [String.append_assoc]⟩\n"
-                "(3) List-level fallback:\n"
+                "(1) List-level — unfold to List.isPrefixOf and use the List lemma:\n"
                 "  simp only [String.isPrefixOf, String.toList_append]\n"
                 "  exact List.isPrefixOf_append_left _ _\n"
+                "(2) Full simp unfold:\n"
+                "  simp [String.isPrefixOf, List.isPrefixOf, String.append]\n"
+                "(3) Induction on p.toList:\n"
+                "  induction p.toList with\n"
+                "  | nil => simp [String.isPrefixOf]\n"
+                "  | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih\n"
                 "Do NOT use `decide` — free variables make the goal non-ground."
             )
         if "No goals" in data or "no goals" in data:
@@ -152,6 +154,13 @@ class LeanResult:
                 "(4) If `simp` makes no progress after `generalize`, the hypothesis still contains an unsimplified "
                 "`if`-expression — use `split_ifs at h` BEFORE `generalize` to eliminate the guard first."
             )
+        if "invalid binder annotation" in data and "not a class instance" in data:
+            return (
+                "Square brackets `[h : T]` are reserved for typeclass arguments only — Lean rejected "
+                "this because `T` is not a typeclass. "
+                "Change every `[h : T]` in the theorem signature to `(h : T)` (round brackets). "
+                "Example: `[h : op = PLUS]` → `(h : op = PLUS)`."
+            )
         if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
             import re as _re
 
@@ -173,6 +182,31 @@ class LeanResult:
                         "Lean 4 Mathlib does not have `List.length_eq_one`. "
                         "Case on the list: `cases l with | nil => simp | cons a t => cases t with "
                         "| nil => ... | cons b t => simp [List.length_cons] at h`"
+                    ),
+                    "List.append_right_cancel": (
+                        "`List.append_right_cancel` does not exist in Mathlib. "
+                        "To strip a common suffix `s` from `a ++ s = b ++ s`, use:\n"
+                        "  have hlen : a.length = b.length := by\n"
+                        "    have := congr_arg List.length h; simp [List.length_append] at this; omega\n"
+                        "  exact (List.append_inj h hlen).1\n"
+                        "`List.append_inj h hlen` requires the two PREFIX lengths to be equal, "
+                        "then gives `prefix_l = prefix_r ∧ suffix_l = suffix_r`."
+                    ),
+                    "List.append_left_cancel": (
+                        "`List.append_left_cancel` does not exist in Mathlib. "
+                        "To strip a common prefix `p` from `p ++ a = p ++ b`, use:\n"
+                        "  exact (List.append_inj h rfl).2\n"
+                        "`List.append_inj h rfl` works when the two prefixes are definitionally equal "
+                        "(same literal), giving `prefix_l = prefix_r ∧ a = b`; take `.2` for the suffix."
+                    ),
+                    "Operator.decEq": (
+                        "`Operator.decEq` does not exist as a standalone def. "
+                        "DecidableEq is a typeclass instance, not a named lemma. "
+                        "Fix options:\n"
+                        "(1) Add `deriving DecidableEq` to the `Operator` inductive definition.\n"
+                        "(2) Use `decide` directly on closed decidable goals.\n"
+                        "(3) Use `instDecidableEqOperator` if the instance was auto-generated, "
+                        "or just write the `DecidableEq Operator` instance manually."
                     ),
                 }
                 if name in _KNOWN_RENAMES:
@@ -291,12 +325,15 @@ class LeanResult:
                 "`decide` cannot work when the goal contains free variables. "
                 "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` — "
                 "that also fails to close goals with free-variable strings. "
-                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:\n"
-                "  exact String.isPrefixOf_append_left _ _\n"
-                "  -- or: simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _\n"
-                "For the suffix-witness form `String.startsWith_iff_isPrefixOf`:\n"
-                "  simp only [String.startsWith_iff_isPrefixOf]\n"
-                "  exact ⟨rest, by simp [String.append_assoc]⟩\n"
+                "NOTE: `String.isPrefixOf_append_left` and `String.isPrefixOf_iff` do NOT exist in Mathlib.\n"
+                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals, "
+                "use the List-level strategy:\n"
+                "  simp only [String.isPrefixOf, String.toList_append]\n"
+                "  exact List.isPrefixOf_append_left _ _\n"
+                "Or induction on p.toList:\n"
+                "  induction p.toList with\n"
+                "  | nil => simp [String.isPrefixOf]\n"
+                "  | cons c cs ih => simp [String.isPrefixOf, List.isPrefixOf]; exact ih\n"
                 "For non-string goals with free variables: use `simp`, `omega`, `ring`, or `linarith`."
             )
         if "omega could not prove" in data and ".length" in data:
