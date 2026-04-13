@@ -149,6 +149,15 @@ class LeanResult:
                     "The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). "
                     "Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis."
                 )
+            if ".data" in data:
+                return (
+                    "A list lemma was applied to a struct's `.data` field, but the lemma operates on "
+                    "`List` directly — the struct's `++` is not the same as `List.append`. "
+                    "Fix: (1) Add `have happ : (s ++ t).data = s.data ++ t.data := rfl` (or `by simp`) "
+                    "and `rw [happ]` before applying the lemma, or "
+                    "(2) redesign the model to use `List T` directly instead of a struct with a `.data` field — "
+                    "this is almost always cleaner: just type-alias the aggregation as `List T`."
+                )
             return (
                 "The argument has the wrong type. Common causes: "
                 "(1) Applying an induction hypothesis with the wrong proof — check that the evidence you pass "
@@ -191,6 +200,18 @@ class LeanResult:
             return "A typeclass instance is missing. Check your imports."
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
+        if data == "timeout":
+            return (
+                "The proof timed out. Try a faster strategy: "
+                "(1) Replace `simp` chains with `omega` (Nat/Int arithmetic) or `linarith`/`ring` (Rat/Real). "
+                "(2) For commutativity/linearity over Rat: `ring` closes most goals directly. "
+                "(3) For string injectivity (f a b = f a' b' → a = a' ∧ b = b'): "
+                "use `String.mk.injEq` to reduce to `List Char` equality, then `simp [List.append_inj_iff]` "
+                "to extract each component, or introduce a helper lemma that strips the fixed prefix/suffix "
+                "one step at a time using `String.append_left_cancel` / `String.append_right_cancel`. "
+                "(4) Avoid `aesop` and `decide` on non-finite or large types — they do not terminate. "
+                "(5) If the goal needs induction, make the induction hypothesis strong enough (generalize first)."
+            )
         if "function expected" in data or "Function expected" in data:
             if "∃" in data or "Exists" in data:
                 return (

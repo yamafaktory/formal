@@ -329,10 +329,17 @@ Mathlib API — use EXACTLY these names when dealing with List/Option:
   List.head?_cons          : List.head? (a :: l) = some a
   List.head?_nil           : List.head? ([] : List α) = none
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
+  List.countP_append       : List.countP p (l ++ m) = List.countP p l + List.countP p m
   Option.some_injective    : some a = some b → a = b
 
   List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
   List.find?_mem           : List.find? p l = some a → a ∈ l
+
+Modeling notes:
+- NEVER model a simple collection wrapper as a Lean struct with a `.data` field. Represent it
+  directly as `List T` — struct wrappers cause `++` to differ from `List.append`, breaking lemmas.
+- For string injectivity proofs: reduce to `List Char` via `String.ext_iff` / `String.toList_append`,
+  then use `List.append_inj_iff` or manual cancel lemmas.
 
 Proof templates for membership goals:
 
@@ -403,7 +410,19 @@ Mathlib API (use EXACTLY these names):
   List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
   List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
   List.find?_mem           : List.find? p l = some a → a ∈ l
+  List.countP_append       : List.countP p (l ++ m) = List.countP p l + List.countP p m
   Option.some_injective    : some a = some b → a = b
+
+Modeling notes:
+- NEVER model a simple collection wrapper (e.g. an aggregation class that just holds a list) as a
+  Lean struct with a `.data` field. Instead, represent it directly as `List T` or `Finset T`.
+  Struct wrappers cause Lean's `++` to differ from `List.append`, so lemmas like `List.countP_append`
+  won't apply without extra unwrapping. Just use the list directly.
+- For string injectivity (proving f(a,b) = f(a',b') → a=a' ∧ b=b' for a format function):
+  reduce strings to `List Char` using `String.ext_iff` and `String.toList_append`, then use
+  list append injectivity (`List.append_inj_iff` or manual `List.append_left_cancel`).
+  This is a hard property in Lean — prefer `ring`/`omega` when the property can be rephrased
+  as arithmetic instead.
 
 Proof templates for common membership goals:
 
