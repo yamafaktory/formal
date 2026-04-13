@@ -66,6 +66,30 @@ class LeanResult:
         if not self.errors:
             return ""
         data = self.errors[0].get("data", "")
+        if "unsolved goals" in data and ".length" in data and '< "' in data:
+            return (
+                'Each case has a remaining goal of the form `0 < "literal".length` — '
+                "these are closed concrete propositions (no free variables), so use `decide` "
+                "or `norm_num` to close them. "
+                "Add `· decide` (or `· norm_num`) after each case branch, "
+                "or add `all_goals decide` at the end to close all such goals at once. "
+                "Do NOT use `omega` — it cannot evaluate un-reduced string literal lengths."
+            )
+        if "unsolved goals" in data and "isPrefixOf" in data and "++" in data:
+            return (
+                "The goal `p.isPrefixOf (p ++ rest) = true` was not closed by simp. "
+                "Try these strategies in order until one compiles:\n"
+                "(1) Direct lemma (if it exists):\n"
+                "  exact String.isPrefixOf_append_left _ _\n"
+                "(2) Existence-witness form (most portable — does not depend on a specific lemma name):\n"
+                "  rw [show (p ++ rest).isPrefixOf = _ from rfl]  -- skip if already in final form\n"
+                "  simp only [String.isPrefixOf_iff]\n"
+                "  exact ⟨rest, by simp [String.append_assoc]⟩\n"
+                "(3) List-level fallback:\n"
+                "  simp only [String.isPrefixOf, String.toList_append]\n"
+                "  exact List.isPrefixOf_append_left _ _\n"
+                "Do NOT use `decide` — free variables make the goal non-ground."
+            )
         if "No goals" in data or "no goals" in data:
             if "cases" in data or "Cases" in data:
                 return (
@@ -267,14 +291,12 @@ class LeanResult:
                 "`decide` cannot work when the goal contains free variables. "
                 "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` — "
                 "that also fails to close goals with free-variable strings. "
-                "For `(prefix ++ rest).startsWith prefix` goals, use the suffix-witness approach:\n"
+                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:\n"
+                "  exact String.isPrefixOf_append_left _ _\n"
+                "  -- or: simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _\n"
+                "For the suffix-witness form `String.startsWith_iff_isPrefixOf`:\n"
                 "  simp only [String.startsWith_iff_isPrefixOf]\n"
                 "  exact ⟨rest, by simp [String.append_assoc]⟩\n"
-                "If `String.startsWith_iff_isPrefixOf` is not available, try:\n"
-                "  apply String.isPrefixOf_self_append  -- or String.startsWith_append_right\n"
-                "If no direct lemma works, convert to List Char:\n"
-                "  simp only [String.startsWith, String.isPrefixOf, String.toList_append]\n"
-                "  exact List.isPrefixOf_append _ _\n"
                 "For non-string goals with free variables: use `simp`, `omega`, `ring`, or `linarith`."
             )
         if "omega could not prove" in data and ".length" in data:

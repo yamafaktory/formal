@@ -76,6 +76,9 @@ Critical rules:
 - After `simp` leaves a residual goal, use `linarith` or `omega`, not `constructor`
 - For arithmetic goals (equality or inequality involving +, *, sum, etc.) NEVER use `constructor` —
   use `ring`, `linarith`, `omega`, or `simp [...]` with the relevant lemmas
+- After case-splitting on an enum/inductive, residual goals of the form `0 < "x".length`
+  or `"x".length = 1` are closed concrete propositions — use `decide` or `norm_num`, NOT `omega`.
+  Use `all_goals decide` or `all_goals norm_num` to close all such goals at once.
 - When a hypothesis `h : Except.ok X = Except.error Y` (or `h : some X = none`) is a contradiction,
   do NOT rely on bare `simp at h` — it may leave the goal open. Use instead:
     `exact absurd h (by simp)` or `simp [Except.ok.injEq] at h` or `cases h`
@@ -464,10 +467,17 @@ Mathlib API (use EXACTLY these names):
   List.countP_append       : List.countP p (l ++ m) = List.countP p l + List.countP p m
   Option.some_injective    : some a = some b → a = b
 
-String length:
-  String.length_append     : (s ++ t).length = s.length + t.length
+String length / prefix:
+  String.length_append          : (s ++ t).length = s.length + t.length
+  String.isPrefixOf_append_left : s.isPrefixOf (s ++ t) = true   (try first; name may vary)
+  List.isPrefixOf_append_left   : l.isPrefixOf (l ++ m) = true   (list-level fallback)
   -- For literal lengths: use `norm_num` or `simp` to reduce "foo".length to a concrete Nat before omega
   -- NEVER call `omega` on goals with un-reduced String.length literal expressions
+  -- For `p.isPrefixOf (p ++ rest) = true` — three strategies in order:
+  --   (1) exact String.isPrefixOf_append_left _ _
+  --   (2) simp only [String.isPrefixOf_iff]; exact ⟨rest, by simp [String.append_assoc]⟩
+  --   (3) simp only [String.isPrefixOf, String.toList_append]; exact List.isPrefixOf_append_left _ _
+  --   Do NOT use `decide` (free variable in rest)
 
 Modeling notes:
 - NEVER model a simple collection wrapper (e.g. an aggregation class that just holds a list) as a
