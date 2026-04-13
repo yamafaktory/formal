@@ -131,6 +131,29 @@ class LeanResult:
         if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
             import re as _re
 
+            # Check for specific commonly-guessed wrong lemma names and give the correct replacement
+            wrong_name = _re.search(r"[Uu]nknown (?:identifier|constant) [`']([A-Za-z_.][A-Za-z0-9_.']*)[`']", data)
+            if wrong_name:
+                name = wrong_name.group(1)
+                _KNOWN_RENAMES = {
+                    "Nat.eq_comm": "`eq_comm` (works for any type, no `Nat.` prefix needed)",
+                    "Int.eq_comm": "`eq_comm` (works for any type, no `Int.` prefix needed)",
+                    "Nat.pow_add": "`pow_add : a ^ (m + n) = a ^ m * a ^ n` (no `Nat.` prefix needed)",
+                    "Nat.pow_mul": "`pow_mul : a ^ (m * n) = (a ^ m) ^ n` (no `Nat.` prefix needed)",
+                    "pow_le_pow_right": (
+                        "`Nat.pow_le_pow_right (h : 0 < base) : n ≤ m → base^n ≤ base^m` for Nat, "
+                        "or `pow_le_pow_right (h : 1 ≤ base) : n ≤ m → base^n ≤ base^m` for ordered semirings"
+                    ),
+                    "pow_le_pow_left": ("`pow_le_pow_left (h : 0 ≤ a) (hab : a ≤ b) (n : ℕ) : a^n ≤ b^n`"),
+                    "List.length_eq_one": (
+                        "Lean 4 Mathlib does not have `List.length_eq_one`. "
+                        "Case on the list: `cases l with | nil => simp | cons a t => cases t with "
+                        "| nil => ... | cons b t => simp [List.length_cons] at h`"
+                    ),
+                }
+                if name in _KNOWN_RENAMES:
+                    return f"`{name}` does not exist. Use {_KNOWN_RENAMES[name]}."
+
             # Distinguish missing local hypotheses (e.g. h2, hne) from missing Mathlib names
             local_hyp = _re.search(r"[Uu]nknown identifier [`']([a-z_][a-zA-Z0-9_']*)[`']", data)
             if local_hyp and "." not in local_hyp.group(1):
@@ -181,10 +204,28 @@ class LeanResult:
                     "(2) redesign the model to use `List T` directly instead of a struct with a `.data` field — "
                     "this is almost always cleaner: just type-alias the aggregation as `List T`."
                 )
+            # IH used as a value when it is still a function waiting for its hypothesis argument
+            if "has type" in data and "→" in data and "but is expected to have type" in data:
+                import re as _re
+
+                # Extract the IH name if present
+                ih_name_match = _re.search(r"The argument\s+(\w+)\s+has type", data)
+                ih_name = ih_name_match.group(1) if ih_name_match else "ih"
+                # Extract the required hypothesis type (left side of the arrow in the IH type)
+                arrow_match = _re.search(r"has type\s+(.+?)\s+→", data)
+                required = arrow_match.group(1).strip() if arrow_match else "the required hypothesis"
+                return (
+                    f"`{ih_name}` is a function — it still needs its hypothesis argument before it becomes a proof. "
+                    f"You must apply it: `{ih_name} (proof_of_{required.replace(' ', '_')})` where the argument "
+                    f"proves `{required}`. "
+                    f"Common proofs for arithmetic preconditions: `Nat.le_add_right n k` (proves `n ≤ n + k`), "
+                    f"`Nat.le_refl n` (proves `n ≤ n`), or `by omega`. "
+                    f"Do NOT pass `{ih_name}` to `le_trans` or other lemmas without applying it first."
+                )
             return (
                 "The argument has the wrong type. Common causes: "
-                "(1) Applying an induction hypothesis with the wrong proof — check that the evidence you pass "
-                "matches exactly what the IH expects (e.g. a proof about `List.find? tl`, not `some x = some y`). "
+                "(1) An induction hypothesis is still a function (has `→` in its type) — you must apply it "
+                "to a proof of its precondition before using it as a value. "
                 "(2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). "
                 "Read the expected type in the error and find or derive a proof of exactly that type."
             )
@@ -248,15 +289,17 @@ class LeanResult:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
         if data == "timeout":
             return (
-                "The proof timed out. Try a faster strategy: "
-                "(1) Replace `simp` chains with `omega` (Nat/Int arithmetic) or `linarith`/`ring` (Rat/Real). "
-                "(2) For commutativity/linearity over Rat: `ring` closes most goals directly. "
-                "(3) For string injectivity (f a b = f a' b' → a = a' ∧ b = b'): "
-                "use `String.mk.injEq` to reduce to `List Char` equality, then `simp [List.append_inj_iff]` "
-                "to extract each component, or introduce a helper lemma that strips the fixed prefix/suffix "
-                "one step at a time using `String.append_left_cancel` / `String.append_right_cancel`. "
-                "(4) Avoid `aesop` and `decide` on non-finite or large types — they do not terminate. "
-                "(5) If the goal needs induction, make the induction hypothesis strong enough (generalize first)."
+                "The proof timed out. Try a faster strategy:\n"
+                "(1) Replace `simp` chains with `omega` (Nat/Int arithmetic) or `linarith`/`ring` (Rat/Real).\n"
+                "(2) For commutativity/linearity over Rat: `ring` closes most goals directly.\n"
+                "(3) For a property about a specific enum/constructor value (e.g. `h : op = PLUS`): "
+                "use `subst h` to replace the variable with the concrete value everywhere, "
+                "then `simp [PLUS.getPrecedence, PLUS.print, ...]` to reduce the multi-branch if/match. "
+                "Do NOT use `decide` or `aesop` on open inductive types — they do not terminate.\n"
+                "(4) For string injectivity (f a b = f a' b' → a = a' ∧ b = b'): "
+                "use `String.mk.injEq` to reduce to `List Char` equality, then `simp [List.append_inj_iff]`.\n"
+                "(5) Avoid `aesop` and `decide` on non-finite or large types — they do not terminate.\n"
+                "(6) If the goal needs induction, make the induction hypothesis strong enough (generalize first)."
             )
         if "function expected" in data or "Function expected" in data:
             if "∃" in data or "Exists" in data:

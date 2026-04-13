@@ -119,6 +119,31 @@ def run_feature_pipeline(
 
     def _verify_one(prop: Property) -> PropertyResult:
         fn = fn_map.get(prop.function)
+
+        # If the property references a named function that wasn't extracted, we have
+        # no source code to re-implement in Lean — skip rather than sending an empty
+        # prompt and burning 480s on a blind type-reconstruction attempt.
+        if fn is None and prop.function and prop.function not in fn_map:
+            reason = (
+                f"Source function '{prop.function}' was not extracted as a pure function — "
+                "cannot reconstruct its behavior for Lean verification."
+            )
+            log(_log, "SKIP", f"{prop.id} — {reason}")
+            return PropertyResult(
+                property_id=prop.id,
+                description=prop.description,
+                kind=prop.kind,
+                function=prop.function,
+                verified=False,
+                lean_code="",
+                lean_output="",
+                retries=0,
+                reason=reason,
+                status="unverifiable",
+                preconditions=prop.preconditions,
+                assumptions=prop.assumptions,
+            )
+
         try:
             return verify_property(prop, fn, max_retries=max_retries, language=language)
         except Exception as e:

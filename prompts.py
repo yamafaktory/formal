@@ -85,6 +85,14 @@ Critical rules:
   · Backward direction (cond → f x = A): prefer `simp only [f, if_pos h]` in ONE step —
     do NOT `unfold f` then `rw [if_pos h]`; rw closes via rfl automatically and any tactic after will crash.
     Alternatively: `unfold f; split_ifs with hc; · rfl; · exact absurd h hc`
+- For properties that hold for a specific enum/constructor value (e.g. `h : op = PLUS`):
+  use `subst h` (if the variable appears alone) or `simp only [h]` to substitute the specific value
+  everywhere, then `simp [PLUS.someField, ...]` to reduce the multi-branch if/match.
+  Do NOT use `decide` or `aesop` on open inductive types — they will not terminate.
+  Pattern:
+    intro h          -- h : op = PLUS
+    subst h          -- replaces all `op` with `PLUS`
+    simp [PLUS.getPrecedence, PLUS.print, ...]   -- reduces branches
 - In list-induction cons cases with `hweights : ∀ x ∈ hd :: tl, x = 0` (or similar), extract facts
   with `have h1 := hweights _ (by simp)` for the head and
   `have h2 : ∀ x ∈ tl, x = 0 := fun x hx => hweights x (by simp [hx])` for the tail,
@@ -148,6 +156,16 @@ Nat / Int arithmetic:
   Nat.succ_ne_zero         : Nat.succ n ≠ 0
   Nat.lt_irrefl            : ¬ n < n
   Nat.le_of_lt_succ        : n < m + 1 → n ≤ m
+  Nat.pow_le_pow_right     : 0 < x → n ≤ m → x ^ n ≤ x ^ m   (Nat only)
+  pow_le_pow_right         : 1 ≤ x → n ≤ m → x ^ n ≤ x ^ m   (ordered semiring)
+  pow_le_pow_left          : 0 ≤ a → a ≤ b → ∀ n, a ^ n ≤ b ^ n
+  pow_add                  : a ^ (m + n) = a ^ m * a ^ n
+  pow_mul                  : a ^ (m * n) = (a ^ m) ^ n
+  mul_pow                  : (a * b) ^ n = a ^ n * b ^ n
+  one_pow                  : (1 : α) ^ n = 1
+  pow_zero                 : a ^ 0 = 1
+  pow_succ                 : a ^ (n + 1) = a ^ n * a
+  eq_comm                  : a = b ↔ b = a   (NOT Nat.eq_comm — eq_comm works for all types)
 
 Key tactic patterns:
 - Destructure a length-1 list into a concrete singleton (do NOT use List.length_eq_one):
@@ -270,11 +288,16 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 - Hash codes or memory addresses
 - External state, I/O, or time
 
-String properties that are hard to verify in Lean (still mark verifiable=true, but note in assumptions):
-- `startsWith` / `isPrefixOf` with free-variable strings: `decide` and bare `simp` both fail.
+String properties — verifiability rules:
+- `startsWith` / `isPrefixOf` with free-variable strings: mark verifiable=true.
   Add to assumptions: "Proof via suffix witness: simp [String.startsWith_iff_isPrefixOf]; exact ⟨rest, by simp⟩"
-- String injectivity (f(a,b)=f(a',b') → a=a' ∧ b=b'): requires converting to List Char.
+- String injectivity WITHOUT a separator precondition (e.g. f(a,b) = prefix++a++mid++b is injective
+  because prefix and mid are unique delimiters): mark verifiable=true.
   Add to assumptions: "Proof via String.toList_append + List.append_inj_iff"
+- String injectivity WITH a separator precondition (the proof requires assuming the separator does
+  NOT appear inside either input string): mark verifiable=FALSE.
+  unverifiable_reason: "Separator-precondition string injectivity requires substring-absence reasoning
+  that Lean/Mathlib cannot discharge within practical timeouts — always times out."
 
 When in doubt, mark as verifiable — ordering, bounds, identity, idempotency, and
 monotonicity properties are almost always verifiable under these models.
@@ -466,7 +489,7 @@ Modeling notes:
 - Mathlib lemmas (e.g. `List.length_append`) are propositions, not functions. Apply them with
   `simp [List.length_append]` or `rw [List.length_append]` — never write `List.length_append l`.
 
-Proof templates for common membership goals:
+Proof templates for common goals:
 
 (A) "result of a singleton-guarded function is a member of the list"
     -- After casing to [a] and simplifying h to result = a:
@@ -503,6 +526,27 @@ Proof templates for common membership goals:
           simp at h          -- some a.field = some result  →  a.field = result
           exact ⟨a, List.mem_of_mem_filter (by rw [hf]; simp), h⟩
         | cons b rest => simp at h
+
+(D) "format function is injective: PREFIX ++ w ++ SUFFIX = PREFIX ++ w' ++ SUFFIX → w = w'"
+    -- Use List.append_left_cancel and List.append_right_cancel via String.toList:
+    --   String.ext_iff     : s = t ↔ s.toList = t.toList
+    --   String.toList_append: (s ++ t).toList = s.toList ++ t.toList
+    --   List.append_left_cancel  : l ++ m = l ++ n → m = n   (strip fixed prefix)
+    --   List.append_right_cancel : l ++ m = n ++ m → l = n   (strip fixed suffix)
+    intro h
+    -- Convert the String equality to List Char equality
+    rw [String.ext_iff] at h
+    simp only [String.toList_append] at h
+    -- Strip the fixed prefix (e.g. "PREFIX".toList) with:
+    have h1 := List.append_left_cancel h   -- strips PREFIX from both sides
+    -- Strip the fixed suffix (e.g. "SUFFIX".toList) with:
+    have h2 := List.append_right_cancel h1  -- strips SUFFIX from both sides
+    -- h2 : w.toList = w'.toList  →  conclude w = w':
+    constructor
+    · exact String.ext h2
+    · ...  -- similarly for v if needed
+    -- NOTE: this only works when there is NO ambiguous split point (i.e. the separator
+    -- cannot appear inside w). If a separator precondition is needed, mark as unverifiable.
 
 Output ONLY a lean4 code block with the complete theorem and proof."""
 
