@@ -27,7 +27,17 @@ Code:
 
 
 AUTOFORMALIZE_SYSTEM = """You are a Lean 4 expert. Output ONLY valid Lean 4 code in a lean4 code block.
-Use Lean 4 syntax — not Lean 3. All types must be from Lean 4 / Mathlib."""
+Use Lean 4 syntax — not Lean 3. All types must be from Lean 4 / Mathlib.
+
+Model text as `List Char`, never as Lean's `String`. `String.startsWith` is implemented
+through `String.Slice.Pattern.ForwardPattern`, `String.isPrefixOf` does not reduce, and
+`String.mk` / `String.length` blow the recursion depth — goals stated over `String` are
+not provable in practice. The same properties over `List Char` close with `simp`,
+`List.isPrefixOf`, `List.prefix_append`, `List.append_inj` and `List.take_append`.
+
+So write `def f (s : List Char) : List Char := ...` rather than taking a `String`, and
+state the theorem over `List Char`. Use string literals only where the value is concrete
+and never destructured."""
 
 AUTOFORMALIZE_USER = """Translate this specification into a Lean 4 theorem statement.
 
@@ -286,7 +296,7 @@ A property is VERIFIABLE if:
     equality / comparison  →  = or ≤ on the relevant type
     membership             →  ∈ Finset / ∈ List
     optional / nullable    →  Option T
-    string equality        →  = on String (which has DecidableEq)
+    text / string          →  List Char (NOT String — see the modeling note below)
     ordered collection     →  List T or Finset T
     map / dictionary       →  Finset (K × V) or a function K → Option V
 - The proof does not require axioms about runtime behaviour
@@ -294,7 +304,7 @@ A property is VERIFIABLE if:
 
 Modeling assumptions applied during verification:
 - Floating-point types are modeled as Rat (rationals) — NaN, Inf, IEEE 754 rounding do not exist.
-- String equality is structural (= on String), not reference equality.
+- Strings are modeled as List Char, not Lean's String. String equality is structural.
 - Collections are modeled as Finset or List with standard membership.
 
 A property is UNVERIFIABLE only if it fundamentally depends on something outside these models:
@@ -305,10 +315,10 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 
 String properties — verifiability rules:
 - `startsWith` / `isPrefixOf` with free-variable strings: mark verifiable=true.
-  Add to assumptions: "Proof: simp only [String.isPrefixOf, String.toList_append]; rfl"
+  Add to assumptions: "Strings modeled as List Char; proof via simp [List.isPrefixOf]"
 - String injectivity WITHOUT a separator precondition (e.g. f(a,b) = prefix++a++mid++b is injective
   because prefix and mid are unique delimiters): mark verifiable=true.
-  Add to assumptions: "Proof via String.toList_append + List.append_inj"
+  Add to assumptions: "Strings modeled as List Char; proof via List.append_inj"
 - String injectivity WITH a separator precondition (the proof requires assuming the separator does
   NOT appear inside either input string): mark verifiable=FALSE.
   unverifiable_reason: "Separator-precondition string injectivity requires substring-absence reasoning
