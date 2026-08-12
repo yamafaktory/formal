@@ -5,7 +5,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-LEAN_PROJECT_DIR = Path(os.getenv("LEAN_PROJECT_DIR", "/lean_project"))
+from .paths import LEAN_PROJECT_DIR
+
 LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
 AUTO_TACTIC_TIMEOUT = 20  # seconds for the auto-tactic pre-pass
 

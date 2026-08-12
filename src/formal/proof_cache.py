@@ -12,13 +12,14 @@ Only successful (verified) results are cached — failures are always retried.
 import hashlib
 import json
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .paths import PROOF_CACHE_DIR
 
 if TYPE_CHECKING:
     from .property_verifier import PropertyResult
 
-_CACHE_DIR = Path(os.getenv("PROOF_CACHE_DIR", "/app/results/cache"))
+_CACHE_DIR = PROOF_CACHE_DIR
 _CACHE_TTL_DAYS = int(os.getenv("PROOF_CACHE_TTL_DAYS", "7"))
 
 

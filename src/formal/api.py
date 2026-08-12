@@ -1,6 +1,5 @@
 import json
 import logging
-import pathlib
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -10,6 +9,7 @@ from .feature_pipeline import (
     run_feature_pipeline,
     run_feature_pipeline_from_file,
 )
+from .paths import RESULTS_DIR
 from .pipeline import PipelineResult, run_pipeline
 
 logger = logging.getLogger("formal.api")
@@ -168,7 +168,6 @@ def verify_feature(req: VerifyFeatureRequest):
 
 
 def _save(prefix: str, label: str, data: dict):
-    pathlib.Path("/app/results").mkdir(exist_ok=True)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     safe = "".join(c if c.isalnum() else "_" for c in label)
-    with open(f"/app/results/{prefix}_{safe}.json", "w") as f:
-        json.dump(data, f, indent=2)
+    (RESULTS_DIR / f"{prefix}_{safe}.json").write_text(json.dumps(data, indent=2))
