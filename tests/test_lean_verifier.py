@@ -283,3 +283,46 @@ class TestVerifyBatch:
             lambda source, timeout=None: LeanResult(success=False, output="timed out", errors=[]),
         )
         assert verify_batch(self._entries()) is None
+
+
+class TestStringPrefixHint:
+    """The String-level prefix recipe was verified against Lean v4.29.0.
+
+    Every String-level route fails there (startsWith goes through the slice
+    pattern API), so the hint must steer to List Char rather than to a tactic.
+    """
+
+    def _hint(self, data):
+        return LeanResult(success=False, output="", errors=[{"severity": "error", "data": data}]).hint_for_error()
+
+    def test_fires_on_a_slice_pattern_error(self):
+        data = "unsolved goals a b : String ⊢ String.Slice.Pattern.ForwardPattern.startsWith a (a ++ b).toSlice"
+        assert "List Char" in self._hint(data)
+
+    def test_fires_on_definitional_equality_for_startswith(self):
+        data = "Tactic `rfl` failed: The left-hand side (a ++ b).startsWith a is not definitionally equal"
+        assert "String.toList_append" in self._hint(data)
+
+    def test_fires_on_unsolved_isprefixof_over_append(self):
+        data = "unsolved goals ⊢ p.isPrefixOf (p ++ rest) = true"
+        assert "List.isPrefixOf" in self._hint(data)
+
+    def test_free_variable_error_about_strings_gets_the_prefix_hint(self):
+        data = "Expected type must not contain free variables: String.isPrefixOf a b"
+        assert "List Char" in self._hint(data)
+
+    def test_free_variable_error_elsewhere_keeps_generic_advice(self):
+        data = "Expected type must not contain free variables: n + m"
+        hint = self._hint(data)
+        assert "linarith" in hint
+        assert "List Char" not in hint
+
+    def test_recommends_tolist_over_data(self):
+        hint = self._hint("(a ++ b).startsWith a is not definitionally equal")
+        assert ".toList" in hint
+        assert "NOT `.data`" in hint
+
+    def test_warns_off_the_lemmas_that_do_not_exist(self):
+        hint = self._hint("(a ++ b).startsWith a is not definitionally equal")
+        for absent in ("String.isPrefixOf_iff", "String.isPrefixOf_append_left", "List.isPrefixOf_append_left"):
+            assert absent in hint

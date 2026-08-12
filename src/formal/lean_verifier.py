@@ -23,6 +23,26 @@ AUTO_TACTIC_TIMEOUT = 20  # seconds for the auto-tactic pre-pass
 _AUTO_TACTIC_STEPS = ("rfl", "omega", "norm_num", "linarith", "ring", "decide", "simp")
 AUTO_TACTICS = "first | " + " | ".join(f"({step}; done)" for step in _AUTO_TACTIC_STEPS)
 
+# Verified against Lean v4.29.0 / Mathlib: every String-level route to a prefix
+# goal fails, because String.startsWith now goes through the slice pattern API
+# (String.Slice.Pattern.ForwardPattern) and String.isPrefixOf does not reduce.
+# Converting to List Char with String.toList_append does work.
+STRING_PREFIX_HINT = (
+    "String-level prefix goals cannot be closed in this Lean version: `String.startsWith` is "
+    "implemented through `String.Slice.Pattern.ForwardPattern`, and `String.isPrefixOf` does not "
+    "reduce either — `simp`, `rfl`, `decide` and unfolding all fail on them.\n"
+    "Convert to `List Char`, where the goal is trivial:\n"
+    "  simp [String.toList_append, List.isPrefixOf]\n"
+    "This closes goals of the form `a.toList.isPrefixOf (a ++ b).toList = true`.\n"
+    "Better still, state the property over `List Char` in the first place — model the function as "
+    "taking `List Char` rather than `String`, and `simp [List.isPrefixOf]`, `List.prefix_append` "
+    "and `List.take_append` all apply directly.\n"
+    "Use `.toList`, NOT `.data` — `.data` does not reduce. Do NOT use `String.isPrefixOf_iff`, "
+    "`String.isPrefixOf_append_left` or `List.isPrefixOf_append_left`: they do not exist. "
+    "`String.toList_append` takes no explicit arguments, so pass it to `simp`, never `exact`."
+)
+
+
 # ── Lean environment cache ─────────────────────────────────────────────────────
 # Running `lake env lean` on every verification call re-invokes `lake` just to
 # set environment variables. We capture those variables once at first use and
@@ -88,35 +108,10 @@ class LeanResult:
                 "or add `all_goals decide` at the end to close all such goals at once. "
                 "Do NOT use `omega` — it cannot evaluate un-reduced string literal lengths."
             )
-        if "not definitionally equal" in data and "isPrefixOf" in data:
-            return (
-                "`String.isPrefixOf` is implemented externally (C FFI) and is NOT definitionally "
-                "reducible — `rfl` fails at the `String` level. "
-                "But `List.isPrefixOf` IS definitionally reducible. "
-                "Convert to `List.isPrefixOf` first, then close with `rfl`:\n"
-                "  simp only [String.isPrefixOf, String.toList_append]\n"
-                "  rfl\n"
-                "After `simp only [String.isPrefixOf, String.toList_append]`, the goal is at the "
-                "`List Char` level where Lean's kernel can step through each concrete character "
-                "in the prefix definitionally, so `rfl` succeeds even with a free-variable suffix. "
-                "If `rfl` still fails, use `simp [List.isPrefixOf]` as a fallback — but prefer `rfl` "
-                "since `simp [List.isPrefixOf]` can loop. "
-                "Do NOT use `decide` or `native_decide` — they require ground terms."
-            )
-        if "unsolved goals" in data and "isPrefixOf" in data and "++" in data:
-            return (
-                "The goal `p.isPrefixOf (p ++ rest) = true` was not closed. "
-                "IMPORTANT: `String.isPrefixOf_iff`, `String.isPrefixOf_append_left`, and "
-                "`List.isPrefixOf_append_left` do NOT exist in Mathlib — do not use them.\n"
-                "`String.isPrefixOf` is @[extern] (C FFI) and not definitionally reducible, but "
-                "`List.isPrefixOf` IS. Convert to List level then close with `rfl`:\n"
-                "  simp only [String.isPrefixOf, String.toList_append]\n"
-                "  rfl\n"
-                "After `simp only`, Lean's kernel reduces `List.isPrefixOf` character-by-character "
-                "through the concrete prefix, so `rfl` closes the goal even with free-variable suffixes. "
-                "Do NOT use `decide` or `simp [List.isPrefixOf]` — `decide` needs ground terms "
-                "and `simp [List.isPrefixOf]` can loop on this goal."
-            )
+        if "not definitionally equal" in data and ("isPrefixOf" in data or "startsWith" in data):
+            return STRING_PREFIX_HINT
+        if "unsolved goals" in data and ("isPrefixOf" in data or "startsWith" in data) and "++" in data:
+            return STRING_PREFIX_HINT
         if "No goals" in data or "no goals" in data:
             if "cases" in data or "Cases" in data:
                 return (
@@ -376,18 +371,12 @@ class LeanResult:
                 )
             return "A typeclass instance is missing. Check your imports."
         if "Expected type must not contain free variables" in data:
+            if "isPrefixOf" in data or "startsWith" in data or "String" in data:
+                return STRING_PREFIX_HINT
             return (
                 "`decide` cannot work when the goal contains free variables. "
-                "Do NOT use `decide`, and do NOT use `simp [String.startsWith, String.isPrefixOf]` alone — "
-                "that also fails to close goals with free-variable strings. "
-                "NOTE: `String.isPrefixOf_append_left`, `List.isPrefixOf_append_left`, and "
-                "`String.isPrefixOf_iff` do NOT exist in Mathlib — do not use any of them.\n"
-                "For `p.isPrefixOf (p ++ rest) = true` or `(p ++ rest).startsWith p` goals:\n"
-                "  simp only [String.isPrefixOf, String.toList_append]\n"
-                "  simp [List.isPrefixOf]\n"
-                "This works because the prefix characters are concrete — simp reduces them one-by-one "
-                "regardless of free variables in the suffix.\n"
-                "For non-string goals with free variables: use `simp`, `omega`, `ring`, or `linarith`."
+                "Use `simp`, `omega`, `ring`, or `linarith` instead, or case-split on the "
+                "free variables until the remaining goals are ground."
             )
         if "omega could not prove" in data and ".length" in data:
             return (
@@ -406,6 +395,8 @@ class LeanResult:
                 "String.length]` — `String.length` unfolds recursively and causes maximum recursion depth errors.\n"
                 "Also do NOT use `String.length_mk` — it does not exist in Mathlib."
             )
+        if "ForwardPattern" in data or "Slice.Pattern" in data:
+            return STRING_PREFIX_HINT
         if "has already been declared" in data:
             return (
                 "The generated code redeclares a name that Mathlib already defines "
