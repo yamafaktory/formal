@@ -14,10 +14,13 @@ import json
 import os
 from typing import TYPE_CHECKING
 
+from .logger import get_logger, log
 from .paths import PROOF_CACHE_DIR
 
 if TYPE_CHECKING:
     from .property_verifier import PropertyResult
+
+_log = get_logger(__name__)
 
 _CACHE_DIR = PROOF_CACHE_DIR
 _CACHE_TTL_DAYS = int(os.getenv("PROOF_CACHE_TTL_DAYS", "7"))
@@ -79,7 +82,11 @@ def load(key: str) -> "PropertyResult | None":
 
 
 def save(key: str, result: "PropertyResult") -> None:
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = _CACHE_DIR / f"{key}.json"
-    path.write_text(json.dumps(result.__dict__, indent=2))
-    _evict_expired()
+    """Best-effort — the cache is an optimisation and never changes a verdict."""
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        path = _CACHE_DIR / f"{key}.json"
+        path.write_text(json.dumps(result.__dict__, indent=2))
+        _evict_expired()
+    except OSError as e:
+        log(_log, "CACHE", f"could not write {key[:12]}… — {e}")

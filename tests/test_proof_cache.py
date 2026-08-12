@@ -168,3 +168,31 @@ class TestTTLEviction:
         save(key2, make_result(property_id="prop_2"))
 
         assert cache_file.exists()
+
+
+class TestSaveFailuresAreNonFatal:
+    """A cache write must never change a verification verdict."""
+
+    def test_unwritable_directory_does_not_raise(self, tmp_path, monkeypatch):
+        import formal.proof_cache as pc
+
+        locked = tmp_path / "locked"
+        locked.mkdir(mode=0o500)
+        monkeypatch.setattr(pc, "_CACHE_DIR", locked / "cache")
+
+        key = cache_key("code", "desc", "kind", "formal", [], [])
+        save(key, make_result())
+
+    def test_unwritable_file_does_not_raise(self, tmp_cache, monkeypatch):
+        key = cache_key("code", "desc", "kind", "formal", [], [])
+        blocker = tmp_cache / f"{key}.json"
+        blocker.mkdir()
+
+        save(key, make_result())
+
+    def test_a_healthy_cache_still_writes(self, tmp_cache):
+        key = cache_key("code", "desc", "kind", "formal", [], [])
+        save(key, make_result())
+
+        assert (tmp_cache / f"{key}.json").is_file()
+        assert load(key) is not None
