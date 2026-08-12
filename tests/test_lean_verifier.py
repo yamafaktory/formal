@@ -1,6 +1,8 @@
 """Tests for lean_verifier — hint logic, syntax check, auto-tactic substitution."""
 
-from formal.lean_verifier import LeanResult, check_syntax, with_auto_tactics
+import time
+
+from formal.lean_verifier import LeanResult, check_syntax, sweep_stale_temps, with_auto_tactics
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,3 +147,35 @@ class TestWithAutoTactics:
     def test_no_sorry_unchanged(self):
         code = "theorem foo : 1 = 1 := by rfl"
         assert with_auto_tactics(code) == code
+
+
+class TestSweepStaleTemps:
+    """Scratch files stranded by a killed run must not accumulate."""
+
+    def _aged(self, path, seconds_old):
+        import os as _os
+
+        path.write_text("import Mathlib\n")
+        stamp = time.time() - seconds_old
+        _os.utime(path, (stamp, stamp))
+        return path
+
+    def test_removes_a_stranded_file(self, tmp_path):
+        old = self._aged(tmp_path / "tmp_dead.lean", 7200)
+        sweep_stale_temps(tmp_path)
+        assert not old.exists()
+
+    def test_keeps_a_file_from_a_live_run(self, tmp_path):
+        fresh = self._aged(tmp_path / "tmp_live.lean", 5)
+        sweep_stale_temps(tmp_path)
+        assert fresh.exists()
+
+    def test_leaves_real_lean_sources_alone(self, tmp_path):
+        source = self._aged(tmp_path / "Warmup.lean", 7200)
+        keep = self._aged(tmp_path / ".gitkeep", 7200)
+        sweep_stale_temps(tmp_path)
+        assert source.exists()
+        assert keep.exists()
+
+    def test_missing_directory_is_harmless(self, tmp_path):
+        sweep_stale_temps(tmp_path / "absent")

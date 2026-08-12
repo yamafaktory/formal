@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -457,6 +458,20 @@ class LeanResult:
 # ── Verification ───────────────────────────────────────────────────────────────
 
 
+STALE_TEMP_AGE = 3600
+
+
+def sweep_stale_temps(verify_dir: Path) -> None:
+    """Remove scratch files stranded by a killed run; live ones are far younger."""
+    cutoff = time.time() - STALE_TEMP_AGE
+    for path in verify_dir.glob("tmp_*.lean"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def verify(lean_code: str, timeout: int | None = None) -> LeanResult:
     """Write lean_code to a temp file and verify it with lean --json."""
     if not lean_code or not lean_code.strip():
@@ -464,6 +479,7 @@ def verify(lean_code: str, timeout: int | None = None) -> LeanResult:
 
     verify_dir = LEAN_PROJECT_DIR / "Verify"
     verify_dir.mkdir(parents=True, exist_ok=True)
+    sweep_stale_temps(verify_dir)
 
     with tempfile.NamedTemporaryFile(suffix=".lean", mode="w", dir=verify_dir, delete=False, prefix="tmp_") as f:
         f.write(lean_code)
