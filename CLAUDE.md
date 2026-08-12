@@ -2,11 +2,11 @@
 
 ## Python
 
-After every Python file change, run:
+The package lives in `src/formal/`. After every Python file change, run:
 
 ```sh
-ruff check .
-ruff format .
+uv run ruff check .
+uv run ruff format .
 ```
 
 ## Shell
@@ -14,7 +14,7 @@ ruff format .
 After every shell file change, run:
 
 ```sh
-shfmt -w .
+shfmt -w setup.sh formal
 shellcheck setup.sh formal
 ```
 
@@ -23,7 +23,7 @@ shellcheck setup.sh formal
 Tests live in `tests/`. Run them with:
 
 ```sh
-python3 -m pytest --tb=short
+uv run pytest --tb=short
 ```
 
 When adding new code, add tests for anything that is pure or can be tested

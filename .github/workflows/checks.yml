@@ -10,12 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v3
+      - uses: astral-sh/setup-uv@v5
         with:
-          args: check .
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: format --check .
+          enable-cache: true
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
 
   shfmt:
     runs-on: ubuntu-latest
@@ -25,7 +24,7 @@ jobs:
           SHFMT_VERSION=$(curl -sSL https://api.github.com/repos/mvdan/sh/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
           curl -sSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
           chmod +x /usr/local/bin/shfmt
-          shfmt -d .
+          shfmt -d setup.sh formal
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -37,8 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
-      - run: pip install pytest
-      - run: python -m pytest --tb=short
+          enable-cache: true
+      - run: uv run pytest --tb=short

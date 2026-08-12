@@ -1,7 +1,6 @@
 # formal
 
 [![Checks](https://github.com/yamafaktory/formal/actions/workflows/checks.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/checks.yml)
-[![Publish Docker image](https://github.com/yamafaktory/formal/actions/workflows/publish.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/publish.yml)
 
 An LLM-driven property checker for code, backed by Lean 4 as a proof engine.
 
@@ -56,11 +55,18 @@ output so you can judge whether the LLM's interpretation matches your intent.
 
 ## Setup
 
-### 1. Configure your LLM provider
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). Everything
+else — the Lean toolchain, Mathlib, the Python environment — is installed by the
+setup script.
 
 ```sh
 ./setup.sh
 ```
+
+It syncs the Python environment, installs [elan](https://github.com/leanprover/elan)
+and the pinned Lean toolchain, downloads prebuilt Mathlib oleans, and then asks
+which LLM backend to use. Re-running it is safe: steps that are already done are
+skipped.
 
 Two backends:
 
@@ -77,27 +83,22 @@ Two backends:
 | LM Studio | `http://localhost:1234/v1` |
 | Any other | Any OpenAI-compatible endpoint |
 
-`setup.sh` writes the right `COMPOSE_FILE` to `.env` automatically. Available models
-are fetched from `/v1/models`; if unsupported, enter the model name manually.
+Settings are written to `.env`. Available models are fetched from `/v1/models`; if
+unsupported, enter the model name manually.
 
-### 2. Start
-
-```sh
-docker compose up
-```
-
-Pulls the prebuilt image from GHCR — no local build needed. To build from source:
-
-```sh
-docker compose up --build
-```
+Then check the installation:
 
 ```sh
 ./formal status
-# {"status":"ok"}
 ```
 
-### 3. Add this to your project's AI agent instructions
+Optionally put `formal` on your `PATH` for use from any directory:
+
+```sh
+uv tool install .
+```
+
+### Add this to your project's AI agent instructions
 
 For Claude Code, add to your `CLAUDE.md`. For Cursor, Copilot, or other agents, add
 to the equivalent instructions file.
@@ -105,12 +106,11 @@ to the equivalent instructions file.
 ````markdown
 ## Formal Verification
 
-A property checker runs at http://localhost:1337. After implementing any feature
-that contains non-trivial pure logic (calculations, transformations, validations,
-business rules), verify it:
+After implementing any feature that contains non-trivial pure logic (calculations,
+transformations, validations, business rules), verify it:
 
 ```sh
-~/dev/formal/formal verify /absolute/path/to/file.java
+~/dev/formal/formal verify path/to/file.java
 ```
 
 **When to verify:** after writing or modifying pure domain logic — pricing
@@ -129,28 +129,39 @@ intent, the proof result may not reflect real behaviour.
 
 ## CLI
 
-The `formal` script is the primary interface. All commands talk to `localhost:1337`.
+The `formal` script is the primary interface — it runs the pipeline in-process,
+no daemon involved.
 
 ```sh
-# Watch live logs — see generated Lean code, proof attempts, retries in real time
-./formal watch
-
 # Verify a file (language auto-detected from extension)
 ./formal verify path/to/Feature.java
 
 # Verify inline code
 ./formal verify --code 'def f(x): return max(0, x)' --lang Python
 
-# Full JSON response
-./formal verify path/to/Feature.java --full
+# Full JSON result
+./formal verify path/to/Feature.java --json
 
-# Health check
+# Verify properties one at a time instead of in parallel
+./formal verify path/to/Feature.java --no-parallel
+
+# Show resolved paths, toolchain state and LLM backend
 ./formal status
+
+# Re-run installation and backend configuration
+./formal setup
+
+# Serve the HTTP API on 127.0.0.1:1337
+./formal serve
 ```
 
-### Watch output
+`verify` exits `0` when every verifiable property was proved, `1` otherwise, so it
+can gate a commit hook or CI step.
 
-`formal watch` streams structured logs from the container:
+### Progress output
+
+Progress streams to stderr while the run happens, so the result on stdout stays
+pipeable:
 
 ```
 [PIPELINE] Decomposing feature [Java]: SomeService.java
@@ -175,6 +186,8 @@ The `formal` script is the primary interface. All commands talk to `localhost:13
 File:    path/to/Feature.java
 Summary: Applies discount and computes final price
 Score:   full  (4/5 verified, 1 unverifiable)
+Pure functions: computePrice, applyDiscount
+Impure parts: 2 side effects (not verifiable)
 ─────────────────────────────────────────
   ✓ [bound] discount is always between 0 and 1
       Preconditions: discount is a float
@@ -191,6 +204,10 @@ Preconditions and assumptions are shown for every property so you can verify tha
 the LLM's interpretation of your code matches what you intended.
 
 ## API reference
+
+The HTTP API is optional — start it with `./formal serve` (127.0.0.1:1337 by
+default). It exists for clients that cannot shell out, such as an agent running in
+a sandbox without Lean installed.
 
 ### `POST /verify-feature`
 
@@ -276,15 +293,20 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | Variable | Description |
 |---|---|
 | `LLM_BACKEND` | `claude-cli` or `openai` (set by `setup.sh`) |
-| `HOST_CLAUDE_CONFIG_DIR` | Host path to the Claude config directory to mount into the container (default: `~/.claude`). Use this to select a different account, e.g. `~/.claude-work`. |
+| `CLAUDE_CONFIG_DIR` | Claude config directory (default: `~/.claude`). Use this to select a different account, e.g. `~/.claude-work`. |
 | `LLM_BASE_URL` | Base URL of any OpenAI-compatible endpoint |
 | `LLM_API_KEY` | API key (leave empty for local models) |
 | `LLM_MODEL` | Model name as accepted by the provider |
 | `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
-| `PROOF_CACHE_DIR` | Directory for cached proof results (default: `results/cache/`) |
+| `FORMAL_HOME` | Root for everything below (default: the checkout) |
+| `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib (default: `$FORMAL_HOME/lean_project`) |
+| `FORMAL_RESULTS_DIR` | Directory for saved results (default: `$FORMAL_HOME/results`) |
+| `PROOF_CACHE_DIR` | Directory for cached proof results (default: `$FORMAL_RESULTS_DIR/cache`) |
 | `PROOF_CACHE_TTL_DAYS` | Cache entries older than this are deleted on the next save (default: `7`) |
+
+`./formal status` prints the resolved values.
 
 ## Development
 
@@ -293,12 +315,18 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 [Ruff](https://docs.astral.sh/ruff/) handles both linting and formatting. Config is in `pyproject.toml`.
 
 ```sh
-ruff check .          # lint
-ruff check --fix .    # lint + auto-fix
-ruff format .         # format
+uv run ruff check .          # lint
+uv run ruff check --fix .    # lint + auto-fix
+uv run ruff format .         # format
 ```
 
 Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgrade). Line length: 120.
+
+### Tests
+
+```sh
+uv run pytest --tb=short
+```
 
 ## Proof cache
 
@@ -314,7 +342,7 @@ the TTL eviction.
 Only successful proofs are cached; failed attempts always go through the full
 LLM + retry loop.
 
-Cache files are written to `results/cache/` (one JSON file per entry). Entries
+Cache files are written to `results/cache/` in the checkout (one JSON file per entry). Entries
 older than `PROOF_CACHE_TTL_DAYS` (default: 7) are deleted automatically on the
 next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CACHE_DIR`.
 
@@ -331,5 +359,5 @@ next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CAC
 - **Not a test replacement.** This checks properties for all inputs under stated
   assumptions; it does not replace integration or end-to-end tests.
 - **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
-- **Building from source is slow.** Installing Lean 4 + Mathlib oleans takes several
-  minutes locally. The prebuilt GHCR image avoids this.
+- **First install is large.** Mathlib's prebuilt oleans are several GB and take a
+  few minutes to download. This happens once, in `./setup.sh`.

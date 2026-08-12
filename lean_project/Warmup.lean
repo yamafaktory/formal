@@ -1,5 +1,5 @@
 -- Pre-elaborates common Mathlib imports so the first proof request is fast.
--- Built at image build time; oleans are baked into the Docker layer.
+-- Built by setup.sh, after the prebuilt oleans are fetched.
 import Mathlib
 import Mathlib.Tactic
 

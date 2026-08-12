@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="$(dirname "$0")/.env"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE="$ROOT/.env"
+LEAN_DIR="$ROOT/lean_project"
+ELAN_BIN="${ELAN_HOME:-$HOME/.elan}/bin"
 
 cat <<'EOF'
 
 Formal Verifier — Setup
 
 EOF
-
-echo "Choose a backend:"
-echo "  1) Claude Code  (local claude CLI — uses your Pro plan, no API key needed)"
-echo "  2) OpenAI-compatible API  (OpenAI, Anthropic, Groq, Ollama, LM Studio, …)"
-echo ""
-echo -n "Pick 1 or 2: "
-read -r BACKEND_CHOICE
 
 _upsert() {
 	local key="$1" val="$2" file="$3"
@@ -25,23 +21,94 @@ _upsert() {
 	fi
 }
 
+_drop() {
+	[[ -f "$2" ]] || return 0
+	sed -i "/^$1=/d" "$2"
+}
+
+_have() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+# ── Step 1: Python environment ────────────────────────────────────────────────
+
+if ! _have uv; then
+	echo "uv is required but not installed."
+	echo "  https://docs.astral.sh/uv/getting-started/installation/"
+	exit 1
+fi
+
+echo "[1/3] Syncing the Python environment..."
+uv sync --project "$ROOT" --quiet
+echo "      Done."
+echo ""
+
+# ── Step 2: Lean toolchain and Mathlib ────────────────────────────────────────
+
+[[ -d "$ELAN_BIN" ]] && PATH="$ELAN_BIN:$PATH"
+
+if ! _have elan; then
+	echo "[2/3] Lean is not installed."
+	echo "      elan (the Lean toolchain manager) will be installed to ${ELAN_BIN%/bin}."
+	echo -n "      Install it now? [Y/n]: "
+	read -r REPLY
+	if [[ "${REPLY:-Y}" =~ ^[Nn] ]]; then
+		echo "      Skipped. Install elan yourself, then re-run this script."
+		exit 1
+	fi
+	curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh |
+		sh -s -- -y --default-toolchain none
+	PATH="$ELAN_BIN:$PATH"
+fi
+
+MATHLIB_LIB="$LEAN_DIR/.lake/packages/mathlib/.lake/build/lib"
+
+if [[ -d "$MATHLIB_LIB" ]]; then
+	echo "[2/3] Lean toolchain and Mathlib already present — skipping."
+else
+	echo "[2/3] Installing Lean $(tr -d '\n' <"$LEAN_DIR/lean-toolchain") and Mathlib."
+	echo "      This downloads several GB of prebuilt oleans and takes a few minutes."
+	echo -n "      Continue? [Y/n]: "
+	read -r REPLY
+	if [[ "${REPLY:-Y}" =~ ^[Nn] ]]; then
+		echo "      Skipped. Re-run this script when ready — no proofs can run until then."
+	else
+		echo "      Resolving dependencies..."
+		(cd "$LEAN_DIR" && lake update)
+		echo "      Fetching prebuilt Mathlib oleans..."
+		(cd "$LEAN_DIR" && lake exe cache get)
+		echo "      Precompiling the warmup module..."
+		(cd "$LEAN_DIR" && lake build Warmup)
+		echo "      Done."
+	fi
+fi
+echo ""
+
+# ── Step 3: LLM backend ───────────────────────────────────────────────────────
+
+echo "[3/3] Choose a backend:"
+echo "  1) Claude Code  (local claude CLI — uses your Pro plan, no API key needed)"
+echo "  2) OpenAI-compatible API  (OpenAI, Anthropic, Groq, Ollama, LM Studio, …)"
+echo ""
+echo -n "Pick 1 or 2: "
+read -r BACKEND_CHOICE
+
 # ── Option 1: Claude Code CLI ─────────────────────────────────────────────────
 if [[ "$BACKEND_CHOICE" == "1" ]]; then
 	echo ""
 	echo -n "Claude config directory (default: ~/.claude, e.g. ~/.claude-work for a work account): "
 	read -r CLAUDE_CONFIG_INPUT
 	CLAUDE_CONFIG_INPUT="${CLAUDE_CONFIG_INPUT:-~/.claude}"
-	# Expand ~ manually since it won't expand inside quotes later
-	HOST_CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_INPUT/#\~/$HOME}"
+	CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_INPUT/#\~/$HOME}"
 
-	if [[ ! -d "$HOST_CLAUDE_CONFIG_DIR" ]]; then
-		echo "Error: '$HOST_CLAUDE_CONFIG_DIR' is not a directory."
+	if [[ ! -d "$CLAUDE_CONFIG_DIR" ]]; then
+		echo "Error: '$CLAUDE_CONFIG_DIR' is not a directory."
 		exit 1
 	fi
 
 	echo ""
 	echo "Fetching available models via claude CLI..."
-	MODELS=$(CLAUDE_CONFIG_DIR="$HOST_CLAUDE_CONFIG_DIR" claude -p \
+	MODELS=$(CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" claude -p \
 		"List only the model IDs you support, one per line, no explanation." \
 		2>/dev/null | grep -E "^claude" | sort || true)
 
@@ -72,22 +139,19 @@ if [[ "$BACKEND_CHOICE" == "1" ]]; then
 	fi
 
 	_upsert "LLM_BACKEND" "claude-cli" "$ENV_FILE"
-	_upsert "HOST_CLAUDE_CONFIG_DIR" "$HOST_CLAUDE_CONFIG_DIR" "$ENV_FILE"
+	_upsert "CLAUDE_CONFIG_DIR" "$CLAUDE_CONFIG_DIR" "$ENV_FILE"
 	_upsert "LLM_MODEL" "$LLM_MODEL" "$ENV_FILE"
 	_upsert "PROOF_CACHE_TTL_DAYS" "7" "$ENV_FILE"
-	_upsert "COMPOSE_FILE" "docker-compose.yml:docker-compose.claude.yml" "$ENV_FILE"
-	# Remove OpenAI-specific keys if switching backends
-	sed -i '/^LLM_BASE_URL=/d; /^LLM_API_KEY=/d; /^LLM_CLI_CMD=/d' "$ENV_FILE" 2>/dev/null || true
+	for key in LLM_BASE_URL LLM_API_KEY; do
+		_drop "$key" "$ENV_FILE"
+	done
 
 	cat <<EOF
 
 Saved to $ENV_FILE
-  LLM_BACKEND           = claude-cli
-  HOST_CLAUDE_CONFIG_DIR = $HOST_CLAUDE_CONFIG_DIR
-  LLM_MODEL             = $LLM_MODEL
-
-Run:  docker compose up          # pulls prebuilt image from GHCR
-      docker compose up --build  # or build locally from source
+  LLM_BACKEND       = claude-cli
+  CLAUDE_CONFIG_DIR = $CLAUDE_CONFIG_DIR
+  LLM_MODEL         = $LLM_MODEL
 EOF
 
 # ── Option 2: OpenAI-compatible API ──────────────────────────────────────────
@@ -154,16 +218,13 @@ elif [[ "$BACKEND_CHOICE" == "2" ]]; then
 	_upsert "LLM_API_KEY" "$LLM_API_KEY" "$ENV_FILE"
 	_upsert "LLM_MODEL" "$LLM_MODEL" "$ENV_FILE"
 	_upsert "PROOF_CACHE_TTL_DAYS" "7" "$ENV_FILE"
-	_upsert "COMPOSE_FILE" "docker-compose.yml" "$ENV_FILE"
+	_drop "CLAUDE_CONFIG_DIR" "$ENV_FILE"
 
 	cat <<EOF
 
 Saved to $ENV_FILE
   LLM_BASE_URL = $LLM_BASE_URL
   LLM_MODEL    = $LLM_MODEL
-
-Run:  docker compose up          # pulls prebuilt image from GHCR
-      docker compose up --build  # or build locally from source
 EOF
 
 else
@@ -171,4 +232,23 @@ else
 	exit 1
 fi
 
+for key in COMPOSE_FILE HOST_CLAUDE_CONFIG_DIR CLAUDE_CLI_CMD; do
+	_drop "$key" "$ENV_FILE"
+done
+
 chmod 600 "$ENV_FILE"
+
+echo ""
+if ! _have lake; then
+	echo "Add Lean to your PATH, then open a new shell:"
+	echo "  fish:  fish_add_path $ELAN_BIN"
+	echo "  bash:  export PATH=\"$ELAN_BIN:\$PATH\""
+	echo ""
+fi
+cat <<EOF
+Check the installation:
+  $ROOT/formal status
+
+Verify a file:
+  $ROOT/formal verify path/to/File.java
+EOF

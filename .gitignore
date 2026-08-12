@@ -5,3 +5,4 @@ results/
 __pycache__/
 
 .venv/
+lean_project/.lake/
