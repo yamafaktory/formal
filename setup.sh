@@ -239,6 +239,12 @@ done
 chmod 600 "$ENV_FILE"
 
 echo ""
+if ! _have bwrap; then
+	echo "bubblewrap is not installed — Lean proofs will run unsandboxed."
+	echo "  Arch:   pacman -S bubblewrap"
+	echo "  Debian: apt install bubblewrap"
+	echo ""
+fi
 if ! _have lake; then
 	echo "Add Lean to your PATH, then open a new shell:"
 	echo "  fish:  fish_add_path $ELAN_BIN"

@@ -61,6 +61,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    from . import sandbox
     from .paths import FORMAL_HOME, LEAN_PROJECT_DIR, PROOF_CACHE_DIR
 
     backend = os.getenv("LLM_BACKEND", "openai").strip().lower()
@@ -87,6 +88,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         ("lake", lake or "not on PATH"),
         ("lean toolchain", toolchain.read_text().strip() if toolchain.is_file() else "missing"),
         ("mathlib oleans", "built" if mathlib_oleans.is_dir() else "missing — run ./setup.sh"),
+        ("lean sandbox", sandbox.describe()),
         ("llm backend", backend),
         ("llm endpoint", llm_detail),
         ("llm model", model or "not set"),

@@ -5,6 +5,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import sandbox
 from .paths import LEAN_PROJECT_DIR
 
 LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
@@ -476,7 +477,7 @@ def verify(lean_code: str, timeout: int | None = None) -> LeanResult:
 
     try:
         result = subprocess.run(
-            cmd,
+            sandbox.wrap(cmd),
             capture_output=True,
             text=True,
             timeout=effective_timeout,

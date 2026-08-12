@@ -300,6 +300,7 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
+| `FORMAL_SANDBOX` | `auto` (default, sandbox if bubblewrap is installed), `bwrap` (require it), or `off` |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |
 | `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib (default: `$FORMAL_HOME/lean_project`) |
 | `FORMAL_RESULTS_DIR` | Directory for saved results (default: `$FORMAL_HOME/results`) |
@@ -327,6 +328,27 @@ Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgra
 ```sh
 uv run pytest --tb=short
 ```
+
+## Sandboxing
+
+Lean is not a passive checker: elaboration can execute arbitrary code through
+`#eval`, macros and `initialize` blocks. Since the code being elaborated was
+written by an LLM, proofs are checked inside
+[bubblewrap](https://github.com/containers/bubblewrap):
+
+- No network — `--unshare-net`, so a proof cannot exfiltrate anything it reads
+- No home directory — masked by a tmpfs, so `~/.claude`, `~/.ssh` and `~/.aws`
+  are not visible
+- Read-only root, with the Lean toolchain bound read-only
+- Nothing writable except `lean_project/`
+
+Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to enable
+it. Without it, Lean runs unsandboxed and a warning is printed once per run; set
+`FORMAL_SANDBOX=bwrap` to make its absence a hard error instead, or
+`FORMAL_SANDBOX=off` to opt out silently. `./formal status` shows which applies.
+
+The LLM call itself is not sandboxed — it needs the network and, for the
+`claude-cli` backend, your credentials.
 
 ## Proof cache
 
