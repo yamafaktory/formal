@@ -67,6 +67,11 @@ toolchain, downloads prebuilt Mathlib oleans, and then asks which LLM backend to
 use. Re-running it is safe: steps that are already done are skipped. Use
 `--lean-only` or `--backend-only` to run just one half.
 
+Any elan already on your system is used as-is, however you installed it — so if
+your package manager carries it, use that and `formal setup` will pick it up and
+install the pinned Lean version into it. Otherwise it offers elan's official
+installer. See [lean-lang.org/install](https://lean-lang.org/install/).
+
 Nothing is added to your shell configuration — `formal` locates the Lean
 toolchain under `ELAN_HOME` (default `~/.elan`) by itself.
 

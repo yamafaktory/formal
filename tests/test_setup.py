@@ -81,24 +81,124 @@ class TestChooseModel:
             setup._choose_model([])
 
 
+class TestEnsureElan:
+    def test_existing_lake_needs_no_install(self, monkeypatch):
+        monkeypatch.setattr(setup.toolchain, "which", lambda name: "/usr/bin/lake" if name == "lake" else None)
+        with patch.object(setup, "install_elan") as install:
+            assert setup.ensure_elan() is True
+        install.assert_not_called()
+
+    def test_elan_from_a_package_manager_needs_no_install(self, monkeypatch):
+        monkeypatch.setattr(setup.toolchain, "which", lambda name: "/usr/bin/elan" if name == "elan" else None)
+        with patch.object(setup, "install_elan") as install:
+            assert setup.ensure_elan() is True
+        install.assert_not_called()
+
+
+class TestEnsureToolchain:
+    def _elan_only(self, monkeypatch):
+        monkeypatch.setattr(setup.toolchain, "which", lambda name: "/usr/bin/elan" if name == "elan" else None)
+
+    def test_without_elan_falls_back_to_looking_for_lake(self, monkeypatch):
+        monkeypatch.setattr(setup.toolchain, "which", lambda name: "/usr/bin/lake" if name == "lake" else None)
+        with patch.object(setup.subprocess, "run") as run:
+            assert setup.ensure_toolchain() is True
+        run.assert_not_called()
+
+    def test_an_installed_pin_is_left_alone(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.29.0\n")
+        self._elan_only(monkeypatch)
+        monkeypatch.setattr(setup, "toolchain_installed", lambda *a: True)
+        with patch.object(setup.subprocess, "run") as run:
+            assert setup.ensure_toolchain() is True
+        run.assert_not_called()
+
+    def test_a_lake_shim_alone_does_not_count_as_installed(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.29.0\n")
+        monkeypatch.setattr(setup.toolchain, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(setup, "toolchain_installed", lambda *a: False)
+        seen = []
+
+        def run(cmd, **kwargs):
+            seen.append(cmd)
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(setup.subprocess, "run", run)
+        assert setup.ensure_toolchain() is True
+        assert seen == [["/usr/bin/elan", "toolchain", "install", "leanprover/lean4:v4.29.0"]]
+
+    def test_reports_a_failed_toolchain_install(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.29.0\n")
+        self._elan_only(monkeypatch)
+        monkeypatch.setattr(setup, "toolchain_installed", lambda *a: False)
+        monkeypatch.setattr(setup.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 1})())
+        assert setup.ensure_toolchain() is False
+
+    def test_missing_lean_toolchain_file_is_reported(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        self._elan_only(monkeypatch)
+        assert setup.ensure_toolchain() is False
+
+
+class TestToolchainInstalled:
+    def _list_output(self, monkeypatch, stdout, returncode=0):
+        monkeypatch.setattr(
+            setup.subprocess,
+            "run",
+            lambda *a, **k: type("R", (), {"returncode": returncode, "stdout": stdout})(),
+        )
+
+    def test_finds_the_pin_among_installed_toolchains(self, monkeypatch):
+        self._list_output(monkeypatch, "leanprover/lean4:v4.29.0 (default)\nstable\n")
+        assert setup.toolchain_installed("/usr/bin/elan", "leanprover/lean4:v4.29.0") is True
+
+    def test_a_different_version_does_not_count(self, monkeypatch):
+        self._list_output(monkeypatch, "leanprover/lean4:v4.28.0\n")
+        assert setup.toolchain_installed("/usr/bin/elan", "leanprover/lean4:v4.29.0") is False
+
+    def test_no_installed_toolchains(self, monkeypatch):
+        self._list_output(monkeypatch, "")
+        assert setup.toolchain_installed("/usr/bin/elan", "leanprover/lean4:v4.29.0") is False
+
+    def test_a_failing_elan_reports_not_installed(self, monkeypatch):
+        self._list_output(monkeypatch, "leanprover/lean4:v4.29.0\n", returncode=1)
+        assert setup.toolchain_installed("/usr/bin/elan", "leanprover/lean4:v4.29.0") is False
+
+
+class TestLeanVersion:
+    def test_reads_and_strips_the_pin(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        (tmp_path / "lean-toolchain").write_text("leanprover/lean4:v4.29.0\n")
+        assert setup.lean_version() == "leanprover/lean4:v4.29.0"
+
+    def test_none_when_absent(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        assert setup.lean_version() is None
+
+
 class TestInstallLean:
-    def test_skips_when_mathlib_is_already_built(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(setup.toolchain, "which", lambda _: "/usr/bin/lake")
+    @pytest.fixture
+    def toolchain_ready(self, monkeypatch):
+        monkeypatch.setattr(setup, "ensure_elan", lambda: True)
+        monkeypatch.setattr(setup, "ensure_toolchain", lambda: True)
+
+    def test_skips_when_mathlib_is_already_built(self, toolchain_ready, monkeypatch, tmp_path):
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path)
         with patch.object(setup, "_lake") as lake:
             assert setup.install_lean() is True
         lake.assert_not_called()
 
-    def test_declining_the_download_stops(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(setup.toolchain, "which", lambda _: "/usr/bin/lake")
+    def test_declining_the_download_stops(self, toolchain_ready, monkeypatch, tmp_path):
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
         monkeypatch.setattr("builtins.input", lambda _: "n")
         with patch.object(setup, "_lake") as lake:
             assert setup.install_lean() is False
         lake.assert_not_called()
 
-    def test_runs_the_three_lake_steps_in_order(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(setup.toolchain, "which", lambda _: "/usr/bin/lake")
+    def test_runs_the_three_lake_steps_in_order(self, toolchain_ready, monkeypatch, tmp_path):
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
         monkeypatch.setattr("builtins.input", lambda _: "y")
         with patch.object(setup, "_lake", return_value=True) as lake:
@@ -109,8 +209,7 @@ class TestInstallLean:
             ("build", "Warmup"),
         ]
 
-    def test_a_failing_step_aborts_the_rest(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(setup.toolchain, "which", lambda _: "/usr/bin/lake")
+    def test_a_failing_step_aborts_the_rest(self, toolchain_ready, monkeypatch, tmp_path):
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
         monkeypatch.setattr("builtins.input", lambda _: "y")
         with patch.object(setup, "_lake", return_value=False) as lake:
@@ -120,6 +219,13 @@ class TestInstallLean:
     def test_declining_elan_stops_before_lake(self, monkeypatch):
         monkeypatch.setattr(setup.toolchain, "which", lambda _: None)
         monkeypatch.setattr("builtins.input", lambda _: "n")
+        with patch.object(setup, "_lake") as lake:
+            assert setup.install_lean() is False
+        lake.assert_not_called()
+
+    def test_an_unusable_toolchain_stops_before_lake(self, monkeypatch):
+        monkeypatch.setattr(setup, "ensure_elan", lambda: True)
+        monkeypatch.setattr(setup, "ensure_toolchain", lambda: False)
         with patch.object(setup, "_lake") as lake:
             assert setup.install_lean() is False
         lake.assert_not_called()
