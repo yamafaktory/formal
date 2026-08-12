@@ -19,6 +19,10 @@ def mathlib_lib() -> Path:
     return LEAN_PROJECT_DIR / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib"
 
 
+def manifest() -> Path:
+    return LEAN_PROJECT_DIR / "lake-manifest.json"
+
+
 def lean_version() -> str | None:
     toolchain_file = LEAN_PROJECT_DIR / "lean-toolchain"
     return toolchain_file.read_text().strip() if toolchain_file.is_file() else None
@@ -154,11 +158,16 @@ def install_lean() -> bool:
         _say("Skipped — no proofs can run until this completes.")
         return False
 
-    for description, args in (
-        ("Resolving dependencies", ("update",)),
+    steps = [
         ("Fetching prebuilt Mathlib oleans", ("exe", "cache", "get")),
         ("Precompiling the warmup module", ("build", "Warmup")),
-    ):
+    ]
+    if manifest().is_file():
+        _say("  Using the dependency revisions pinned in lake-manifest.json.")
+    else:
+        steps.insert(0, ("Resolving dependencies", ("update",)))
+
+    for description, args in steps:
         _say(f"  {description}...")
         if not _lake(*args):
             _say(f"  Failed: lake {' '.join(args)}")

@@ -199,6 +199,7 @@ class TestInstallLean:
         lake.assert_not_called()
 
     def test_runs_the_three_lake_steps_in_order(self, toolchain_ready, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
         monkeypatch.setattr("builtins.input", lambda _: "y")
         with patch.object(setup, "_lake", return_value=True) as lake:
@@ -208,6 +209,26 @@ class TestInstallLean:
             ("exe", "cache", "get"),
             ("build", "Warmup"),
         ]
+
+    def test_a_committed_manifest_is_honoured_not_regenerated(self, toolchain_ready, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        (tmp_path / "lake-manifest.json").write_text("{}")
+        monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        with patch.object(setup, "_lake", return_value=True) as lake:
+            assert setup.install_lean() is True
+        assert [call.args for call in lake.call_args_list] == [
+            ("exe", "cache", "get"),
+            ("build", "Warmup"),
+        ]
+
+    def test_without_a_manifest_dependencies_are_resolved_first(self, toolchain_ready, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path)
+        monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        with patch.object(setup, "_lake", return_value=True) as lake:
+            assert setup.install_lean() is True
+        assert [call.args for call in lake.call_args_list][0] == ("update",)
 
     def test_a_failing_step_aborts_the_rest(self, toolchain_ready, monkeypatch, tmp_path):
         monkeypatch.setattr(setup, "mathlib_lib", lambda: tmp_path / "absent")
