@@ -67,7 +67,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    from . import sandbox, toolchain
+    from . import sandbox, setup, toolchain
     from .paths import FORMAL_HOME, LEAN_PROJECT_DIR, PROOF_CACHE_DIR
 
     backend = os.getenv("LLM_BACKEND", "openai").strip().lower()
@@ -99,6 +99,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
         ("llm endpoint", llm_detail),
         ("llm model", model or "not set"),
     ]
+
+    unknown = setup.unknown_env_keys()
+    if unknown:
+        rows.append(("unused .env keys", f"{', '.join(unknown)} — nothing reads these"))
+
     width = max(len(k) for k, _ in rows)
     for key, value in rows:
         print(f"{key.ljust(width)}  {value}")

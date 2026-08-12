@@ -12,6 +12,39 @@ from .paths import FORMAL_HOME, LEAN_PROJECT_DIR
 ELAN_INSTALLER = "https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh"
 
 
+# Every key formal understands. CLAUDE_CONFIG_DIR is consumed by the claude CLI
+# subprocess rather than read here, and is recognised for that reason.
+KNOWN_ENV_KEYS = frozenset(
+    {
+        "CLAUDE_CONFIG_DIR",
+        "ELAN_HOME",
+        "FORMAL_HOME",
+        "FORMAL_RESULTS_DIR",
+        "FORMAL_SANDBOX",
+        "LEAN_PROJECT_DIR",
+        "LEAN_TIMEOUT",
+        "LLM_API_KEY",
+        "LLM_BACKEND",
+        "LLM_BASE_URL",
+        "LLM_CLI_CMD",
+        "LLM_MODEL",
+        "LLM_TEMPERATURE",
+        "LLM_TIMEOUT",
+        "MAX_PARALLEL_PROPERTIES",
+        "MAX_PROOF_RETRIES",
+        "NO_COLOR",
+        "PROOF_CACHE_DIR",
+        "PROOF_CACHE_TTL_DAYS",
+        "XDG_DATA_HOME",
+    }
+)
+
+
+def unknown_env_keys() -> list[str]:
+    """Keys present in .env that nothing reads — a silent misconfiguration."""
+    return sorted(key for key in read_env() if key not in KNOWN_ENV_KEYS)
+
+
 def env_file() -> Path:
     return FORMAL_HOME / ".env"
 

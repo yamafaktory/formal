@@ -317,3 +317,35 @@ class TestRun:
         with patch.object(setup, "configure_backend") as configure:
             assert setup.run() == 1
         configure.assert_not_called()
+
+
+class TestUnknownEnvKeys:
+    """A key nothing reads is a silent misconfiguration — CLAUDE_CLI_CMD sat unused for weeks."""
+
+    def test_recognised_keys_are_not_reported(self, env_path):
+        env_path.write_text("LLM_BACKEND=claude-cli\nLLM_MODEL=x\nCLAUDE_CONFIG_DIR=/tmp\n")
+        assert setup.unknown_env_keys() == []
+
+    def test_unknown_keys_are_reported_sorted(self, env_path):
+        env_path.write_text("LLM_MODEL=x\nZED=1\nCOMPOSE_FILE=y\n")
+        assert setup.unknown_env_keys() == ["COMPOSE_FILE", "ZED"]
+
+    def test_a_near_miss_is_caught(self, env_path):
+        """CLAUDE_CLI_CMD looks plausible; the code reads LLM_CLI_CMD."""
+        env_path.write_text("CLAUDE_CLI_CMD=claude-cf\n")
+        assert setup.unknown_env_keys() == ["CLAUDE_CLI_CMD"]
+
+    def test_missing_env_file_is_empty(self, env_path):
+        assert setup.unknown_env_keys() == []
+
+    def test_every_key_setup_writes_is_recognised(self, env_path):
+        """Whatever setup writes must never show up as unused."""
+        written = {
+            "LLM_BACKEND",
+            "CLAUDE_CONFIG_DIR",
+            "LLM_MODEL",
+            "PROOF_CACHE_TTL_DAYS",
+            "LLM_BASE_URL",
+            "LLM_API_KEY",
+        }
+        assert written <= setup.KNOWN_ENV_KEYS
