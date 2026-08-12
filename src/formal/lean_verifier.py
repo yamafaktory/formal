@@ -576,3 +576,87 @@ def with_auto_tactics(lean_code: str) -> str:
     replaced = lean_code.replace(":= by sorry", f":= by {AUTO_TACTICS}")
     replaced = replaced.replace("by\n  sorry", f"by {AUTO_TACTICS}")
     return replaced
+
+
+# ── Batched verification ───────────────────────────────────────────────────────
+
+
+@dataclass
+class BatchEntry:
+    key: str
+    lean_code: str
+    first_line: int = 0
+    last_line: int = 0
+
+
+def _split_imports(lean_code: str) -> tuple[list[str], list[str]]:
+    imports, body = [], []
+    for line in lean_code.splitlines():
+        (imports if line.strip().startswith("import ") else body).append(line)
+    return imports, body
+
+
+def build_batch(entries: list[BatchEntry]) -> str:
+    """Assemble one Lean file from several independent proofs.
+
+    Imports are hoisted because Lean only accepts them at the top of a file, and
+    each proof is namespaced so identically named definitions cannot collide.
+    """
+    seen_imports: list[str] = []
+    blocks: list[str] = []
+    for index, entry in enumerate(entries):
+        imports, body = _split_imports(entry.lean_code)
+        for line in imports:
+            if line.strip() not in seen_imports:
+                seen_imports.append(line.strip())
+        blocks.append((f"Batch{index}", entry, body))
+
+    lines = list(seen_imports)
+    if not lines:
+        lines = ["import Mathlib"]
+    lines.append("")
+
+    for namespace, entry, body in blocks:
+        lines.append(f"namespace {namespace}")
+        entry.first_line = len(lines) + 1
+        lines.extend(body)
+        entry.last_line = len(lines)
+        lines.append(f"end {namespace}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def verify_batch(entries: list[BatchEntry], timeout: int | None = None) -> dict[str, LeanResult] | None:
+    """Check several proofs in a single Lean invocation, paying one Mathlib import.
+
+    Returns per-key results, or None when the batch itself could not be run — the
+    caller then falls back to verifying each proof on its own.
+    """
+    if not entries:
+        return {}
+
+    batch_source = build_batch(entries)
+    result = verify(batch_source, timeout=timeout)
+
+    # An error outside every namespace (a bad hoisted import, say) invalidates the
+    # whole batch rather than any one proof.
+    for error in result.errors:
+        line = error.get("pos", {}).get("line") or error.get("line") or 0
+        if not any(e.first_line <= line <= e.last_line for e in entries):
+            return None
+    if not result.success and not result.errors:
+        return None
+
+    per_key: dict[str, LeanResult] = {}
+    for entry in entries:
+        errors = [
+            e
+            for e in result.errors
+            if entry.first_line <= (e.get("pos", {}).get("line") or e.get("line") or 0) <= entry.last_line
+        ]
+        per_key[entry.key] = LeanResult(
+            success=not errors,
+            output=result.output if errors else "",
+            errors=errors,
+        )
+    return per_key

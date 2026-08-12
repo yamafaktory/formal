@@ -2,7 +2,15 @@
 
 import time
 
-from formal.lean_verifier import LeanResult, check_syntax, sweep_stale_temps, with_auto_tactics
+from formal.lean_verifier import (
+    BatchEntry,
+    LeanResult,
+    build_batch,
+    check_syntax,
+    sweep_stale_temps,
+    verify_batch,
+    with_auto_tactics,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -179,3 +187,99 @@ class TestSweepStaleTemps:
 
     def test_missing_directory_is_harmless(self, tmp_path):
         sweep_stale_temps(tmp_path / "absent")
+
+
+class TestBuildBatch:
+    """One Lean file from many proofs: imports hoisted, definitions isolated."""
+
+    def _entry(self, key, code):
+        return BatchEntry(key=key, lean_code=code)
+
+    def test_hoists_and_dedupes_imports(self):
+        entries = [
+            self._entry("a", "import Mathlib\n\ntheorem a : True := trivial\n"),
+            self._entry("b", "import Mathlib\nimport Mathlib.Tactic\n\ntheorem b : True := trivial\n"),
+        ]
+        source = build_batch(entries)
+        assert source.splitlines()[:2] == ["import Mathlib", "import Mathlib.Tactic"]
+        assert source.count("import Mathlib\n") == 1
+
+    def test_imports_only_appear_at_the_top(self):
+        entries = [self._entry("a", "import Mathlib\n\ntheorem a : True := trivial\n")]
+        body = "\n".join(build_batch(entries).splitlines()[2:])
+        assert "import " not in body
+
+    def test_each_entry_is_namespaced(self):
+        entries = [self._entry("a", "theorem a : True := trivial\n"), self._entry("b", "theorem b : True := trivial\n")]
+        source = build_batch(entries)
+        assert "namespace Batch0" in source and "end Batch0" in source
+        assert "namespace Batch1" in source and "end Batch1" in source
+
+    def test_line_ranges_point_at_each_body(self):
+        entries = [
+            self._entry("a", "import Mathlib\n\ntheorem a : True := trivial\n"),
+            self._entry("b", "theorem b : False := sorry\n"),
+        ]
+        lines = build_batch(entries).splitlines()
+        for entry, needle in zip(entries, ["theorem a", "theorem b"]):
+            span = lines[entry.first_line - 1 : entry.last_line]
+            assert any(needle in line for line in span)
+
+    def test_supplies_an_import_when_none_given(self):
+        assert build_batch([self._entry("a", "theorem a : True := trivial\n")]).startswith("import Mathlib")
+
+
+class TestVerifyBatch:
+    def _entries(self):
+        return [
+            BatchEntry(key="a", lean_code="import Mathlib\n\ntheorem a : True := trivial\n"),
+            BatchEntry(key="b", lean_code="theorem b : False := sorry\n"),
+        ]
+
+    def test_no_entries_is_an_empty_result(self):
+        assert verify_batch([]) == {}
+
+    def test_errors_are_attributed_by_line(self, monkeypatch):
+        entries = self._entries()
+        build_batch(entries)  # populate line ranges the same way verify_batch does
+        failing_line = entries[1].first_line
+
+        def fake_verify(source, timeout=None):
+            return LeanResult(
+                success=False,
+                output="boom",
+                errors=[{"severity": "error", "data": "unsolved goals", "pos": {"line": failing_line}}],
+            )
+
+        monkeypatch.setattr("formal.lean_verifier.verify", fake_verify)
+        results = verify_batch(entries)
+        assert results["a"].success is True
+        assert results["b"].success is False
+
+    def test_all_succeed_when_lean_reports_nothing(self, monkeypatch):
+        monkeypatch.setattr(
+            "formal.lean_verifier.verify",
+            lambda source, timeout=None: LeanResult(success=True, output="", errors=[]),
+        )
+        results = verify_batch(self._entries())
+        assert all(r.success for r in results.values())
+
+    def test_an_error_outside_every_namespace_falls_back(self, monkeypatch):
+        """A bad hoisted import invalidates the batch, not one proof."""
+        monkeypatch.setattr(
+            "formal.lean_verifier.verify",
+            lambda source, timeout=None: LeanResult(
+                success=False,
+                output="unknown package",
+                errors=[{"severity": "error", "data": "unknown package", "pos": {"line": 1}}],
+            ),
+        )
+        assert verify_batch(self._entries()) is None
+
+    def test_a_failure_without_errors_falls_back(self, monkeypatch):
+        """A timeout reports no per-line errors, so nothing can be attributed."""
+        monkeypatch.setattr(
+            "formal.lean_verifier.verify",
+            lambda source, timeout=None: LeanResult(success=False, output="timed out", errors=[]),
+        )
+        assert verify_batch(self._entries()) is None
