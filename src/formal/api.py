@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 
@@ -100,7 +101,7 @@ def verify_task(req: VerifyRequest):
     if req.save_result:
         _save(
             "verify",
-            req.task[:40],
+            req.task,
             {"task": result.task, "verified": result.verified, "stages": [s.__dict__ for s in result.stages]},
         )
 
@@ -143,7 +144,7 @@ def verify_feature(req: VerifyFeatureRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     if req.save_result:
-        label = (req.file or "inline")[:40]
+        label = req.file or "inline"
         _save(
             "feature",
             label,
@@ -170,6 +171,14 @@ def verify_feature(req: VerifyFeatureRequest):
 
 
 def _save(prefix: str, label: str, data: dict):
+    """Write a result, keeping distinct labels in distinct files.
+
+    Replacing every non-alphanumeric character with _ maps "a-b" and "a_b" onto
+    one name, and truncating for readability collides any two labels sharing a
+    prefix — either way a result silently overwrote another. The digest is taken
+    over the whole label, so only identical labels share a file.
+    """
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() else "_" for c in label)
-    (RESULTS_DIR / f"{prefix}_{safe}.json").write_text(json.dumps(data, indent=2))
+    readable = "".join(c if c.isalnum() else "_" for c in label)[:60]
+    digest = hashlib.sha256(label.encode()).hexdigest()[:8]
+    (RESULTS_DIR / f"{prefix}_{readable}_{digest}.json").write_text(json.dumps(data, indent=2))
