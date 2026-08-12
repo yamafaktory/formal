@@ -208,3 +208,143 @@ class TestNeutralWorkingDirectory:
         _call_cli("sys", "user")
         assert seen["cwd"] == tempfile.gettempdir()
         assert seen["cwd"] != os.getcwd()
+
+
+class TestRepeatedFailures:
+    """No backend's wording is known — repetition is the signal.
+
+    Continuing does not cost money, refused calls are not billed. It costs truth:
+    five modules were reported as having errored properties when they never ran.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_streak(self, monkeypatch):
+        from formal.llm_client import reset_failure_streak
+
+        monkeypatch.setenv("LLM_BACKEND", "claude-cli")
+        reset_failure_streak()
+        yield
+        reset_failure_streak()
+
+    def _failing(self, monkeypatch, messages):
+        """Fail one call_llm per message, mocking beneath call_llm's accounting."""
+        step = iter(messages)
+
+        def fail(system, user, model=None):
+            raise RuntimeError(next(step))
+
+        monkeypatch.setattr("formal.llm_client._call_cli", fail)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "You've hit your individual spend limit · run /usage-credits",
+            "model 'llama3' not found, try pulling it first",  # Ollama
+            "Error: Failed to connect to LM Studio server",
+            "402 Payment Required",
+            "something nobody has ever written before",
+        ],
+    )
+    def test_any_repeated_error_stops_the_run(self, monkeypatch, message):
+        from formal.llm_client import BackendUnavailable, call_llm
+
+        self._failing(monkeypatch, [message] * 3)
+        for _ in range(2):
+            with pytest.raises(RuntimeError) as excinfo:
+                call_llm("sys", "user")
+            assert not isinstance(excinfo.value, BackendUnavailable)
+        with pytest.raises(BackendUnavailable, match="will not recover"):
+            call_llm("sys", "user")
+
+    def test_differing_errors_never_trip_it(self, monkeypatch):
+        from formal.llm_client import BackendUnavailable, call_llm
+
+        self._failing(monkeypatch, [f"transient failure {i}" for i in range(5)])
+        for _ in range(5):
+            with pytest.raises(RuntimeError) as excinfo:
+                call_llm("sys", "user")
+            assert not isinstance(excinfo.value, BackendUnavailable)
+
+    def test_a_success_clears_the_streak(self, monkeypatch):
+        from formal.llm_client import BackendUnavailable, call_llm
+
+        outcomes = ["same error", "same error", None, "same error"]
+        step = iter(outcomes)
+
+        def maybe_fail(system, user, model=None):
+            message = next(step)
+            if message is None:
+                return "fine"
+            raise RuntimeError(message)
+
+        monkeypatch.setattr("formal.llm_client._call_cli", maybe_fail)
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                call_llm("sys", "user")
+        assert call_llm("sys", "user") == "fine"
+        with pytest.raises(RuntimeError) as excinfo:
+            call_llm("sys", "user")
+        assert not isinstance(excinfo.value, BackendUnavailable)
+
+    def test_whitespace_differences_do_not_look_like_new_errors(self, monkeypatch):
+        from formal.llm_client import BackendUnavailable, call_llm
+
+        self._failing(monkeypatch, ["spend  limit", "spend limit\n", " spend limit "])
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                call_llm("sys", "user")
+        with pytest.raises(BackendUnavailable):
+            call_llm("sys", "user")
+
+    def test_the_threshold_is_configurable(self, monkeypatch):
+        from formal.llm_client import BackendUnavailable, call_llm
+
+        monkeypatch.setenv("LLM_FAILURE_STREAK", "2")
+        self._failing(monkeypatch, ["boom"] * 2)
+        with pytest.raises(RuntimeError):
+            call_llm("sys", "user")
+        with pytest.raises(BackendUnavailable):
+            call_llm("sys", "user")
+
+    def test_a_refusal_is_a_runtime_error_so_the_cli_reports_it(self):
+        from formal.llm_client import BackendUnavailable
+
+        assert issubclass(BackendUnavailable, RuntimeError)
+
+
+class TestRefusalStopsTheRun:
+    """Per-property error handling must not swallow a refusal — that is what kept it going."""
+
+    def _pipeline_with(self, monkeypatch, failing):
+        import formal.feature_pipeline as fp
+        from formal.feature_extractor import DecomposedFeature, Property, PureFunction
+
+        props = [Property(id=f"prop_{i}", description="d", function="f", kind="bound", formal="") for i in range(3)]
+        feature = DecomposedFeature(
+            feature_summary="s",
+            pure_functions=[PureFunction(name="f", code="def f(): pass", description="f")],
+            impure_parts=[],
+            properties=[],
+        )
+        monkeypatch.setattr(fp, "decompose", lambda code, language="Python": feature)
+        monkeypatch.setattr(fp, "extract_properties", lambda feature, language="Python": props)
+        monkeypatch.setattr(fp, "formalize", failing)
+        return fp
+
+    def test_a_refusal_aborts_instead_of_marking_properties_errored(self, monkeypatch):
+        from formal.llm_client import BackendUnavailable
+
+        def refuse(prop, fn, language="Python"):
+            raise BackendUnavailable("spend limit")
+
+        fp = self._pipeline_with(monkeypatch, refuse)
+        with pytest.raises(BackendUnavailable):
+            fp.run_feature_pipeline("def f(): pass", parallel=False)
+
+    def test_an_ordinary_error_still_becomes_an_errored_property(self, monkeypatch):
+        def blow_up(prop, fn, language="Python"):
+            raise ValueError("something else")
+
+        fp = self._pipeline_with(monkeypatch, blow_up)
+        result = fp.run_feature_pipeline("def f(): pass", parallel=False)
+        assert result.properties_errored == 3

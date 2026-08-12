@@ -11,6 +11,7 @@ from .feature_extractor import (
     extract_properties,
 )
 from .lean_verifier import LEAN_TIMEOUT, BatchEntry, LeanResult, verify_batch
+from .llm_client import BackendUnavailable
 from .logger import get_logger, log
 from .property_verifier import Formalization, PropertyResult, error_result, formalize, prove, unverifiable_result
 
@@ -160,7 +161,13 @@ def run_feature_pipeline(
         workers = min(len(items), int(os.getenv("MAX_PARALLEL_PROPERTIES", "4")))
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures = [ex.submit(work, item) for item in items]
-            return [f.result() for f in futures]
+            try:
+                return [f.result() for f in futures]
+            except BackendUnavailable:
+                # Whatever has not started must not start: the budget is already gone.
+                for future in futures:
+                    future.cancel()
+                raise
 
     def _formalize_one(prop: Property) -> PropertyResult | Formalization:
         fn = fn_map.get(prop.function)
@@ -178,6 +185,8 @@ def run_feature_pipeline(
 
         try:
             return formalize(prop, fn, language=language)
+        except BackendUnavailable:
+            raise
         except Exception as e:
             log(_log, "ERROR", f"{prop.id} ✗ {type(e).__name__}: {e}")
             return error_result(prop, f"{type(e).__name__}: {e}")
@@ -207,6 +216,8 @@ def run_feature_pipeline(
     def _prove_one(f: Formalization) -> PropertyResult:
         try:
             return prove(f, first_result=first_results.get(f.key), max_retries=max_retries)
+        except BackendUnavailable:
+            raise
         except Exception as e:
             log(_log, "ERROR", f"{f.prop.id} ✗ {type(e).__name__}: {e}")
             return error_result(f.prop, f"{type(e).__name__}: {e}")

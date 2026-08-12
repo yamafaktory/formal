@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from . import prompts, proof_cache
 from .feature_extractor import _clean_json
-from .llm_client import call_llm
+from .llm_client import BackendUnavailable, call_llm
 from .logger import get_logger, log
 
 _log = get_logger(__name__)
@@ -97,6 +97,8 @@ def annotate(results, run) -> int:
     def _one(result):
         try:
             return result, check(result.description, result.lean_code)
+        except BackendUnavailable:
+            raise
         except Exception as e:
             log(_log, "ERROR", f"{result.property_id} fidelity check failed: {type(e).__name__}: {e}")
             return result, Fidelity()

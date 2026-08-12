@@ -14,6 +14,46 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+
+
+class BackendUnavailable(RuntimeError):
+    """The backend keeps failing identically, so the run cannot continue.
+
+    The refused calls cost nothing — they are rejected, not billed. What continuing
+    costs is truth: one exhausted budget produced 104 further calls across five
+    modules, and every one of those modules was then reported as having errored
+    properties. A run that stops says nothing about them; a run that carries on says
+    something false, which took a separate investigation to undo.
+    """
+
+
+# Every backend words a spend limit, a rejected key or a dead endpoint differently,
+# and rewords it between versions — so nothing here reads the message. Repetition is
+# the signal: the same error, call after call, is not going to resolve itself.
+_streak_lock = threading.Lock()
+_streak = {"error": "", "count": 0}
+
+
+def _streak_limit() -> int:
+    return max(1, int(os.getenv("LLM_FAILURE_STREAK", "3")))
+
+
+def reset_failure_streak() -> None:
+    with _streak_lock:
+        _streak["error"], _streak["count"] = "", 0
+
+
+def _record_failure(message: str) -> int:
+    """Count consecutive identical failures, across threads. Returns the streak."""
+    signature = " ".join(message.split())[:200]
+    with _streak_lock:
+        if signature == _streak["error"]:
+            _streak["count"] += 1
+        else:
+            _streak["error"], _streak["count"] = signature, 1
+        return _streak["count"]
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -126,6 +166,14 @@ def list_models() -> list[str]:
 
 def call_llm(system: str, user: str, model: str | None = None) -> str:
     backend = os.environ.get("LLM_BACKEND", "openai").strip().lower()
-    if backend == "claude-cli":
-        return _call_cli(system, user, model)
-    return _call_openai(system, user, model)
+    try:
+        answer = _call_cli(system, user, model) if backend == "claude-cli" else _call_openai(system, user, model)
+    except Exception as e:
+        streak = _record_failure(str(e))
+        if streak >= _streak_limit():
+            raise BackendUnavailable(
+                f"the backend failed {streak} times in a row with the same error, so it will not recover: {e}"
+            ) from None
+        raise
+    reset_failure_streak()
+    return answer
