@@ -7,3 +7,4 @@ __pycache__/
 .venv/
 lean_project/.lake/
 lean_project/Verify/tmp_*.lean
+lean_project/Scratch_*.lean
