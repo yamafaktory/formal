@@ -81,6 +81,13 @@ def _call_openai(system: str, user: str, model: str | None = None) -> str:
     if not model:
         raise RuntimeError("LLM_MODEL is not set. Run `formal setup` to choose a model.")
 
+    kwargs = {}
+    # Sampling makes decomposition vary between runs on identical input. Blank
+    # omits the parameter entirely, for models that reject it.
+    temperature = os.environ.get("LLM_TEMPERATURE", "0").strip()
+    if temperature:
+        kwargs["temperature"] = float(temperature)
+
     response = _get_openai_client().chat.completions.create(
         model=model,
         messages=[
@@ -88,6 +95,7 @@ def _call_openai(system: str, user: str, model: str | None = None) -> str:
             {"role": "user", "content": user},
         ],
         max_tokens=4096,
+        **kwargs,
     )
     return response.choices[0].message.content or ""
 

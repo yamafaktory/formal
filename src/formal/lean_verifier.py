@@ -13,9 +13,15 @@ LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
 AUTO_TACTIC_TIMEOUT = 20  # seconds for the auto-tactic pre-pass
 
 # Auto-tactics tried before calling the LLM for proof generation.
-# Ordered fastest-first: rfl (instant), omega (linear arith), norm_num
-# (numeric), decide (finite decidable), simp (last resort).
-AUTO_TACTICS = "first | rfl | omega | norm_num | decide | simp"
+# Ordered fastest-first: rfl (instant), omega (linear Nat/Int), norm_num (numeric),
+# linarith/ring (rational and real arithmetic — the usual modelling of floats),
+# decide (finite decidable), simp (last resort).
+#
+# Each alternative is followed by `done`: `first` commits to whichever branch
+# succeeds, and norm_num and simp succeed by making progress without closing the
+# goal, which would shadow every later alternative.
+_AUTO_TACTIC_STEPS = ("rfl", "omega", "norm_num", "linarith", "ring", "decide", "simp")
+AUTO_TACTICS = "first | " + " | ".join(f"({step}; done)" for step in _AUTO_TACTIC_STEPS)
 
 # ── Lean environment cache ─────────────────────────────────────────────────────
 # Running `lake env lean` on every verification call re-invokes `lake` just to

@@ -325,6 +325,7 @@ Set in `.env` (created by `formal setup`), overridable via environment variables
 | `LLM_BASE_URL` | Base URL of any OpenAI-compatible endpoint |
 | `LLM_API_KEY` | API key (leave empty for local models) |
 | `LLM_MODEL` | Model name as accepted by the provider |
+| `LLM_TEMPERATURE` | Sampling temperature for the OpenAI backend (default: `0`, for repeatable decomposition). Leave blank to omit the parameter for models that reject it. |
 | `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |

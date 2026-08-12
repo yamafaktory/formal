@@ -1,8 +1,25 @@
 import json
+import re
 from dataclasses import dataclass, field
 
 from . import prompts
 from .llm_client import call_llm
+from .logger import get_logger, log
+
+_log = get_logger(__name__)
+
+# Function-definition syntax across the supported languages. Used only to notice
+# that a decomposition returning nothing is suspicious.
+_DEFINITION = re.compile(
+    r"(^|\s)(def|fn|func|function|fun|sub|proc)\s+\w+"
+    r"|\w+\s+\w+\s*\([^)]*\)\s*(\{|:)"
+    r"|=>\s*\{?",
+    re.MULTILINE,
+)
+
+
+def looks_like_it_defines_functions(code: str) -> bool:
+    return bool(_DEFINITION.search(code))
 
 
 @dataclass
@@ -35,7 +52,25 @@ class DecomposedFeature:
 
 
 def decompose(code: str, language: str = "Python") -> DecomposedFeature:
-    """Step 1 — Split feature into pure functions and side effects."""
+    """Step 1 — Split feature into pure functions and side effects.
+
+    Decomposition is an LLM step and its output varies between runs on identical
+    input — the same file has yielded several pure functions on one run and none
+    on the next. An empty result on a file that plainly defines functions is
+    retried once, since silently reporting "nothing to check" is the one failure
+    mode a caller cannot distinguish from a clean pass.
+    """
+    feature = _decompose_once(code, language)
+    if not feature.pure_functions and looks_like_it_defines_functions(code):
+        log(_log, "PIPELINE", "Decomposition found no pure functions in a file that defines some — retrying")
+        retried = _decompose_once(code, language)
+        if retried.pure_functions:
+            log(_log, "PIPELINE", f"Retry found {len(retried.pure_functions)} pure function(s)")
+            return retried
+    return feature
+
+
+def _decompose_once(code: str, language: str) -> DecomposedFeature:
     system = prompts.DECOMPOSE_SYSTEM
     user = prompts.DECOMPOSE_USER.format(code=code, language=language)
     data = None

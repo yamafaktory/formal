@@ -3,7 +3,16 @@
 import json
 from unittest.mock import patch
 
-from formal.feature_extractor import DecomposedFeature, PureFunction, _clean_json, extract_properties
+import pytest
+
+from formal.feature_extractor import (
+    DecomposedFeature,
+    PureFunction,
+    _clean_json,
+    decompose,
+    extract_properties,
+    looks_like_it_defines_functions,
+)
 
 # ── _clean_json ───────────────────────────────────────────────────────────────
 
@@ -156,3 +165,59 @@ class TestExtractProperties:
             extract_properties(make_feature(), language="Kotlin")
         call_args = mock_llm.call_args[0][1]  # second positional arg = user prompt
         assert "Kotlin" in call_args
+
+
+class TestLooksLikeItDefinesFunctions:
+    """Guards the retry that catches a decomposition returning nothing."""
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def clamp(x, lo, hi):\n    return max(lo, min(x, hi))\n",
+            "fn clamp(x: i32) -> i32 { x }\n",
+            "func Clamp(x int) int { return x }\n",
+            "function clamp(x) { return x; }\n",
+            "public int clamp(int x) {\n  return x;\n}\n",
+            "const clamp = (x) => Math.max(0, x);\n",
+            "pub fn clamp(x: i32) i32 {\n    return x;\n}\n",
+        ],
+    )
+    def test_detects_definitions_across_languages(self, code):
+        assert looks_like_it_defines_functions(code) is True
+
+    @pytest.mark.parametrize(
+        "code",
+        ['PROMPT = """a long string"""\n', "X = 1\nY = 2\n", "", "# just a comment\n"],
+    )
+    def test_ignores_files_without_definitions(self, code):
+        assert looks_like_it_defines_functions(code) is False
+
+
+class TestDecomposeRetry:
+    def _response(self, names):
+        functions = [{"name": n, "code": f"def {n}(): pass", "description": n} for n in names]
+        return json.dumps({"feature_summary": "s", "pure_functions": functions, "impure_parts": []})
+
+    def test_an_empty_result_on_a_file_with_functions_is_retried(self):
+        responses = [self._response([]), self._response(["clamp"])]
+        with patch("formal.feature_extractor.call_llm", side_effect=responses) as mock_llm:
+            feature = decompose("def clamp(x):\n    return x\n")
+        assert [f.name for f in feature.pure_functions] == ["clamp"]
+        assert mock_llm.call_count == 2
+
+    def test_a_file_without_functions_is_not_retried(self):
+        with patch("formal.feature_extractor.call_llm", return_value=self._response([])) as mock_llm:
+            feature = decompose("CONSTANT = 1\n")
+        assert feature.pure_functions == []
+        assert mock_llm.call_count == 1
+
+    def test_a_successful_decomposition_is_not_retried(self):
+        with patch("formal.feature_extractor.call_llm", return_value=self._response(["clamp"])) as mock_llm:
+            decompose("def clamp(x):\n    return x\n")
+        assert mock_llm.call_count == 1
+
+    def test_the_retry_is_attempted_only_once(self):
+        with patch("formal.feature_extractor.call_llm", return_value=self._response([])) as mock_llm:
+            feature = decompose("def clamp(x):\n    return x\n")
+        assert feature.pure_functions == []
+        assert mock_llm.call_count == 2
