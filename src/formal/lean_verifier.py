@@ -400,6 +400,16 @@ class LeanResult:
                 "String.length]` — `String.length` unfolds recursively and causes maximum recursion depth errors.\n"
                 "Also do NOT use `String.length_mk` — it does not exist in Mathlib."
             )
+        if "has already been declared" in data:
+            return (
+                "The generated code redeclares a name that Mathlib already defines "
+                "(commonly `Path`, `Option`, `Prod`, `List`, `String`, `Nat`, or a tactic name). "
+                "`import Mathlib` brings it into scope, so the definition collides.\n"
+                "Rename the local model with a prefix that cannot clash — `MyPath`, `SrcOption`, "
+                "`ModelString` — and update every reference to it in the theorem and proof. "
+                "Do NOT try to work around it with `namespace`, `open`, or `_root_.`: the theorem "
+                "should model your function's own type, not shadow a Mathlib one."
+            )
         if "declaration uses 'sorry'" in data:
             return "Replace sorry with a real proof. Try omega, simp, decide, or rfl."
         if data == "timeout":

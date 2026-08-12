@@ -61,7 +61,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
     if result.properties_errored:
         return 2
-    return 0 if result.overall_score in ("full", "no_pure_logic") else 1
+    if result.overall_score == "no_pure_logic":
+        return 3
+    return 0 if result.overall_score == "full" else 1
 
 
 def _cmd_status(args: argparse.Namespace) -> int:

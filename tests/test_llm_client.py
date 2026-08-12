@@ -13,17 +13,32 @@ def _result(returncode=0, stdout="", stderr=""):
 
 
 class TestTimeout:
-    def test_timeout_becomes_a_readable_error(self, monkeypatch):
+    def test_repeated_stalls_become_a_readable_error(self, monkeypatch):
         monkeypatch.setenv("LLM_TIMEOUT", "7")
 
         def raise_timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="claude", timeout=7)
 
         monkeypatch.setattr(subprocess, "run", raise_timeout)
-        with pytest.raises(RuntimeError, match="did not respond within LLM_TIMEOUT"):
+        with pytest.raises(RuntimeError, match="stalled twice"):
             _call_cli("sys", "user")
 
-    def test_timeout_names_the_budget_and_the_remedy(self, monkeypatch):
+    def test_a_stall_is_retried_once_and_can_succeed(self, monkeypatch):
+        """Timeouts were observed as outright stalls, so the retry usually lands."""
+        monkeypatch.setenv("LLM_TIMEOUT", "7")
+        calls = []
+
+        def stall_then_answer(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(cmd="claude", timeout=7)
+            return _result(stdout="recovered")
+
+        monkeypatch.setattr(subprocess, "run", stall_then_answer)
+        assert _call_cli("sys", "user") == "recovered"
+        assert len(calls) == 2
+
+    def test_the_error_names_the_budget_and_a_remedy(self, monkeypatch):
         monkeypatch.setenv("LLM_TIMEOUT", "7")
 
         def raise_timeout(*args, **kwargs):
@@ -33,9 +48,9 @@ class TestTimeout:
         with pytest.raises(RuntimeError) as excinfo:
             _call_cli("sys", "user")
         assert "7s" in str(excinfo.value)
-        assert "raise LLM_TIMEOUT" in str(excinfo.value)
+        assert "MAX_PARALLEL_PROPERTIES" in str(excinfo.value)
 
-    def test_a_timeout_is_not_retried(self, monkeypatch):
+    def test_a_stall_is_retried_at_most_once(self, monkeypatch):
         monkeypatch.setenv("LLM_TIMEOUT", "7")
         calls = []
 
@@ -46,7 +61,7 @@ class TestTimeout:
         monkeypatch.setattr(subprocess, "run", raise_timeout)
         with pytest.raises(RuntimeError):
             _call_cli("sys", "user")
-        assert len(calls) == 1
+        assert len(calls) == 2
 
     def test_default_budget_matches_the_pre_container_value(self, monkeypatch):
         monkeypatch.delenv("LLM_TIMEOUT", raising=False)

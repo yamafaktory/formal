@@ -170,9 +170,19 @@ no daemon involved.
 ./formal serve
 ```
 
-`verify` exits `0` when every verifiable property was proved and `1` when one was
-not, so it can gate a commit hook or CI step. Exit `2` means formal itself failed
-and reached no verdict — treat it as an infrastructure error, not a disproof.
+`verify` exit codes, so it can gate a commit hook or CI step:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every verifiable property was proved |
+| `1` | At least one property was not proved — investigate |
+| `2` | formal itself failed; no verdict was reached |
+| `3` | No pure logic found, so nothing was checked |
+
+`3` is distinct from `0` deliberately: a file that was never checked should not
+look like a file that passed. Decomposition is an LLM step and can miss functions
+it found on a previous run, so treat `3` on a file you expect to have pure logic
+as a signal to re-run rather than as a pass.
 
 ### Progress output
 
@@ -273,8 +283,8 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
 
 | Score | Meaning |
 |---|---|
-| `full` | All verifiable properties proved |
-| `partial` | ≥50% of verifiable properties proved |
+| `full` | Every property was checked and proved |
+| `partial` | ≥50% of checked properties proved, or something could not be checked |
 | `failed` | <50% of verifiable properties proved |
 | `no_pure_logic` | No pure functions found |
 | `error` | Nothing could be checked — formal itself failed, no verdict was reached |

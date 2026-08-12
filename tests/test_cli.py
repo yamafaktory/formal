@@ -73,9 +73,10 @@ class TestVerifyExitCode:
 
     @pytest.mark.parametrize(
         ("found", "verified", "unverifiable", "expected"),
-        [(2, 2, 0, 0), (0, 0, 0, 0), (2, 1, 0, 1), (2, 0, 0, 1)],
+        [(2, 2, 0, 0), (0, 0, 0, 3), (2, 1, 0, 1), (2, 0, 0, 1)],
     )
     def test_exit_code_follows_score(self, monkeypatch, found, verified, unverifiable, expected):
+        """0 proved, 1 disproved, 2 tool failure, 3 nothing to check."""
         monkeypatch.setattr(cli.sys, "argv", ["formal", "verify", "--code", "def f(): pass"])
         monkeypatch.setattr(cli, "_load_env", lambda: None)
         with patch(

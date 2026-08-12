@@ -40,9 +40,14 @@ def _call_cli(system: str, user: str, model: str | None = None) -> str:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
+            # Observed as an outright stall rather than slow progress, and unrelated to
+            # input size — so a second attempt usually succeeds where waiting would not.
+            if attempt == 0:
+                continue
             raise RuntimeError(
-                f"{cli_cmd} did not respond within LLM_TIMEOUT ({timeout}s). "
-                "Large files need a longer budget — raise LLM_TIMEOUT in .env."
+                f"{cli_cmd} stalled twice without responding, {timeout}s each time. "
+                "Concurrent invocations make this more likely: lower MAX_PARALLEL_PROPERTIES, "
+                "or raise LLM_TIMEOUT if your backend is genuinely just slow."
             ) from None
         if result.returncode == 0:
             return result.stdout.strip()

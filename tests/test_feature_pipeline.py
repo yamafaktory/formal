@@ -50,15 +50,16 @@ class TestScore:
         """The regression: 10 internal errors used to render as 0/10 verified, 'failed'."""
         assert _result(["error"] * 10).overall_score == "error"
 
+    def test_an_errored_property_prevents_full(self):
+        """full must mean everything was checked — an errored property was not."""
+        assert _result(["verified", "verified", "error"]).overall_score == "partial"
+
     def test_errors_are_excluded_from_the_denominator(self):
-        # Two verifiable properties, both proved; the third only errored.
-        assert _result(["verified", "verified", "error"]).overall_score == "full"
+        # One proved, one disproved, one errored: 1/2 of what was checked, not 1/3.
+        assert _result(["verified", "failed", "error"]).overall_score == "partial"
 
     def test_a_genuine_disproof_still_scores_failed(self):
         assert _result(["failed", "failed"]).overall_score == "failed"
-
-    def test_partial_is_unaffected_by_an_error(self):
-        assert _result(["verified", "failed", "error"]).overall_score == "partial"
 
     @pytest.mark.parametrize("statuses", [["unverifiable"], ["unverifiable", "unverifiable"]])
     def test_only_unverifiable_is_still_no_pure_logic(self, statuses):

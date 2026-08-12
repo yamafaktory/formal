@@ -95,9 +95,25 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
     if data is None:
         return []
 
-    return [
+    return _parse_properties(data)
+
+
+def assign_unique_ids(properties: list["Property"]) -> list["Property"]:
+    """Guarantee distinct ids — results are matched back to properties by id."""
+    seen: set[str] = set()
+    for position, prop in enumerate(properties, start=1):
+        candidate = prop.id or f"prop_{position}"
+        while candidate in seen:
+            candidate = f"{candidate}_{position}"
+        prop.id = candidate
+        seen.add(candidate)
+    return properties
+
+
+def _parse_properties(data: dict) -> list["Property"]:
+    properties = [
         Property(
-            id=p.get("id", f"prop_{i}"),
+            id=str(p.get("id") or "").strip(),
             description=p.get("description", ""),
             function=p.get("function", ""),
             kind=p.get("kind", "invariant"),
@@ -107,8 +123,9 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
             verifiable=p.get("verifiable", True),
             unverifiable_reason=p.get("unverifiable_reason", ""),
         )
-        for i, p in enumerate(data.get("properties", []))
+        for p in data.get("properties", [])
     ]
+    return assign_unique_ids(properties)
 
 
 def _clean_json(text: str) -> str:

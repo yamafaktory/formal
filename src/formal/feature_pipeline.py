@@ -40,7 +40,8 @@ class FeaturePipelineResult:
             return "no_pure_logic"
         pct = self.properties_verified / verifiable_count
         if pct == 1.0:
-            return "full"
+            # "full" must mean every property was checked — an errored one was not.
+            return "partial" if errored else "full"
         if pct >= 0.5:
             return "partial"
         return "failed"

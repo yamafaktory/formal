@@ -129,7 +129,27 @@ class TestExtractProperties:
         prop = {k: v for k, v in VALID_PROPERTY.items() if k != "id"}
         with patch("formal.feature_extractor.call_llm", return_value=llm_response([prop])):
             props = extract_properties(make_feature())
-        assert props[0].id == "prop_0"
+        assert props[0].id == "prop_1"
+
+    def test_fallback_ids_are_one_based_and_never_collide(self):
+        """A 0-based fallback made the second property collide with the model's prop_1."""
+        first = {**VALID_PROPERTY, "id": "prop_1"}
+        second = {k: v for k, v in VALID_PROPERTY.items() if k != "id"}
+        with patch("formal.feature_extractor.call_llm", return_value=llm_response([first, second])):
+            props = extract_properties(make_feature())
+        assert [p.id for p in props] == ["prop_1", "prop_2"]
+
+    def test_duplicate_ids_from_the_model_are_made_unique(self):
+        dup = {**VALID_PROPERTY, "id": "same"}
+        with patch("formal.feature_extractor.call_llm", return_value=llm_response([dup, dict(dup)])):
+            props = extract_properties(make_feature())
+        assert len({p.id for p in props}) == 2
+
+    def test_blank_ids_fall_back_rather_than_colliding(self):
+        blank = {**VALID_PROPERTY, "id": "  "}
+        with patch("formal.feature_extractor.call_llm", return_value=llm_response([blank, dict(blank)])):
+            props = extract_properties(make_feature())
+        assert [p.id for p in props] == ["prop_1", "prop_2"]
 
     def test_passes_language_to_prompt(self):
         with patch("formal.feature_extractor.call_llm", return_value=llm_response([])) as mock_llm:
