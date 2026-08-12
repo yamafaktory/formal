@@ -110,3 +110,50 @@ class TestLanguageDetection:
     )
     def test_detects_language_from_suffix(self, suffix, language):
         assert _detect_language(suffix) == language
+
+
+class TestErrorExitCode:
+    def _errored(self):
+        from formal.property_verifier import PropertyResult
+
+        return FeaturePipelineResult(
+            feature_file="mod.py",
+            feature_summary="a module",
+            pure_functions=["f"],
+            impure_parts=[],
+            properties_found=1,
+            properties_verified=0,
+            properties_unverifiable=0,
+            results=[
+                PropertyResult(
+                    property_id="p0",
+                    description="d",
+                    kind="bound",
+                    function="f",
+                    verified=False,
+                    lean_code="",
+                    lean_output="",
+                    retries=0,
+                    reason="NameError: boom",
+                    status="error",
+                    preconditions=[],
+                    assumptions=[],
+                )
+            ],
+        )
+
+    def test_a_tool_failure_exits_2_not_1(self, monkeypatch):
+        """Exit 1 means 'your code is wrong'; a crash must not claim that."""
+        monkeypatch.setattr(cli.sys, "argv", ["formal", "verify", "--code", "def f(): pass"])
+        monkeypatch.setattr(cli, "_load_env", lambda: None)
+        with patch("formal.feature_pipeline.run_feature_pipeline", return_value=self._errored()):
+            assert cli.main() == 2
+
+    def test_json_reports_the_error_count(self, monkeypatch, capsys):
+        monkeypatch.setattr(cli.sys, "argv", ["formal", "verify", "--code", "def f(): pass", "--json"])
+        monkeypatch.setattr(cli, "_load_env", lambda: None)
+        with patch("formal.feature_pipeline.run_feature_pipeline", return_value=self._errored()):
+            cli.main()
+        payload = cli.json.loads(capsys.readouterr().out)
+        assert payload["properties_errored"] == 1
+        assert payload["overall_score"] == "error"

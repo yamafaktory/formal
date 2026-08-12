@@ -29,10 +29,28 @@ class PropertyResult:
     lean_output: str
     retries: int
     reason: str = ""
-    status: str = "failed"  # "verified" | "failed" | "unverifiable"
+    status: str = "failed"  # "verified" | "failed" | "unverifiable" | "error"
     preconditions: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     cached: bool = False
+
+
+def error_result(prop: Property, reason: str) -> "PropertyResult":
+    """A failure of this tool, not a verdict about the code under test."""
+    return PropertyResult(
+        property_id=prop.id,
+        description=prop.description,
+        kind=prop.kind,
+        function=prop.function,
+        verified=False,
+        lean_code="",
+        lean_output="",
+        retries=0,
+        reason=reason,
+        status="error",
+        preconditions=prop.preconditions,
+        assumptions=prop.assumptions,
+    )
 
 
 def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":

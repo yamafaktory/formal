@@ -42,7 +42,7 @@ Your code (any language)
   → LLM: generate properties with explicit preconditions and assumptions
   → LLM: translate each property into a Lean 4 theorem + proof
   → Lean 4 + Mathlib: accept or reject each proof (with retries)
-  → Results: verified / failed / unverifiable
+  → Results: verified / failed / unverifiable / error
 ```
 
 Side effects (DB calls, HTTP, I/O) are excluded — only pure, deterministic logic is
@@ -136,6 +136,7 @@ Results:
 - `full` — all properties proved under stated assumptions
 - `partial` / `failed` — investigate unverified properties; may indicate a logic bug
 - `unverifiable` — modeling limitation (reference equality, reflection, etc.), not a bug
+- `error` — the checker itself failed; no verdict was reached, so re-run rather than changing code
 
 Review the preconditions and assumptions in the output. If they do not match your
 intent, the proof result may not reflect real behaviour.
@@ -169,8 +170,9 @@ no daemon involved.
 ./formal serve
 ```
 
-`verify` exits `0` when every verifiable property was proved, `1` otherwise, so it
-can gate a commit hook or CI step.
+`verify` exits `0` when every verifiable property was proved and `1` when one was
+not, so it can gate a commit hook or CI step. Exit `2` means formal itself failed
+and reached no verdict — treat it as an infrastructure error, not a disproof.
 
 ### Progress output
 
@@ -275,6 +277,7 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
 | `partial` | ≥50% of verifiable properties proved |
 | `failed` | <50% of verifiable properties proved |
 | `no_pure_logic` | No pure functions found |
+| `error` | Nothing could be checked — formal itself failed, no verdict was reached |
 
 **Property status:**
 
@@ -283,6 +286,7 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
 | `verified` | Lean 4 accepted the proof under stated preconditions and assumptions |
 | `failed` | Proof could not be found — may indicate a logic bug or a bad translation |
 | `unverifiable` | Property cannot be modelled in Lean 4 (not a bug) |
+| `error` | formal failed while checking this property — a tool failure, not a verdict about your code |
 
 ### `POST /verify`
 

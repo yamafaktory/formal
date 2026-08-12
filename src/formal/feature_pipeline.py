@@ -10,7 +10,7 @@ from .feature_extractor import (
     extract_properties,
 )
 from .logger import get_logger, log
-from .property_verifier import PropertyResult, unverifiable_result, verify_property
+from .property_verifier import PropertyResult, error_result, unverifiable_result, verify_property
 
 _log = get_logger(__name__)
 
@@ -27,8 +27,15 @@ class FeaturePipelineResult:
     results: list[PropertyResult]
 
     @property
+    def properties_errored(self) -> int:
+        return sum(1 for r in self.results if r.status == "error")
+
+    @property
     def overall_score(self) -> str:
-        verifiable_count = self.properties_found - self.properties_unverifiable
+        errored = self.properties_errored
+        verifiable_count = self.properties_found - self.properties_unverifiable - errored
+        if errored and verifiable_count == 0:
+            return "error"
         if verifiable_count == 0:
             return "no_pure_logic"
         pct = self.properties_verified / verifiable_count
@@ -40,10 +47,13 @@ class FeaturePipelineResult:
 
     def summary(self) -> str:
         rule = "─" * 41
-        score = (
-            f"{self.overall_score}  ({self.properties_verified}/{self.properties_found} verified, "
-            f"{self.properties_unverifiable} unverifiable)"
+        errored = self.properties_errored
+        counts = (
+            f"{self.properties_verified}/{self.properties_found} verified, {self.properties_unverifiable} unverifiable"
         )
+        if errored:
+            counts += f", {errored} errored"
+        score = f"{self.overall_score}  ({counts})"
         lines = [
             rule,
             f"File:    {self.feature_file}",
@@ -58,6 +68,8 @@ class FeaturePipelineResult:
                 icon = "✓"
             elif r.status == "unverifiable":
                 icon = "~"
+            elif r.status == "error":
+                icon = "!"
             else:
                 icon = "✗"
             cached_marker = " [cached]" if r.cached else ""
@@ -69,6 +81,9 @@ class FeaturePipelineResult:
             if r.status != "verified" and r.reason:
                 lines.append(f"      → {r.reason}")
         lines.append(rule)
+        if errored:
+            lines.append(f"{errored} property/properties could not be checked — this is a tool failure, not a verdict.")
+            lines.append(rule)
         return "\n".join(lines)
 
 
@@ -151,19 +166,8 @@ def run_feature_pipeline(
         try:
             return verify_property(prop, fn, max_retries=max_retries, language=language)
         except Exception as e:
-            log(_log, "FAIL", f"{prop.id} ✗ unexpected error: {e}")
-            return PropertyResult(
-                property_id=prop.id,
-                description=prop.description,
-                kind=prop.kind,
-                function=prop.function,
-                verified=False,
-                lean_code="",
-                lean_output=str(e),
-                retries=0,
-                reason=f"Unexpected error: {e}",
-                status="failed",
-            )
+            log(_log, "ERROR", f"{prop.id} ✗ {type(e).__name__}: {e}")
+            return error_result(prop, f"{type(e).__name__}: {e}")
 
     verified_results: list[PropertyResult] = []
 
@@ -184,6 +188,7 @@ def run_feature_pipeline(
     verified_count = sum(1 for r in all_results if r.status == "verified")
     unverifiable_count = sum(1 for r in all_results if r.status == "unverifiable")
     failed_count = sum(1 for r in all_results if r.status == "failed")
+    errored_count = sum(1 for r in all_results if r.status == "error")
     elapsed = time.monotonic() - _t0
     m, s = divmod(int(elapsed), 60)
     elapsed_str = f"{m}m {s}s" if m else f"{s}s"
@@ -191,7 +196,8 @@ def run_feature_pipeline(
         _log,
         "PIPELINE",
         f"Done — verified: {verified_count}, failed: {failed_count}, unverifiable: {unverifiable_count}"
-        f" — total: {elapsed_str}",
+        + (f", errored: {errored_count}" if errored_count else "")
+        + f" — total: {elapsed_str}",
     )
 
     return FeaturePipelineResult(

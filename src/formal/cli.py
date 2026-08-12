@@ -31,6 +31,7 @@ def _result_to_dict(result) -> dict:
         "properties_found": result.properties_found,
         "properties_verified": result.properties_verified,
         "properties_unverifiable": result.properties_unverifiable,
+        "properties_errored": result.properties_errored,
         "overall_score": result.overall_score,
         "results": [r.__dict__ for r in result.results],
     }
@@ -58,6 +59,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     else:
         print(result.summary())
 
+    if result.properties_errored:
+        return 2
     return 0 if result.overall_score in ("full", "no_pure_logic") else 1
 
 

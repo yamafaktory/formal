@@ -58,7 +58,7 @@ class PropertyResultOut(BaseModel):
     description: str
     kind: str
     function: str
-    status: str  # "verified" | "failed" | "unverifiable"
+    status: str  # "verified" | "failed" | "unverifiable" | "error"
     verified: bool
     lean_code: str
     lean_output: str
@@ -77,6 +77,7 @@ class VerifyFeatureResponse(BaseModel):
     properties_found: int
     properties_verified: int
     properties_unverifiable: int
+    properties_errored: int
     overall_score: str
     results: list[PropertyResultOut]
 
@@ -162,6 +163,7 @@ def verify_feature(req: VerifyFeatureRequest):
         properties_found=result.properties_found,
         properties_verified=result.properties_verified,
         properties_unverifiable=result.properties_unverifiable,
+        properties_errored=result.properties_errored,
         overall_score=result.overall_score,
         results=[PropertyResultOut(**r.__dict__) for r in result.results],
     )
