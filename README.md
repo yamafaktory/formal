@@ -56,17 +56,16 @@ output so you can judge whether the LLM's interpretation matches your intent.
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). Everything
-else — the Lean toolchain, Mathlib, the Python environment — is installed by the
-setup script.
+else — the Lean toolchain, Mathlib, the Python environment — is installed by:
 
 ```sh
-./setup.sh
+./formal setup
 ```
 
-It syncs the Python environment, installs [elan](https://github.com/leanprover/elan)
-and the pinned Lean toolchain, downloads prebuilt Mathlib oleans, and then asks
-which LLM backend to use. Re-running it is safe: steps that are already done are
-skipped.
+It installs [elan](https://github.com/leanprover/elan) and the pinned Lean
+toolchain, downloads prebuilt Mathlib oleans, and then asks which LLM backend to
+use. Re-running it is safe: steps that are already done are skipped. Use
+`--lean-only` or `--backend-only` to run just one half.
 
 Nothing is added to your shell configuration — `formal` locates the Lean
 toolchain under `ELAN_HOME` (default `~/.elan`) by itself.
@@ -291,11 +290,11 @@ curl http://localhost:1337/health
 
 ## Configuration
 
-Set in `.env` (created by `setup.sh`), overridable via environment variables:
+Set in `.env` (created by `formal setup`), overridable via environment variables:
 
 | Variable | Description |
 |---|---|
-| `LLM_BACKEND` | `claude-cli` or `openai` (set by `setup.sh`) |
+| `LLM_BACKEND` | `claude-cli` or `openai` (set by `formal setup`) |
 | `CLAUDE_CONFIG_DIR` | Claude config directory (default: `~/.claude`). Use this to select a different account, e.g. `~/.claude-work`. |
 | `LLM_BASE_URL` | Base URL of any OpenAI-compatible endpoint |
 | `LLM_API_KEY` | API key (leave empty for local models) |
@@ -386,4 +385,4 @@ next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CAC
   assumptions; it does not replace integration or end-to-end tests.
 - **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
 - **First install is large.** Mathlib's prebuilt oleans are several GB and take a
-  few minutes to download. This happens once, in `./setup.sh`.
+  few minutes to download. This happens once, in `./formal setup`.

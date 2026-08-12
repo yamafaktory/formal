@@ -14,8 +14,8 @@ uv run ruff format .
 After every shell file change, run:
 
 ```sh
-shfmt -w setup.sh formal
-shellcheck setup.sh formal
+shfmt -w formal
+shellcheck formal
 ```
 
 ## Tests

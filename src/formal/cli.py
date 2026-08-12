@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -77,7 +76,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         llm_detail = base_url or "LLM_BASE_URL not set"
 
     lake = toolchain.which("lake")
-    toolchain = LEAN_PROJECT_DIR / "lean-toolchain"
+    toolchain_file = LEAN_PROJECT_DIR / "lean-toolchain"
     mathlib_oleans = LEAN_PROJECT_DIR / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib"
     lean_ok = lake is not None and mathlib_oleans.is_dir()
 
@@ -86,8 +85,8 @@ def _cmd_status(args: argparse.Namespace) -> int:
         ("lean project", str(LEAN_PROJECT_DIR)),
         ("proof cache", str(PROOF_CACHE_DIR)),
         ("lake", lake or "not on PATH"),
-        ("lean toolchain", toolchain.read_text().strip() if toolchain.is_file() else "missing"),
-        ("mathlib oleans", "built" if mathlib_oleans.is_dir() else "missing — run ./setup.sh"),
+        ("lean toolchain", toolchain_file.read_text().strip() if toolchain_file.is_file() else "missing"),
+        ("mathlib oleans", "built" if mathlib_oleans.is_dir() else "missing — run: formal setup"),
         ("lean sandbox", sandbox.describe()),
         ("llm backend", backend),
         ("llm endpoint", llm_detail),
@@ -108,11 +107,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_setup(args: argparse.Namespace) -> int:
-    script = Path(__file__).resolve().parents[2] / "setup.sh"
-    if not script.is_file():
-        print(f"formal: setup.sh not found at {script}", file=sys.stderr)
-        return 2
-    return subprocess.call([str(script)])
+    from . import setup
+
+    return setup.run(lean_only=args.lean_only, backend_only=args.backend_only)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -139,6 +136,8 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(func=_cmd_serve)
 
     setup = sub.add_parser("setup", help="install the Lean toolchain and configure the LLM backend")
+    setup.add_argument("--lean-only", action="store_true", help="install Lean and Mathlib, skip backend configuration")
+    setup.add_argument("--backend-only", action="store_true", help="configure the LLM backend, skip the Lean install")
     setup.set_defaults(func=_cmd_setup)
 
     return parser

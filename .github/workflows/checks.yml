@@ -24,7 +24,7 @@ jobs:
           SHFMT_VERSION=$(curl -sSL https://api.github.com/repos/mvdan/sh/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
           curl -sSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
           chmod +x /usr/local/bin/shfmt
-          shfmt -d setup.sh formal
+          shfmt -d formal
 
   shellcheck:
     runs-on: ubuntu-latest

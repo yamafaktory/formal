@@ -60,7 +60,7 @@ def _get_openai_client():
         base_url = os.environ.get("LLM_BASE_URL", "").strip()
         api_key = os.environ.get("LLM_API_KEY", "").strip() or "no-key"
         if not base_url:
-            raise RuntimeError("LLM_BASE_URL is not set. Run ./setup.sh to configure your LLM provider.")
+            raise RuntimeError("LLM_BASE_URL is not set. Run `formal setup` to configure your LLM provider.")
         _openai_client = OpenAI(base_url=base_url, api_key=api_key)
     return _openai_client
 
@@ -68,7 +68,7 @@ def _get_openai_client():
 def _call_openai(system: str, user: str, model: str | None = None) -> str:
     model = model or os.environ.get("LLM_MODEL", "").strip()
     if not model:
-        raise RuntimeError("LLM_MODEL is not set. Run ./setup.sh to choose a model.")
+        raise RuntimeError("LLM_MODEL is not set. Run `formal setup` to choose a model.")
 
     response = _get_openai_client().chat.completions.create(
         model=model,
