@@ -337,6 +337,24 @@ Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgra
 uv run pytest --tb=short
 ```
 
+### Updating Lean dependencies
+
+`lean_project/lake-manifest.json` pins the exact commit of Mathlib and everything
+it pulls in — `lakefile.toml` only names a revision for Mathlib itself, so
+inherited packages are unpinned without it. `formal setup` therefore skips
+`lake update` whenever the manifest exists, and installs from the pinned set.
+
+To move to a newer Mathlib, bump `rev` in `lakefile.toml` and the version in
+`lean-toolchain`, then regenerate and commit the result:
+
+```sh
+cd lean_project
+lake update && lake exe cache get && lake build Warmup
+```
+
+Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on
+lemma names or `simp` behaviour that changed.
+
 ## Sandboxing
 
 Lean is not a passive checker: elaboration can execute arbitrary code through
@@ -375,6 +393,10 @@ LLM + retry loop.
 Cache files are written to `results/cache/` in the checkout (one JSON file per entry). Entries
 older than `PROOF_CACHE_TTL_DAYS` (default: 7) are deleted automatically on the
 next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CACHE_DIR`.
+
+The cache is strictly an optimisation. If it cannot be written — wrong
+permissions, full disk — the failure is logged under `[CACHE]` and the
+verification result is unaffected.
 
 ## Limitations
 
