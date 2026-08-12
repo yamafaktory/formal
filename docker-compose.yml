@@ -16,8 +16,6 @@ services:
       LLM_TIMEOUT: ${LLM_TIMEOUT:-480}
       PROOF_CACHE_TTL_DAYS: ${PROOF_CACHE_TTL_DAYS:-7}
     volumes:
-      # Mount source so Python changes take effect without rebuild
-      - .:/app/formal:ro
       # Optional: persist verification results
       - ./results:/app/results
     restart: unless-stopped

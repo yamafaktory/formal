@@ -48,21 +48,18 @@ ENV PATH="/root/.elan/bin:$PATH"
 COPY --from=lean-builder /lean_project /lean_project
 COPY lean_project/Verify/.gitkeep /lean_project/Verify/.gitkeep
 
-# Install Python dependencies
+# Install the application and its dependencies
 WORKDIR /app
-COPY requirements.txt .
 RUN python3 -m venv /venv
 ENV PATH="/venv/bin:$PATH"
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the application (build context IS the formal/ package)
-COPY *.py ./formal/
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir .
 
 ENV LEAN_PROJECT_DIR=/lean_project
 ENV LEAN_TIMEOUT=120
 ENV MAX_PROOF_RETRIES=3
 ENV MAX_PARALLEL_PROPERTIES=4
-ENV PYTHONPATH=/app
 
 EXPOSE 1337
 CMD ["uvicorn", "formal.api:app", "--host", "0.0.0.0", "--port", "1337"]
