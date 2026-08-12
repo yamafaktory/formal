@@ -2,6 +2,7 @@
 
 import getpass
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,32 @@ def env_file() -> Path:
 
 def mathlib_lib() -> Path:
     return LEAN_PROJECT_DIR / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib"
+
+
+TEMPLATE_FILES = ("lakefile.toml", "lean-toolchain", "lake-manifest.json", "Warmup.lean")
+
+
+def template_dir() -> Path:
+    return Path(__file__).resolve().parent / "_lean_project"
+
+
+def materialize_lean_project() -> bool:
+    """Copy the bundled Lean project into FORMAL_HOME when running outside a checkout."""
+    if (LEAN_PROJECT_DIR / "lakefile.toml").is_file():
+        return True
+
+    source = template_dir()
+    if not source.is_dir():
+        _say(f"No Lean project at {LEAN_PROJECT_DIR} and no bundled copy at {source}.")
+        return False
+
+    _say(f"Creating the Lean project in {LEAN_PROJECT_DIR}...")
+    (LEAN_PROJECT_DIR / "Verify").mkdir(parents=True, exist_ok=True)
+    for name in TEMPLATE_FILES:
+        candidate = source / name
+        if candidate.is_file():
+            shutil.copy2(candidate, LEAN_PROJECT_DIR / name)
+    return (LEAN_PROJECT_DIR / "lakefile.toml").is_file()
 
 
 def manifest() -> Path:
@@ -145,6 +172,8 @@ def ensure_toolchain() -> bool:
 
 
 def install_lean() -> bool:
+    if not materialize_lean_project():
+        return False
     if not ensure_elan() or not ensure_toolchain():
         return False
 

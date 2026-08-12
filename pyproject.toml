@@ -28,6 +28,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/formal"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"lean_project/lakefile.toml" = "formal/_lean_project/lakefile.toml"
+"lean_project/lean-toolchain" = "formal/_lean_project/lean-toolchain"
+"lean_project/lake-manifest.json" = "formal/_lean_project/lake-manifest.json"
+"lean_project/Warmup.lean" = "formal/_lean_project/Warmup.lean"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

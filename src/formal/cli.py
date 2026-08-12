@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 def _load_env() -> None:
-    candidate = Path(__file__).resolve().parents[2] / ".env"
+    from .home import home
+
+    candidate = home() / ".env"
     if not candidate.is_file():
         return
     for raw in candidate.read_text().splitlines():

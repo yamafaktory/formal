@@ -22,33 +22,31 @@ def _result(found=2, verified=2, unverifiable=0) -> FeaturePipelineResult:
 
 
 class TestLoadEnv:
-    def _write(self, tmp_path, body):
-        (tmp_path / "src" / "formal").mkdir(parents=True)
+    def _env_at(self, tmp_path, monkeypatch, body):
+        monkeypatch.setenv("FORMAL_HOME", str(tmp_path))
         (tmp_path / ".env").write_text(body)
-        return str(tmp_path / "src" / "formal" / "cli.py")
 
     def test_parses_keys_and_strips_quotes(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(cli, "__file__", self._write(tmp_path, "A=1\nB=\"two\"\nC='three'\n"))
+        self._env_at(tmp_path, monkeypatch, "A=1\nB=\"two\"\nC='three'\n")
         for key in ("A", "B", "C"):
             monkeypatch.delenv(key, raising=False)
         cli._load_env()
         assert (cli.os.environ["A"], cli.os.environ["B"], cli.os.environ["C"]) == ("1", "two", "three")
 
     def test_skips_comments_and_blank_lines(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(cli, "__file__", self._write(tmp_path, "# comment\n\nA=1\nnot-a-pair\n"))
+        self._env_at(tmp_path, monkeypatch, "# comment\n\nA=1\nnot-a-pair\n")
         monkeypatch.delenv("A", raising=False)
         cli._load_env()
         assert cli.os.environ["A"] == "1"
 
     def test_does_not_override_the_real_environment(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(cli, "__file__", self._write(tmp_path, "A=from-file\n"))
+        self._env_at(tmp_path, monkeypatch, "A=from-file\n")
         monkeypatch.setenv("A", "from-shell")
         cli._load_env()
         assert cli.os.environ["A"] == "from-shell"
 
     def test_missing_file_is_not_an_error(self, tmp_path, monkeypatch):
-        (tmp_path / "src" / "formal").mkdir(parents=True)
-        monkeypatch.setattr(cli, "__file__", str(tmp_path / "src" / "formal" / "cli.py"))
+        monkeypatch.setenv("FORMAL_HOME", str(tmp_path))
         cli._load_env()
 
 

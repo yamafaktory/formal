@@ -179,9 +179,53 @@ class TestLeanVersion:
         assert setup.lean_version() is None
 
 
+class TestMaterializeLeanProject:
+    """Outside a checkout the Lean project is created from files bundled in the wheel."""
+
+    def _template(self, monkeypatch, tmp_path):
+        source = tmp_path / "bundled"
+        source.mkdir()
+        for name in setup.TEMPLATE_FILES:
+            (source / name).write_text(f"contents of {name}\n")
+        monkeypatch.setattr(setup, "template_dir", lambda: source)
+        return source
+
+    def test_copies_the_bundled_project(self, monkeypatch, tmp_path):
+        self._template(monkeypatch, tmp_path)
+        target = tmp_path / "home" / "lean_project"
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", target)
+
+        assert setup.materialize_lean_project() is True
+        for name in setup.TEMPLATE_FILES:
+            assert (target / name).is_file()
+        assert (target / "Verify").is_dir()
+
+    def test_an_existing_project_is_never_overwritten(self, monkeypatch, tmp_path):
+        self._template(monkeypatch, tmp_path)
+        target = tmp_path / "checkout" / "lean_project"
+        target.mkdir(parents=True)
+        (target / "lakefile.toml").write_text("mine\n")
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", target)
+
+        assert setup.materialize_lean_project() is True
+        assert (target / "lakefile.toml").read_text() == "mine\n"
+
+    def test_reports_when_no_bundled_copy_exists(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup, "template_dir", lambda: tmp_path / "absent")
+        monkeypatch.setattr(setup, "LEAN_PROJECT_DIR", tmp_path / "home" / "lean_project")
+        assert setup.materialize_lean_project() is False
+
+    def test_the_checkout_ships_every_template_file(self):
+        from formal.home import checkout_root
+
+        for name in setup.TEMPLATE_FILES:
+            assert (checkout_root() / "lean_project" / name).is_file()
+
+
 class TestInstallLean:
     @pytest.fixture
     def toolchain_ready(self, monkeypatch):
+        monkeypatch.setattr(setup, "materialize_lean_project", lambda: True)
         monkeypatch.setattr(setup, "ensure_elan", lambda: True)
         monkeypatch.setattr(setup, "ensure_toolchain", lambda: True)
 
@@ -238,6 +282,7 @@ class TestInstallLean:
         assert lake.call_count == 1
 
     def test_declining_elan_stops_before_lake(self, monkeypatch):
+        monkeypatch.setattr(setup, "materialize_lean_project", lambda: True)
         monkeypatch.setattr(setup.toolchain, "which", lambda _: None)
         monkeypatch.setattr("builtins.input", lambda _: "n")
         with patch.object(setup, "_lake") as lake:
@@ -245,6 +290,7 @@ class TestInstallLean:
         lake.assert_not_called()
 
     def test_an_unusable_toolchain_stops_before_lake(self, monkeypatch):
+        monkeypatch.setattr(setup, "materialize_lean_project", lambda: True)
         monkeypatch.setattr(setup, "ensure_elan", lambda: True)
         monkeypatch.setattr(setup, "ensure_toolchain", lambda: False)
         with patch.object(setup, "_lake") as lake:

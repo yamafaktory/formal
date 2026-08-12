@@ -55,16 +55,23 @@ output so you can judge whether the LLM's interpretation matches your intent.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). Everything
-else — the Lean toolchain, Mathlib, the Python environment — is installed by:
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). Install the
+command, then let it install everything else:
 
 ```sh
-./formal setup
+uv tool install git+https://github.com/yamafaktory/formal
+formal setup
 ```
 
-It installs [elan](https://github.com/leanprover/elan) and the pinned Lean
-toolchain, downloads prebuilt Mathlib oleans, and then asks which LLM backend to
-use. Re-running it is safe: steps that are already done are skipped. Use
+No clone needed — the Lean project is bundled in the wheel and created under
+`~/.local/share/formal` on first run, which is also where Mathlib's oleans land.
+
+Working on formal itself? Clone it and run `./formal setup` instead; a checkout
+keeps its Lean project and results inside the repo.
+
+`formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned
+Lean toolchain, downloads prebuilt Mathlib oleans, and then asks which LLM backend
+to use. Re-running it is safe: steps that are already done are skipped. Use
 `--lean-only` or `--backend-only` to run just one half.
 
 Any elan already on your system is used as-is, however you installed it — so if
