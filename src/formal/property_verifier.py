@@ -4,7 +4,14 @@ from dataclasses import dataclass, field
 
 from . import prompts, proof_cache
 from .feature_extractor import Property, PureFunction
-from .lean_verifier import AUTO_TACTIC_TIMEOUT, LeanResult, check_syntax, verify, with_auto_tactics
+from .lean_verifier import (
+    AUTO_TACTIC_TIMEOUT,
+    LeanResult,
+    as_auto_tactic_attempt,
+    check_syntax,
+    verify,
+    with_auto_tactics,
+)
 from .llm_client import call_llm, extract_code_block
 from .logger import get_logger, log
 
@@ -197,6 +204,16 @@ def prove(
     lean_result = first_result if first_result is not None else verify(proof_code)
     if lean_result.success:
         log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
+    else:
+        # One Lean run is far cheaper than an LLM round-trip, and the chain closes
+        # rfl, arithmetic and simp goals outright.
+        auto_code = as_auto_tactic_attempt(proof_code)
+        if auto_code is not None:
+            log(_log, "VERIFY", f"{prop.id} trying auto-tactics before an LLM retry...")
+            auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
+            if auto_result.success:
+                proof_code, lean_result = auto_code, auto_result
+                log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - _t0)})")
 
     for attempt in range(max_retries - 1):  # one attempt already used above
         if lean_result and lean_result.success:

@@ -5,6 +5,7 @@ import time
 from formal.lean_verifier import (
     BatchEntry,
     LeanResult,
+    as_auto_tactic_attempt,
     build_batch,
     check_syntax,
     sweep_stale_temps,
@@ -326,3 +327,36 @@ class TestStringPrefixHint:
         hint = self._hint("(a ++ b).startsWith a is not definitionally equal")
         for absent in ("String.isPrefixOf_iff", "String.isPrefixOf_append_left", "List.isPrefixOf_append_left"):
             assert absent in hint
+
+
+class TestAsAutoTacticAttempt:
+    """Swapping a model-written proof for the tactic chain, before paying for a retry."""
+
+    def test_replaces_a_single_proof_body(self):
+        code = "import Mathlib\n\ntheorem t (a b : Rat) (h : a <= b) : a <= b := by\n  exact h\n"
+        result = as_auto_tactic_attempt(code)
+        assert result.startswith("import Mathlib\n\ntheorem t (a b : Rat) (h : a <= b) : a <= b := by first |")
+        assert "exact h" not in result
+
+    def test_keeps_the_definitions_above_the_theorem(self):
+        code = "import Mathlib\n\ndef clamp (x : Rat) : Rat := x\n\ntheorem t : True := by\n  trivial\n"
+        result = as_auto_tactic_attempt(code)
+        assert "def clamp (x : Rat) : Rat := x" in result
+
+    def test_handles_a_sorry_placeholder(self):
+        assert "sorry" not in as_auto_tactic_attempt("theorem t : True := by sorry\n")
+
+    def test_refuses_when_two_proofs_are_present(self):
+        code = "theorem a : True := by trivial\n\ntheorem b : True := by trivial\n"
+        assert as_auto_tactic_attempt(code) is None
+
+    def test_refuses_when_a_declaration_follows_the_proof(self):
+        code = "theorem t : True := by\n  trivial\n\ndef after : Nat := 1\n"
+        assert as_auto_tactic_attempt(code) is None
+
+    def test_refuses_when_there_is_no_proof(self):
+        assert as_auto_tactic_attempt("import Mathlib\n\ndef f : Nat := 1\n") is None
+
+    def test_the_rewritten_proof_uses_the_closing_chain(self):
+        result = as_auto_tactic_attempt("theorem t : True := by trivial\n")
+        assert "(linarith; done)" in result and "(ring; done)" in result

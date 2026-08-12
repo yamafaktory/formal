@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -560,6 +561,22 @@ def check_syntax(lean_code: str) -> tuple[bool, str]:
     if not any(kw in lean_code for kw in required):
         return False, "Code must contain at least one of: import, theorem, lemma, def, example"
     return True, ""
+
+
+def as_auto_tactic_attempt(lean_code: str) -> str | None:
+    """Swap a model-written proof for the auto-tactic chain, or None if unsafe.
+
+    Worth trying before spending an LLM retry: the chain costs one Lean run and
+    closes rfl, arithmetic and simp goals outright. Only a single proof is
+    rewritten, and only when nothing follows it, since anything else would mean
+    guessing where one declaration ends and the next begins.
+    """
+    if lean_code.count(":= by") != 1:
+        return None
+    head, _, tail = lean_code.partition(":= by")
+    if re.search(r"^\s*(theorem|lemma|def|example|instance|abbrev)\b", tail, re.MULTILINE):
+        return None
+    return f"{head}:= by {AUTO_TACTICS}\n"
 
 
 def with_auto_tactics(lean_code: str) -> str:
