@@ -11,16 +11,12 @@ from pathlib import Path
 
 from .logger import get_logger, log
 from .paths import LEAN_PROJECT_DIR
+from .toolchain import elan_home
 
 _log = get_logger(__name__)
 _warned = False
 
 _OFF = {"off", "none", "0", "false"}
-
-
-def elan_home() -> Path:
-    value = os.getenv("ELAN_HOME", "").strip()
-    return Path(value).expanduser() if value else Path.home() / ".elan"
 
 
 def mode() -> str:

@@ -245,16 +245,12 @@ if ! _have bwrap; then
 	echo "  Debian: apt install bubblewrap"
 	echo ""
 fi
-if ! _have lake; then
-	echo "Add Lean to your PATH, then open a new shell:"
-	echo "  fish:  fish_add_path $ELAN_BIN"
-	echo "  bash:  export PATH=\"$ELAN_BIN:\$PATH\""
-	echo ""
-fi
 cat <<EOF
 Check the installation:
   $ROOT/formal status
 
 Verify a file:
   $ROOT/formal verify path/to/File.java
+
+formal finds Lean under $ELAN_BIN on its own — no shell PATH changes needed.
 EOF

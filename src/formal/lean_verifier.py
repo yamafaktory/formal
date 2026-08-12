@@ -5,7 +5,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import sandbox
+from . import sandbox, toolchain
 from .paths import LEAN_PROJECT_DIR
 
 LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
@@ -31,16 +31,20 @@ def _get_lean_env() -> dict | None:
     if _lean_env_tried:
         return _lean_env
     _lean_env_tried = True
+    lake = toolchain.which("lake")
+    if lake is None:
+        return None
     try:
         result = subprocess.run(
-            ["lake", "env", "env"],
+            [lake, "env", "env"],
             capture_output=True,
             text=True,
             cwd=str(LEAN_PROJECT_DIR),
+            env=toolchain.env(),
             timeout=30,
         )
         if result.returncode == 0:
-            env = dict(os.environ)
+            env = toolchain.env()
             for line in result.stdout.splitlines():
                 if "=" in line:
                     k, _, v = line.partition("=")
@@ -469,11 +473,11 @@ def verify(lean_code: str, timeout: int | None = None) -> LeanResult:
     lean_env = _get_lean_env()
 
     if lean_env is not None:
-        cmd = ["lean", "--json", str(tmp_path)]
+        cmd = [toolchain.which("lean") or "lean", "--json", str(tmp_path)]
         env = lean_env
     else:
-        cmd = ["lake", "env", "lean", "--json", str(tmp_path)]
-        env = None
+        cmd = [toolchain.which("lake") or "lake", "env", "lean", "--json", str(tmp_path)]
+        env = toolchain.env()
 
     try:
         result = subprocess.run(

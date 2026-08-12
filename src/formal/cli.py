@@ -61,7 +61,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
-    from . import sandbox
+    from . import sandbox, toolchain
     from .paths import FORMAL_HOME, LEAN_PROJECT_DIR, PROOF_CACHE_DIR
 
     backend = os.getenv("LLM_BACKEND", "openai").strip().lower()
@@ -76,7 +76,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         llm_ok = bool(base_url)
         llm_detail = base_url or "LLM_BASE_URL not set"
 
-    lake = shutil.which("lake")
+    lake = toolchain.which("lake")
     toolchain = LEAN_PROJECT_DIR / "lean-toolchain"
     mathlib_oleans = LEAN_PROJECT_DIR / ".lake" / "packages" / "mathlib" / ".lake" / "build" / "lib"
     lean_ok = lake is not None and mathlib_oleans.is_dir()

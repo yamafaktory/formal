@@ -68,6 +68,9 @@ and the pinned Lean toolchain, downloads prebuilt Mathlib oleans, and then asks
 which LLM backend to use. Re-running it is safe: steps that are already done are
 skipped.
 
+Nothing is added to your shell configuration — `formal` locates the Lean
+toolchain under `ELAN_HOME` (default `~/.elan`) by itself.
+
 Two backends:
 
 **1 — Claude Code CLI** (uses your local `claude` binary and Pro/Max plan, no API key needed)
@@ -301,6 +304,7 @@ Set in `.env` (created by `setup.sh`), overridable via environment variables:
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
 | `FORMAL_SANDBOX` | `auto` (default, sandbox if bubblewrap is installed), `bwrap` (require it), or `off` |
+| `ELAN_HOME` | Lean toolchain install (default: `~/.elan`). `formal` finds `lake` and `lean` here itself — no shell PATH setup needed. |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |
 | `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib (default: `$FORMAL_HOME/lean_project`) |
 | `FORMAL_RESULTS_DIR` | Directory for saved results (default: `$FORMAL_HOME/results`) |
