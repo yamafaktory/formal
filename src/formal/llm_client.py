@@ -13,6 +13,7 @@ LLM client — two backends:
 import os
 import re
 import subprocess
+import tempfile
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,11 +41,16 @@ def _call_cli(system: str, user: str, model: str | None = None) -> str:
     if model:
         cmd += ["--model", model]
 
+    # Run outside any project: the CLI loads CLAUDE.md and other context from its
+    # working directory, which would prepend the user's project instructions to
+    # every prompt formal sends.
+    neutral_cwd = tempfile.gettempdir()
+
     timeout = int(os.getenv("LLM_TIMEOUT", "480"))
     last_error = ""
     for attempt in range(2):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=neutral_cwd)
         except subprocess.TimeoutExpired:
             # Observed as an outright stall rather than slow progress, and unrelated to
             # input size — so a second attempt usually succeeds where waiting would not.

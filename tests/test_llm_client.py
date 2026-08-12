@@ -188,3 +188,23 @@ class TestFencedBlocksContainingFences:
 
     def test_no_block_returns_empty(self):
         assert extract_code_block("prose with ``` inline and no block", "lean") == ""
+
+
+class TestNeutralWorkingDirectory:
+    """The CLI loads CLAUDE.md from its cwd; formal's prompts must not inherit a project's."""
+
+    def test_the_cli_does_not_run_in_the_callers_directory(self, monkeypatch, tmp_path):
+        import os
+        import tempfile
+
+        seen = {}
+
+        def capture(cmd, *args, **kwargs):
+            seen["cwd"] = kwargs.get("cwd")
+            return _result(stdout="ok")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(subprocess, "run", capture)
+        _call_cli("sys", "user")
+        assert seen["cwd"] == tempfile.gettempdir()
+        assert seen["cwd"] != os.getcwd()
