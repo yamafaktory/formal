@@ -37,6 +37,9 @@ class PropertyResult:
     retries: int
     reason: str = ""
     status: str = "failed"  # "verified" | "failed" | "unverifiable" | "error"
+    fidelity: str = "unchecked"  # "ok" | "diverges" | "unchecked"
+    back_translation: str = ""
+    fidelity_reason: str = ""
     preconditions: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     cached: bool = False

@@ -160,6 +160,9 @@ no daemon involved.
 # Verify properties one at a time instead of in parallel
 ./formal verify path/to/Feature.java --no-parallel
 
+# Also check that each proved theorem says what the property said
+./formal verify path/to/Feature.java --check-fidelity
+
 # Show resolved paths, toolchain state and LLM backend
 ./formal status
 
@@ -377,6 +380,31 @@ lake update && lake exe cache get && lake build Warmup
 
 Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on
 lemma names or `simp` behaviour that changed.
+
+## Checking the formalization
+
+Lean guarantees that the theorem it was given is true. It cannot tell you whether
+that theorem is the property you wanted — if formalization misread your code, Lean
+proves the wrong thing and reports success. That is the failure this tool is least
+able to notice, because it looks exactly like a pass.
+
+`--check-fidelity` reads each proved theorem back into English *without showing the
+model the original description*, then compares the two:
+
+```
+  ✓ [bound] discount is always between 0 and 1
+      ⚠ theorem may not match this property: the hypothesis assumes the
+        conclusion, so it holds for any definition of the function
+        Lean theorem states: for any rational d, if 0 ≤ d ≤ 1 then 0 ≤ d ≤ 1
+```
+
+It runs only on properties Lean accepted, since a failed property already announces
+itself, and each verdict is cached like a proof. Costs two extra LLM calls per
+verified property, which is why it is opt-in.
+
+Treat a flag as a prompt to read the theorem, not a verdict: the model that
+mistranslated is also the one judging the translation. A clean result is weaker
+evidence than a flagged one.
 
 ## Sandboxing
 

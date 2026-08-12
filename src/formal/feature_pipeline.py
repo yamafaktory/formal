@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from . import fidelity as fidelity_check
 from .feature_extractor import (
     Property,
     decompose,
@@ -26,6 +27,10 @@ class FeaturePipelineResult:
     properties_verified: int
     properties_unverifiable: int
     results: list[PropertyResult]
+
+    @property
+    def properties_diverging(self) -> int:
+        return sum(1 for r in self.results if r.fidelity == "diverges")
 
     @property
     def properties_errored(self) -> int:
@@ -82,7 +87,17 @@ class FeaturePipelineResult:
                 lines.append(f"      Assumptions:   {', '.join(r.assumptions)}")
             if r.status != "verified" and r.reason:
                 lines.append(f"      → {r.reason}")
+            if r.fidelity == "diverges":
+                lines.append(f"      ⚠ theorem may not match this property: {r.fidelity_reason}")
+                if r.back_translation:
+                    lines.append(f"        Lean theorem states: {r.back_translation}")
         lines.append(rule)
+        if self.properties_diverging:
+            lines.append(
+                f"{self.properties_diverging} verified propert(ies) may not say what was asked — "
+                "read the theorem before relying on them."
+            )
+            lines.append(rule)
         if errored:
             lines.append(f"{errored} property/properties could not be checked — this is a tool failure, not a verdict.")
             lines.append(rule)
@@ -94,6 +109,7 @@ def run_feature_pipeline(
     feature_file: str = "<inline>",
     parallel: bool = True,
     language: str = "Python",
+    check_fidelity: bool = False,
 ) -> FeaturePipelineResult:
     _t0 = time.monotonic()
     max_retries = int(os.getenv("MAX_PROOF_RETRIES", "3"))
@@ -202,6 +218,11 @@ def run_feature_pipeline(
     order = {p.id: i for i, p in enumerate(properties)}
     all_results.sort(key=lambda r: order.get(r.property_id, 999))
 
+    # A verified property whose theorem says something else is the one failure that
+    # looks like success, so the check only pays for itself on what Lean accepted.
+    if check_fidelity:
+        fidelity_check.annotate(all_results, _run)
+
     verified_count = sum(1 for r in all_results if r.status == "verified")
     unverifiable_count = sum(1 for r in all_results if r.status == "unverifiable")
     failed_count = sum(1 for r in all_results if r.status == "failed")
@@ -229,13 +250,17 @@ def run_feature_pipeline(
     )
 
 
-def run_feature_pipeline_from_file(file_path: str, language: str | None = None) -> FeaturePipelineResult:
+def run_feature_pipeline_from_file(
+    file_path: str,
+    language: str | None = None,
+    check_fidelity: bool = False,
+) -> FeaturePipelineResult:
     path = pathlib.Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
     code = path.read_text()
     detected = language or _detect_language(path.suffix)
-    return run_feature_pipeline(code, feature_file=str(path), language=detected)
+    return run_feature_pipeline(code, feature_file=str(path), language=detected, check_fidelity=check_fidelity)
 
 
 _EXTENSION_MAP = {

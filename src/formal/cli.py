@@ -32,6 +32,7 @@ def _result_to_dict(result) -> dict:
         "properties_verified": result.properties_verified,
         "properties_unverifiable": result.properties_unverifiable,
         "properties_errored": result.properties_errored,
+        "properties_diverging": result.properties_diverging,
         "overall_score": result.overall_score,
         "results": [r.__dict__ for r in result.results],
     }
@@ -46,13 +47,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             feature_file="<inline>",
             parallel=not args.no_parallel,
             language=args.lang or "Python",
+            check_fidelity=args.check_fidelity,
         )
     else:
         path = Path(args.file).expanduser()
         if not path.is_file():
             print(f"formal: no such file: {path}", file=sys.stderr)
             return 2
-        result = run_feature_pipeline_from_file(str(path), language=args.lang)
+        result = run_feature_pipeline_from_file(str(path), language=args.lang, check_fidelity=args.check_fidelity)
 
     if args.json:
         print(json.dumps(_result_to_dict(result), indent=2))
@@ -137,6 +139,11 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--lang", help="source language (auto-detected from the extension)")
     verify.add_argument("--no-parallel", action="store_true", help="verify properties one at a time")
     verify.add_argument("--json", action="store_true", help="emit the full result as JSON")
+    verify.add_argument(
+        "--check-fidelity",
+        action="store_true",
+        help="read each proved theorem back into English and check it against the property",
+    )
     verify.set_defaults(func=_cmd_verify)
 
     status = sub.add_parser("status", help="show the resolved configuration and toolchain state")

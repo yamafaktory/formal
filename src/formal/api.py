@@ -68,6 +68,9 @@ class PropertyResultOut(BaseModel):
     preconditions: list[str]
     assumptions: list[str]
     cached: bool
+    fidelity: str = "unchecked"
+    back_translation: str = ""
+    fidelity_reason: str = ""
 
 
 class VerifyFeatureResponse(BaseModel):
@@ -79,6 +82,7 @@ class VerifyFeatureResponse(BaseModel):
     properties_verified: int
     properties_unverifiable: int
     properties_errored: int
+    properties_diverging: int
     overall_score: str
     results: list[PropertyResultOut]
 
@@ -165,6 +169,7 @@ def verify_feature(req: VerifyFeatureRequest):
         properties_verified=result.properties_verified,
         properties_unverifiable=result.properties_unverifiable,
         properties_errored=result.properties_errored,
+        properties_diverging=result.properties_diverging,
         overall_score=result.overall_score,
         results=[PropertyResultOut(**r.__dict__) for r in result.results],
     )

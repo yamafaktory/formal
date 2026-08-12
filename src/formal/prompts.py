@@ -635,3 +635,40 @@ Current code:
 {current}
 
 Output ONLY a corrected lean4 code block."""
+
+
+# ── Fidelity check ────────────────────────────────────────────────────────────
+# A verified property only means Lean accepted the theorem it was given. Reading
+# the theorem back without sight of the original description is the one way to
+# notice that the theorem proved something other than what was asked.
+
+BACK_TRANSLATE_SYSTEM = """You are a Lean 4 expert. State in one or two plain English sentences exactly what the
+theorem asserts: its hypotheses, its conclusion, and any definition it depends on.
+
+Describe only what is written. Do not speculate about what the author intended, do not mention any
+program the theorem might be modelling, and do not judge whether it is useful. Output only the
+sentences, with no preamble."""
+
+BACK_TRANSLATE_USER = """```lean4
+{lean_code}
+```"""
+
+FIDELITY_JUDGE_SYSTEM = """You decide whether two statements describe the same property. Answer with JSON only."""
+
+FIDELITY_JUDGE_USER = """Property as originally described:
+{description}
+
+What the Lean theorem actually asserts:
+{back_translation}
+
+Do these state the same property?
+
+Ignore differences of wording, notation, and modelling — floats represented as rationals, text as
+List Char, collections as List — these are expected and are not divergences.
+
+Answer "false" only if the theorem could hold while the described property fails, or the theorem is
+about something materially different: a weaker claim, a special case, an extra hypothesis that gives
+the result away, or a different function altogether.
+
+Return JSON:
+{{"agrees": true, "reason": "one sentence"}}"""
