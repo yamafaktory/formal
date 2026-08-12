@@ -41,7 +41,8 @@ Your code (any language)
   → LLM: extract pure functions, identify side effects
   → LLM: generate properties with explicit preconditions and assumptions
   → LLM: translate each property into a Lean 4 theorem + proof
-  → Lean 4 + Mathlib: accept or reject each proof (with retries)
+  → Lean 4 + Mathlib: accept or reject each proof
+  → on failure: fast tactics, then Mathlib premise search, then LLM retries
   → Results: verified / failed / unverifiable / error
 ```
 

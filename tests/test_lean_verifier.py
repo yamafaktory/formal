@@ -1,13 +1,17 @@
 """Tests for lean_verifier — hint logic, syntax check, auto-tactic substitution."""
 
+import json
 import time
 
 from formal.lean_verifier import (
     BatchEntry,
     LeanResult,
     as_auto_tactic_attempt,
+    as_premise_search,
     build_batch,
     check_syntax,
+    replace_proof,
+    suggested_tactic,
     sweep_stale_temps,
     verify_batch,
     with_auto_tactics,
@@ -360,3 +364,54 @@ class TestAsAutoTacticAttempt:
     def test_the_rewritten_proof_uses_the_closing_chain(self):
         result = as_auto_tactic_attempt("theorem t : True := by trivial\n")
         assert "(linarith; done)" in result and "(ring; done)" in result
+
+
+class TestPremiseSearch:
+    """`exact?` retrieves a lemma from Mathlib, where the tactic chain only guesses."""
+
+    def test_replaces_the_proof_with_a_search(self):
+        code = "import Mathlib\n\ntheorem t (a b : List Char) : a <+: (a ++ b) := by\n  exact rfl\n"
+        assert as_premise_search(code).rstrip().endswith(":= by exact?")
+
+    def test_refuses_the_same_cases_the_tactic_chain_refuses(self):
+        assert as_premise_search("theorem a : True := by trivial\n\ntheorem b : True := by trivial\n") is None
+        assert as_premise_search("theorem t : True := by trivial\n\ndef after : Nat := 1\n") is None
+
+    def test_replace_proof_accepts_any_tactic(self):
+        code = "theorem t : True := by\n  sorry\n"
+        assert replace_proof(code, "exact trivial").rstrip().endswith(":= by exact trivial")
+
+
+class TestSuggestedTactic:
+    """Lean answers premise search with a `Try this:` message."""
+
+    def _line(self, data):
+        return json.dumps({"severity": "information", "data": data})
+
+    def test_parses_the_bracketed_form_lean_emits(self):
+        out = self._line("Try this:\n [apply] exact List.prefix_append a b")
+        assert suggested_tactic(out) == "exact List.prefix_append a b"
+
+    def test_parses_a_plain_suggestion(self):
+        assert suggested_tactic(self._line("Try this: exact Nat.le_refl n")) == "exact Nat.le_refl n"
+
+    def test_parses_a_non_json_line(self):
+        assert suggested_tactic("Try this: exact foo") == "exact foo"
+
+    def test_none_when_lean_suggested_nothing(self):
+        assert suggested_tactic(self._line("unsolved goals ⊢ False")) is None
+
+    def test_none_on_empty_output(self):
+        assert suggested_tactic("") is None
+
+    def test_the_first_suggestion_wins(self):
+        out = self._line("Try this: exact first") + "\n" + self._line("Try this: exact second")
+        assert suggested_tactic(out) == "exact first"
+
+    def test_a_suggestion_ending_in_n_keeps_its_argument(self):
+        """rstrip takes a character set: stripping "\\n" that way ate the trailing n."""
+        assert suggested_tactic(self._line("Try this: exact Nat.le_refl n")) == "exact Nat.le_refl n"
+
+    def test_only_the_first_line_of_a_suggestion_is_taken(self):
+        out = self._line("Try this:\n [apply] exact foo bar\nsome trailing noise")
+        assert suggested_tactic(out) == "exact foo bar"

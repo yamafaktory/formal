@@ -6,9 +6,13 @@ from . import prompts, proof_cache
 from .feature_extractor import Property, PureFunction
 from .lean_verifier import (
     AUTO_TACTIC_TIMEOUT,
+    PREMISE_SEARCH_TIMEOUT,
     LeanResult,
     as_auto_tactic_attempt,
+    as_premise_search,
     check_syntax,
+    replace_proof,
+    suggested_tactic,
     verify,
     with_auto_tactics,
 )
@@ -185,6 +189,41 @@ def formalize(
     return Formalization(prop=prop, key=key, proof_code=proof_code, started_at=_t0)
 
 
+def _recover_without_llm(prop: Property, proof_code: str, started_at: float) -> tuple[str, LeanResult] | None:
+    """Try the tactic chain, then Mathlib premise search, before paying for a retry."""
+    auto_code = as_auto_tactic_attempt(proof_code)
+    if auto_code is not None:
+        log(_log, "VERIFY", f"{prop.id} trying auto-tactics before an LLM retry...")
+        auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
+        if auto_result.success:
+            log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - started_at)})")
+            return auto_code, auto_result
+
+    search_code = as_premise_search(proof_code)
+    if search_code is None:
+        return None
+
+    log(_log, "VERIFY", f"{prop.id} searching Mathlib for a closing lemma...")
+    search_result = verify(search_code, timeout=PREMISE_SEARCH_TIMEOUT)
+    tactic = suggested_tactic(search_result.output)
+    if tactic is None:
+        return None
+
+    # Store the concrete term rather than the search tactic: exact? is slow to
+    # re-check and its answer can move with Mathlib.
+    log(_log, "LEAN", f"{prop.id} Mathlib suggests: {tactic}")
+    final_code = replace_proof(proof_code, tactic)
+    if final_code is None:
+        return None
+    final_result = verify(final_code)
+    if final_result.success:
+        log(_log, "OK", f"{prop.id} ✓ proved by premise search ({_fmt_elapsed(time.monotonic() - started_at)})")
+        return final_code, final_result
+    if search_result.success:
+        return search_code, search_result
+    return None
+
+
 def prove(
     formalization: Formalization,
     first_result: LeanResult | None = None,
@@ -208,15 +247,12 @@ def prove(
     if lean_result.success:
         log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
     else:
-        # One Lean run is far cheaper than an LLM round-trip, and the chain closes
-        # rfl, arithmetic and simp goals outright.
-        auto_code = as_auto_tactic_attempt(proof_code)
-        if auto_code is not None:
-            log(_log, "VERIFY", f"{prop.id} trying auto-tactics before an LLM retry...")
-            auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
-            if auto_result.success:
-                proof_code, lean_result = auto_code, auto_result
-                log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - _t0)})")
+        # Two Lean runs are still cheaper than one LLM round-trip. The chain guesses
+        # from a fixed list; exact? searches Mathlib, which is the failure that
+        # dominates — not a wrong tactic, but not knowing which lemma exists.
+        recovered = _recover_without_llm(prop, proof_code, _t0)
+        if recovered is not None:
+            proof_code, lean_result = recovered
 
     for attempt in range(max_retries - 1):  # one attempt already used above
         if lean_result and lean_result.success:

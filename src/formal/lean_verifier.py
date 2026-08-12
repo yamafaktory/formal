@@ -12,6 +12,9 @@ from .paths import LEAN_PROJECT_DIR
 
 LEAN_TIMEOUT = int(os.getenv("LEAN_TIMEOUT", "120"))
 AUTO_TACTIC_TIMEOUT = 20  # seconds for the auto-tactic pre-pass
+# exact? searches all of Mathlib. A hit costs ~8s; this caps what a miss can waste,
+# since a miss is pure overhead on top of the LLM retry that follows.
+PREMISE_SEARCH_TIMEOUT = 30
 
 # Auto-tactics tried before calling the LLM for proof generation.
 # Ordered fastest-first: rfl (instant), omega (linear Nat/Int), norm_num (numeric),
@@ -563,20 +566,53 @@ def check_syntax(lean_code: str) -> tuple[bool, str]:
     return True, ""
 
 
-def as_auto_tactic_attempt(lean_code: str) -> str | None:
-    """Swap a model-written proof for the auto-tactic chain, or None if unsafe.
+def replace_proof(lean_code: str, tactic: str) -> str | None:
+    """Swap a model-written proof for `tactic`, or None if that would mean guessing.
 
-    Worth trying before spending an LLM retry: the chain costs one Lean run and
-    closes rfl, arithmetic and simp goals outright. Only a single proof is
-    rewritten, and only when nothing follows it, since anything else would mean
-    guessing where one declaration ends and the next begins.
+    Only a single proof is rewritten, and only when nothing follows it — anything
+    else would require knowing where one declaration ends and the next begins.
     """
     if lean_code.count(":= by") != 1:
         return None
     head, _, tail = lean_code.partition(":= by")
     if re.search(r"^\s*(theorem|lemma|def|example|instance|abbrev)\b", tail, re.MULTILINE):
         return None
-    return f"{head}:= by {AUTO_TACTICS}\n"
+    return f"{head}:= by {tactic}\n"
+
+
+def as_auto_tactic_attempt(lean_code: str) -> str | None:
+    """Worth trying before an LLM retry: the chain closes rfl, arithmetic and simp goals."""
+    return replace_proof(lean_code, AUTO_TACTICS)
+
+
+def as_premise_search(lean_code: str) -> str | None:
+    """`exact?` searches Mathlib for a term closing the goal, and names what it finds.
+
+    Where the tactic chain guesses from a fixed list, this retrieves — which is the
+    failure that dominates in practice: not a wrong tactic, but not knowing which
+    lemma exists.
+    """
+    return replace_proof(lean_code, "exact?")
+
+
+_SUGGESTION = re.compile(r"Try this:\s*(?:\[[^\]]*\]\s*)?(.+)")
+
+
+def suggested_tactic(output: str) -> str | None:
+    """Pull the tactic out of Lean's `Try this:` suggestion."""
+    for line in output.splitlines():
+        try:
+            data = json.loads(line).get("data", "")
+        except json.JSONDecodeError:
+            data = line
+        match = _SUGGESTION.search(data)
+        if match:
+            # rstrip takes a character set, not a suffix — stripping "\\n" that way
+            # would eat a trailing n from `exact Nat.le_refl n`.
+            tactic = match.group(1).splitlines()[0].strip().strip('"').strip()
+            if tactic:
+                return tactic
+    return None
 
 
 def with_auto_tactics(lean_code: str) -> str:
