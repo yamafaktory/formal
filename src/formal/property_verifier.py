@@ -70,6 +70,16 @@ def unverifiable_result(prop: Property, reason: str) -> "PropertyResult":
     )
 
 
+@dataclass
+class Formalization:
+    """A property that has been turned into Lean and still needs proving."""
+
+    prop: Property
+    key: str
+    proof_code: str
+    started_at: float
+
+
 def verify_property(
     prop: Property,
     pure_fn: PureFunction | None,
@@ -77,8 +87,19 @@ def verify_property(
     language: str = "Python",
 ) -> PropertyResult:
     """Autoformalize once, then retry proof generation on failure."""
+    outcome = formalize(prop, pure_fn, language=language)
+    if isinstance(outcome, PropertyResult):
+        return outcome
+    return prove(outcome, max_retries=max_retries)
+
+
+def formalize(
+    prop: Property,
+    pure_fn: PureFunction | None,
+    language: str = "Python",
+) -> "PropertyResult | Formalization":
+    """Turn a property into Lean, returning a finished result when no proof is needed."""
     _t0 = time.monotonic()
-    max_retries = max_retries or int(os.getenv("MAX_PROOF_RETRIES", "3"))
     function_code = pure_fn.code if pure_fn else ""
 
     # ── Cache lookup ──────────────────────────────────────────────────────────
@@ -151,12 +172,29 @@ def verify_property(
             proof_cache.save(key, result)
             return result
 
-    # ── Step 3: Lean verify + retry loop ─────────────────────────────────────
-    lean_result: LeanResult | None = None
+    return Formalization(prop=prop, key=key, proof_code=proof_code, started_at=_t0)
+
+
+def prove(
+    formalization: Formalization,
+    first_result: LeanResult | None = None,
+    max_retries: int = None,
+) -> PropertyResult:
+    """Check a formalized property, retrying with error-specific hints on failure.
+
+    first_result lets a caller supply the outcome of a batched Lean run, so the
+    opening attempt does not pay its own Mathlib import.
+    """
+    prop = formalization.prop
+    key = formalization.key
+    proof_code = formalization.proof_code
+    _t0 = formalization.started_at
+    max_retries = max_retries or int(os.getenv("MAX_PROOF_RETRIES", "3"))
+
     retries = 0
     prev_error: str | None = None
 
-    lean_result = verify(proof_code)
+    lean_result = first_result if first_result is not None else verify(proof_code)
     if lean_result.success:
         log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
 

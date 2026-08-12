@@ -1,7 +1,7 @@
 import os
 import pathlib
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .feature_extractor import (
@@ -9,8 +9,9 @@ from .feature_extractor import (
     decompose,
     extract_properties,
 )
+from .lean_verifier import LEAN_TIMEOUT, BatchEntry, LeanResult, verify_batch
 from .logger import get_logger, log
-from .property_verifier import PropertyResult, error_result, unverifiable_result, verify_property
+from .property_verifier import Formalization, PropertyResult, error_result, formalize, prove, unverifiable_result
 
 _log = get_logger(__name__)
 
@@ -137,7 +138,15 @@ def run_feature_pipeline(
     # ── Step 3: Verify each verifiable property (parallel or sequential) ─────
     fn_map = {f.name: f for f in feature.pure_functions}
 
-    def _verify_one(prop: Property) -> PropertyResult:
+    def _run(work, items):
+        if not (parallel and len(items) > 1):
+            return [work(item) for item in items]
+        workers = min(len(items), int(os.getenv("MAX_PARALLEL_PROPERTIES", "4")))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(work, item) for item in items]
+            return [f.result() for f in futures]
+
+    def _formalize_one(prop: Property) -> PropertyResult | Formalization:
         fn = fn_map.get(prop.function)
 
         # If the property references a named function that wasn't extracted, we have
@@ -149,37 +158,44 @@ def run_feature_pipeline(
                 "cannot reconstruct its behavior for Lean verification."
             )
             log(_log, "SKIP", f"{prop.id} — {reason}")
-            return PropertyResult(
-                property_id=prop.id,
-                description=prop.description,
-                kind=prop.kind,
-                function=prop.function,
-                verified=False,
-                lean_code="",
-                lean_output="",
-                retries=0,
-                reason=reason,
-                status="unverifiable",
-                preconditions=prop.preconditions,
-                assumptions=prop.assumptions,
-            )
+            return unverifiable_result(prop, reason)
 
         try:
-            return verify_property(prop, fn, max_retries=max_retries, language=language)
+            return formalize(prop, fn, language=language)
         except Exception as e:
             log(_log, "ERROR", f"{prop.id} ✗ {type(e).__name__}: {e}")
             return error_result(prop, f"{type(e).__name__}: {e}")
 
-    verified_results: list[PropertyResult] = []
+    # ── Step 3a: Formalize every property (LLM-bound, so run these in parallel) ──
+    formalized = _run(_formalize_one, verifiable)
+    pending = [f for f in formalized if isinstance(f, Formalization)]
+    verified_results = [r for r in formalized if isinstance(r, PropertyResult)]
 
-    if parallel and len(verifiable) > 1:
-        workers = min(len(verifiable), int(os.getenv("MAX_PARALLEL_PROPERTIES", "4")))
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = {ex.submit(_verify_one, p): p for p in verifiable}
-            for future in as_completed(futures):
-                verified_results.append(future.result())
-    else:
-        verified_results = [_verify_one(p) for p in verifiable]
+    # ── Step 3b: Check every first attempt in one Lean run ──────────────────────
+    # Each proof would otherwise pay its own `import Mathlib`, which dominates a
+    # Lean invocation. A batch that cannot be attributed falls back to individual
+    # verification inside prove().
+    first_results: dict[str, LeanResult] = {}
+    if len(pending) > 1:
+        log(_log, "LEAN", f"Checking {len(pending)} first attempts in one Lean run...")
+        batched = verify_batch(
+            [BatchEntry(key=f.key, lean_code=f.proof_code) for f in pending],
+            timeout=LEAN_TIMEOUT,
+        )
+        if batched is None:
+            log(_log, "LEAN", "Batch could not be attributed — verifying individually")
+        else:
+            first_results = batched
+
+    # ── Step 3c: Retry loop, per property and only where needed ─────────────────
+    def _prove_one(f: Formalization) -> PropertyResult:
+        try:
+            return prove(f, first_result=first_results.get(f.key), max_retries=max_retries)
+        except Exception as e:
+            log(_log, "ERROR", f"{f.prop.id} ✗ {type(e).__name__}: {e}")
+            return error_result(f.prop, f"{type(e).__name__}: {e}")
+
+    verified_results += _run(_prove_one, pending)
 
     # Merge and sort back to original property order
     all_results = verified_results + unverifiable_results

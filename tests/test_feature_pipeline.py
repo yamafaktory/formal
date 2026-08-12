@@ -80,3 +80,107 @@ class TestSummary:
         text = _result(["verified", "failed"]).summary()
         assert "errored" not in text
         assert "tool failure" not in text
+
+
+class TestBatchedFirstAttempt:
+    """Formalize in parallel, check every first attempt in one Lean run, retry per property."""
+
+    def _property(self, index):
+        from formal.feature_extractor import Property
+
+        return Property(
+            id=f"prop_{index}",
+            description=f"property {index}",
+            function="f",
+            kind="bound",
+            formal="",
+        )
+
+    def _feature(self, count):
+        from formal.feature_extractor import DecomposedFeature, PureFunction
+
+        return DecomposedFeature(
+            feature_summary="a module",
+            pure_functions=[PureFunction(name="f", code="def f(): pass", description="f")],
+            impure_parts=[],
+            properties=[],
+        )
+
+    def _formalization(self, prop):
+        from formal.property_verifier import Formalization
+
+        return Formalization(
+            prop=prop,
+            key=f"key-{prop.id}",
+            proof_code=f"theorem {prop.id} : True := trivial",
+            started_at=0.0,
+        )
+
+    def _run(self, monkeypatch, count, batch_return, prove_spy):
+        import formal.feature_pipeline as fp
+
+        props = [self._property(i) for i in range(count)]
+        monkeypatch.setattr(fp, "decompose", lambda code, language="Python": self._feature(count))
+        monkeypatch.setattr(fp, "extract_properties", lambda feature, language="Python": props)
+        monkeypatch.setattr(fp, "formalize", lambda prop, fn, language="Python": self._formalization(prop))
+        monkeypatch.setattr(fp, "verify_batch", batch_return)
+        monkeypatch.setattr(fp, "prove", prove_spy)
+        return fp.run_feature_pipeline("def f(): pass", parallel=False)
+
+    def test_one_batch_covers_every_pending_property(self, monkeypatch):
+        seen_batches = []
+
+        def batch(entries, timeout=None):
+            seen_batches.append([e.key for e in entries])
+            return {e.key: LeanResultStub(True) for e in entries}
+
+        received = []
+
+        def prove(f, first_result=None, max_retries=None):
+            received.append((f.key, first_result))
+            return _prop("verified", f.prop.id)
+
+        self._run(monkeypatch, 3, batch, prove)
+        assert seen_batches == [["key-prop_0", "key-prop_1", "key-prop_2"]]
+        assert all(first is not None for _, first in received)
+
+    def test_a_single_property_skips_the_batch(self, monkeypatch):
+        calls = []
+
+        def batch(entries, timeout=None):
+            calls.append(entries)
+            return {}
+
+        self._run(monkeypatch, 1, batch, lambda f, first_result=None, max_retries=None: _prop("verified", f.prop.id))
+        assert calls == []
+
+    def test_an_unattributable_batch_falls_back_to_individual_proofs(self, monkeypatch):
+        received = []
+
+        def prove(f, first_result=None, max_retries=None):
+            received.append(first_result)
+            return _prop("verified", f.prop.id)
+
+        self._run(monkeypatch, 3, lambda entries, timeout=None: None, prove)
+        assert received == [None, None, None]
+
+    def test_the_batch_verdict_reaches_each_property(self, monkeypatch):
+        def batch(entries, timeout=None):
+            return {e.key: LeanResultStub(e.key != "key-prop_1") for e in entries}
+
+        received = {}
+
+        def prove(f, first_result=None, max_retries=None):
+            received[f.key] = first_result.success
+            return _prop("verified" if first_result.success else "failed", f.prop.id)
+
+        result = self._run(monkeypatch, 3, batch, prove)
+        assert received == {"key-prop_0": True, "key-prop_1": False, "key-prop_2": True}
+        assert result.properties_verified == 2
+
+
+class LeanResultStub:
+    def __init__(self, success):
+        self.success = success
+        self.output = ""
+        self.errors = []
