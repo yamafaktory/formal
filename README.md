@@ -307,6 +307,7 @@ Set in `.env` (created by `formal setup`), overridable via environment variables
 | `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
 | `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
+| `LLM_TIMEOUT` | Seconds before an LLM call times out (default: `480`). Large files need more, especially when verifying several in parallel. |
 | `FORMAL_SANDBOX` | `auto` (default, sandbox if bubblewrap is installed), `bwrap` (require it), or `off` |
 | `ELAN_HOME` | Lean toolchain install (default: `~/.elan`). `formal` finds `lake` and `lean` here itself — no shell PATH setup needed. |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |

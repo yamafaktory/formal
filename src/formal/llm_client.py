@@ -34,10 +34,16 @@ def _call_cli(system: str, user: str, model: str | None = None) -> str:
     if model:
         cmd += ["--model", model]
 
-    timeout = int(os.getenv("LLM_TIMEOUT", "120"))
+    timeout = int(os.getenv("LLM_TIMEOUT", "480"))
     last_error = ""
     for attempt in range(2):
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"{cli_cmd} did not respond within LLM_TIMEOUT ({timeout}s). "
+                "Large files need a longer budget — raise LLM_TIMEOUT in .env."
+            ) from None
         if result.returncode == 0:
             return result.stdout.strip()
         # Prefer stderr; fall back to stdout; fall back to exit code

@@ -157,6 +157,9 @@ def main() -> int:
         return args.func(args)
     except KeyboardInterrupt:
         return 130
+    except RuntimeError as e:
+        print(f"formal: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
