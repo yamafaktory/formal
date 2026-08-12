@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from . import prompts
+from . import prompts, proof_cache
 from .llm_client import call_llm
 from .logger import get_logger, log
 
@@ -51,6 +51,34 @@ class DecomposedFeature:
     properties: list[Property]
 
 
+def _feature_to_dict(feature: DecomposedFeature) -> dict:
+    return {
+        "feature_summary": feature.feature_summary,
+        "pure_functions": [f.__dict__ for f in feature.pure_functions],
+        "impure_parts": feature.impure_parts,
+    }
+
+
+def _feature_from_dict(data: dict) -> DecomposedFeature:
+    return DecomposedFeature(
+        feature_summary=data["feature_summary"],
+        pure_functions=[PureFunction(**f) for f in data["pure_functions"]],
+        impure_parts=data["impure_parts"],
+        properties=[],
+    )
+
+
+def _decompose_cache_name(code: str, language: str) -> str:
+    prompts_hash = proof_cache.json_key(prompts.DECOMPOSE_SYSTEM, prompts.DECOMPOSE_USER)[:8]
+    return "decompose_" + proof_cache.json_key(prompts_hash, language, code)
+
+
+def _properties_cache_name(feature: DecomposedFeature, language: str) -> str:
+    prompts_hash = proof_cache.json_key(prompts.PROPERTY_EXTRACTION_SYSTEM, prompts.PROPERTY_EXTRACTION_USER)[:8]
+    fingerprint = json.dumps(_feature_to_dict(feature), sort_keys=True)
+    return "properties_" + proof_cache.json_key(prompts_hash, language, fingerprint)
+
+
 def decompose(code: str, language: str = "Python") -> DecomposedFeature:
     """Step 1 — Split feature into pure functions and side effects.
 
@@ -60,13 +88,24 @@ def decompose(code: str, language: str = "Python") -> DecomposedFeature:
     retried once, since silently reporting "nothing to check" is the one failure
     mode a caller cannot distinguish from a clean pass.
     """
+    name = _decompose_cache_name(code, language)
+    cached = proof_cache.load_json(name)
+    if cached is not None:
+        log(_log, "CACHE", f"decomposition reused — {len(cached['pure_functions'])} pure function(s)")
+        return _feature_from_dict(cached)
+
     feature = _decompose_once(code, language)
     if not feature.pure_functions and looks_like_it_defines_functions(code):
         log(_log, "PIPELINE", "Decomposition found no pure functions in a file that defines some — retrying")
         retried = _decompose_once(code, language)
         if retried.pure_functions:
             log(_log, "PIPELINE", f"Retry found {len(retried.pure_functions)} pure function(s)")
-            return retried
+            feature = retried
+
+    # An empty decomposition is never cached — it is the outcome most likely to be
+    # a one-off LLM miss, and freezing it would make the miss permanent.
+    if feature.pure_functions:
+        proof_cache.save_json(name, _feature_to_dict(feature))
     return feature
 
 
@@ -119,6 +158,12 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
         pure_functions=pure_text,
         feature_summary=feature.feature_summary,
     )
+    name = _properties_cache_name(feature, language)
+    cached = proof_cache.load_json(name)
+    if cached is not None:
+        log(_log, "CACHE", f"property set reused — {len(cached.get('properties', []))} properties")
+        return _parse_properties(cached)
+
     data = None
     for _ in range(2):
         raw = call_llm(system, user)
@@ -130,7 +175,10 @@ def extract_properties(feature: DecomposedFeature, language: str = "Python") -> 
     if data is None:
         return []
 
-    return _parse_properties(data)
+    properties = _parse_properties(data)
+    if properties:
+        proof_cache.save_json(name, data)
+    return properties
 
 
 def assign_unique_ids(properties: list["Property"]) -> list["Property"]:

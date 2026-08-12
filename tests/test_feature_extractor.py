@@ -221,3 +221,65 @@ class TestDecomposeRetry:
             feature = decompose("def clamp(x):\n    return x\n")
         assert feature.pure_functions == []
         assert mock_llm.call_count == 2
+
+
+class TestUpstreamCaching:
+    """Decomposition and extraction are cached so the same file yields the same
+    functions and properties — without that the proof cache can never hit, since
+    its key includes the synthesised function body."""
+
+    def _decomposition(self, names):
+        functions = [{"name": n, "code": f"def {n}(): pass", "description": n} for n in names]
+        return json.dumps({"feature_summary": "s", "pure_functions": functions, "impure_parts": []})
+
+    def test_a_second_decomposition_of_the_same_source_makes_no_llm_call(self):
+        code = "def clamp(x):\n    return x\n"
+        with patch("formal.feature_extractor.call_llm", return_value=self._decomposition(["clamp"])) as llm:
+            first = decompose(code)
+            second = decompose(code)
+        assert llm.call_count == 1
+        assert [f.name for f in first.pure_functions] == [f.name for f in second.pure_functions]
+
+    def test_the_reused_decomposition_round_trips_intact(self):
+        code = "def clamp(x):\n    return x\n"
+        with patch("formal.feature_extractor.call_llm", return_value=self._decomposition(["clamp", "scale"])):
+            first = decompose(code)
+            second = decompose(code)
+        assert [(f.name, f.code, f.description) for f in first.pure_functions] == [
+            (f.name, f.code, f.description) for f in second.pure_functions
+        ]
+        assert first.feature_summary == second.feature_summary
+
+    def test_different_source_is_a_different_entry(self):
+        with patch("formal.feature_extractor.call_llm", return_value=self._decomposition(["clamp"])) as llm:
+            decompose("def a(): pass\n")
+            decompose("def b(): pass\n")
+        assert llm.call_count == 2
+
+    def test_a_different_language_is_a_different_entry(self):
+        code = "def clamp(x):\n    return x\n"
+        with patch("formal.feature_extractor.call_llm", return_value=self._decomposition(["clamp"])) as llm:
+            decompose(code, language="Python")
+            decompose(code, language="Kotlin")
+        assert llm.call_count == 2
+
+    def test_an_empty_decomposition_is_never_cached(self):
+        """Freezing an empty result would make a one-off LLM miss permanent."""
+        code = "def clamp(x):\n    return x\n"
+        with patch("formal.feature_extractor.call_llm", return_value=self._decomposition([])) as llm:
+            decompose(code)
+            decompose(code)
+        assert llm.call_count == 4  # two attempts each time, nothing cached
+
+    def test_a_second_extraction_for_the_same_feature_makes_no_llm_call(self):
+        with patch("formal.feature_extractor.call_llm", return_value=llm_response([VALID_PROPERTY])) as llm:
+            first = extract_properties(make_feature())
+            second = extract_properties(make_feature())
+        assert llm.call_count == 1
+        assert [p.id for p in first] == [p.id for p in second]
+
+    def test_an_empty_property_set_is_not_cached(self):
+        with patch("formal.feature_extractor.call_llm", return_value=llm_response([])) as llm:
+            extract_properties(make_feature())
+            extract_properties(make_feature())
+        assert llm.call_count == 2

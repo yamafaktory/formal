@@ -56,6 +56,29 @@ def _evict_expired() -> None:
             path.unlink(missing_ok=True)
 
 
+def json_key(*parts: str) -> str:
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+
+
+def load_json(name: str) -> dict | None:
+    path = _CACHE_DIR / f"{name}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def save_json(name: str, payload: dict) -> None:
+    """Best-effort — a cache miss must never be worse than a write failure."""
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (_CACHE_DIR / f"{name}.json").write_text(json.dumps(payload, indent=2))
+    except OSError as e:
+        log(_log, "CACHE", f"could not write {name[:20]}… — {e}")
+
+
 def cache_key(
     function_code: str,
     description: str,
