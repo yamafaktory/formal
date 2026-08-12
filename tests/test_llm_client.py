@@ -143,3 +143,48 @@ class TestCliErrorsSurfaceCleanly:
         ):
             assert cli.main() == 2
         assert "formal: claude did not respond" in capsys.readouterr().err
+
+
+class TestFencedBlocksContainingFences:
+    """Lean that reasons about markdown embeds ``` in string literals.
+
+    An unanchored closing fence truncated such a block mid-literal, and because
+    extraction is deterministic every retry reproduced it — the property could
+    never recover.
+    """
+
+    def _wrap(self, body, lang="lean4"):
+        return f"Here you go:\n\n```{lang}\n{body}\n```\n\nThat's it.\n"
+
+    def test_a_fence_inside_a_string_literal_does_not_end_the_block(self):
+        body = 'import Mathlib\n\ndef fence : String := "```"\n\ntheorem t : True := trivial'
+        extracted = extract_code_block(self._wrap(body), "lean4")
+        assert extracted == body
+        assert extracted.count('"') % 2 == 0
+
+    def test_the_result_is_not_truncated_mid_literal(self):
+        body = 'def fence : String := "```"\ndef after : Nat := 1'
+        assert "def after" in extract_code_block(self._wrap(body), "lean4")
+
+    def test_an_ordinary_block_is_unchanged(self):
+        body = "import Mathlib\n\ntheorem t : True := trivial"
+        assert extract_code_block(self._wrap(body), "lean4") == body
+
+    def test_a_block_at_the_very_start_is_found(self):
+        text = "```lean\ntheorem t : True := trivial\n```\n"
+        assert extract_code_block(text, "lean") == "theorem t : True := trivial"
+
+    def test_trailing_spaces_after_the_language_are_tolerated(self):
+        text = "```lean  \ntheorem t : True := trivial\n```\n"
+        assert extract_code_block(text, "lean") == "theorem t : True := trivial"
+
+    def test_the_first_block_still_wins(self):
+        text = "```lean\nfirst\n```\n\n```lean\nsecond\n```\n"
+        assert extract_code_block(text, "lean") == "first"
+
+    def test_language_agnostic_extraction_is_also_anchored(self):
+        body = 'def fence : String := "```"'
+        assert extract_code_block(self._wrap(body, lang="")) == body
+
+    def test_no_block_returns_empty(self):
+        assert extract_code_block("prose with ``` inline and no block", "lean") == ""

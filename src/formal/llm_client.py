@@ -18,9 +18,15 @@ import subprocess
 
 
 def extract_code_block(text: str, lang: str = "") -> str:
-    """Extract the content of the first fenced code block matching lang."""
-    pattern = rf"```{re.escape(lang)}\n(.*?)```" if lang else r"```\w*\n(.*?)```"
-    match = re.search(pattern, text, re.DOTALL)
+    """Extract the content of the first fenced code block matching lang.
+
+    Both fences must start a line. Lean that reasons about markdown embeds ``` in
+    string literals, and an unanchored match ends the block at the first one —
+    truncating the code mid-literal, which Lean then rejects as an unterminated
+    string literal on every retry, since the truncation is deterministic.
+    """
+    fence = rf"^```{re.escape(lang)}[^\S\n]*\n" if lang else r"^```\w*[^\S\n]*\n"
+    match = re.search(fence + r"(.*?)^```", text, re.DOTALL | re.MULTILINE)
     return match.group(1).strip() if match else ""
 
 
