@@ -3,7 +3,7 @@ import os
 import sys
 
 # ── ANSI colours (disabled if not a TTY or NO_COLOR is set) ──────────────────
-_USE_COLOR = sys.stdout.isatty() and not os.getenv("NO_COLOR")
+_USE_COLOR = sys.stderr.isatty() and not os.getenv("NO_COLOR")
 
 _C = (
     {
@@ -45,7 +45,7 @@ class _PipelineFormatter(logging.Formatter):
 def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
+        handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(_PipelineFormatter())
         logger.addHandler(handler)
         logger.setLevel(logging.DEBUG)

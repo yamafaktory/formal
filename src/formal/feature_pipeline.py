@@ -39,16 +39,19 @@ class FeaturePipelineResult:
         return "failed"
 
     def summary(self) -> str:
+        rule = "─" * 41
+        score = (
+            f"{self.overall_score}  ({self.properties_verified}/{self.properties_found} verified, "
+            f"{self.properties_unverifiable} unverifiable)"
+        )
         lines = [
-            f"Feature: {self.feature_file}",
+            rule,
+            f"File:    {self.feature_file}",
             f"Summary: {self.feature_summary}",
+            f"Score:   {score}",
             f"Pure functions: {', '.join(self.pure_functions) or 'none'}",
             f"Impure parts: {len(self.impure_parts)} side effects (not verifiable)",
-            "",
-            f"Properties found:       {self.properties_found}",
-            f"Properties verified:    {self.properties_verified}",
-            f"Not verifiable:         {self.properties_unverifiable}",
-            "",
+            rule,
         ]
         for r in self.results:
             if r.status == "verified":
@@ -65,6 +68,7 @@ class FeaturePipelineResult:
                 lines.append(f"      Assumptions:   {', '.join(r.assumptions)}")
             if r.status != "verified" and r.reason:
                 lines.append(f"      → {r.reason}")
+        lines.append(rule)
         return "\n".join(lines)
 
 
@@ -215,15 +219,22 @@ _EXTENSION_MAP = {
     ".py": "Python",
     ".java": "Java",
     ".kt": "Kotlin",
+    ".kts": "Kotlin",
     ".ts": "TypeScript",
     ".tsx": "TypeScript",
     ".js": "JavaScript",
     ".jsx": "JavaScript",
+    ".mjs": "JavaScript",
     ".go": "Go",
     ".rs": "Rust",
     ".cs": "C#",
     ".cpp": "C++",
+    ".cc": "C++",
+    ".cxx": "C++",
+    ".c": "C",
+    ".h": "C",
     ".rb": "Ruby",
+    ".zig": "Zig",
 }
 
 

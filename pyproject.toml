@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.9.0",
 ]
 
+[project.scripts]
+formal = "formal.cli:main"
+
 [dependency-groups]
 dev = [
     "ruff>=0.4.0",
