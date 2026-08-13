@@ -102,15 +102,38 @@ def _is_stale(entry: dict, root: Path) -> bool:
     return normalise_code(function_code) not in normalise_code(current)
 
 
-def load(path: str | Path, root: str | Path | None = None) -> SpecFile:
-    """Read a spec file, separating properties still describing their source from those that are not."""
-    path = Path(path).expanduser()
+def _require_absolute(path: Path, what: str) -> None:
     if not path.is_absolute():
         raise SpecError(
-            f"spec file path must be absolute, got {path} — it is resolved by the server, "
+            f"{what} path must be absolute, got {path} — it is resolved by the server, "
             "whose working directory is not the caller's, so a relative path may find "
             "a different file or none at all"
         )
+
+
+def read_proofs(paths: dict[str, str]) -> dict[str, str]:
+    """Read Lean proofs from disk so a caller need not marshal them into JSON.
+
+    Every caller so far has written a script for this: loading each .lean file,
+    escaping it into a JSON object and posting the batch. The server can already read
+    a spec file from an absolute path; reading the proofs beside it is the same trust
+    model and removes the script.
+    """
+    proofs: dict[str, str] = {}
+    for property_id, raw in paths.items():
+        path = Path(raw).expanduser()
+        _require_absolute(path, f"proof file for {property_id}")
+        try:
+            proofs[property_id] = path.read_text()
+        except OSError as e:
+            raise SpecError(f"cannot read the proof for {property_id} at {path}: {e}") from None
+    return proofs
+
+
+def load(path: str | Path, root: str | Path | None = None) -> SpecFile:
+    """Read a spec file, separating properties still describing their source from those that are not."""
+    path = Path(path).expanduser()
+    _require_absolute(path, "spec file")
     root = Path(root) if root is not None else path.parent
     entries = _read(path)
     _validate(entries, path)

@@ -137,3 +137,27 @@ class TestStaleness:
         )
         assert specs.load(path).stale_ids == ["fmt_elapsed/bound"]
         assert specs.load(path, root=code_root).stale_ids == []
+
+
+class TestReadProofs:
+    """Every caller so far wrote a script to load .lean files and escape them into JSON.
+    One kept its proofs inside a Python module rather than as .lean files at all, because
+    that is what submitting them required."""
+
+    def test_proofs_are_read_from_disk(self, tmp_path):
+        (tmp_path / "a.lean").write_text("import Mathlib\ntheorem a : True := trivial")
+        (tmp_path / "b.lean").write_text("theorem b : True := trivial")
+        proofs = specs.read_proofs({"one": str(tmp_path / "a.lean"), "two": str(tmp_path / "b.lean")})
+        assert proofs["one"].startswith("import Mathlib")
+        assert proofs["two"] == "theorem b : True := trivial"
+
+    def test_a_relative_path_is_refused(self):
+        with pytest.raises(specs.SpecError, match="absolute"):
+            specs.read_proofs({"one": "proofs/a.lean"})
+
+    def test_a_missing_file_names_the_property(self, tmp_path):
+        with pytest.raises(specs.SpecError, match="one"):
+            specs.read_proofs({"one": str(tmp_path / "absent.lean")})
+
+    def test_nothing_to_read_is_nothing(self):
+        assert specs.read_proofs({}) == {}

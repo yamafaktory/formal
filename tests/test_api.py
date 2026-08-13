@@ -190,3 +190,43 @@ class TestSlashedPropertyIds:
     def test_an_unknown_slashed_id_is_still_a_404(self, client):
         sid = client.post("/session", json=_props("p1")).json()["session_id"]
         assert client.get(f"/session/{sid}/proof/no/such/thing").status_code == 404
+
+
+class TestProofFiles:
+    def _session(self, client):
+        return client.post("/session", json=_props("p1")).json()["session_id"]
+
+    def test_the_server_reads_the_proof_off_disk(self, client, tmp_path):
+        sid = self._session(client)
+        (tmp_path / "p1.lean").write_text("import Mathlib\ntheorem t : True := trivial")
+        outcome = Outcome(id="p1", status="verified", lean_code="x", checked=True)
+        with patch("formal.session.check_batch", return_value=[outcome]) as check_batch:
+            body = client.post(f"/session/{sid}/check", json={"proof_files": {"p1": str(tmp_path / "p1.lean")}}).json()
+
+        assert body["verified"] == ["p1"]
+        assert check_batch.call_args[0][0][0].lean_code.startswith("import Mathlib")
+
+    def test_a_missing_proof_file_is_a_client_error(self, client, tmp_path):
+        sid = self._session(client)
+        response = client.post(f"/session/{sid}/check", json={"proof_files": {"p1": str(tmp_path / "no.lean")}})
+        assert response.status_code == 400
+        assert "p1" in response.json()["detail"]
+
+    def test_a_relative_proof_path_is_refused(self, client):
+        sid = self._session(client)
+        response = client.post(f"/session/{sid}/check", json={"proof_files": {"p1": "p1.lean"}})
+        assert response.status_code == 400
+        assert "absolute" in response.json()["detail"]
+
+    def test_both_forms_together_are_refused(self, client, tmp_path):
+        sid = self._session(client)
+        (tmp_path / "p1.lean").write_text("x")
+        response = client.post(
+            f"/session/{sid}/check",
+            json={"proofs": {"p1": "x"}, "proof_files": {"p1": str(tmp_path / "p1.lean")}},
+        )
+        assert response.status_code == 400
+
+    def test_neither_form_is_refused(self, client):
+        sid = self._session(client)
+        assert client.post(f"/session/{sid}/check", json={}).status_code == 400

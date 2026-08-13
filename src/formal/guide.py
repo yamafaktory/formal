@@ -69,7 +69,9 @@ WORKFLOW = [
     "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work' — "
     "that field is a list of bare id strings, while 'cached' is a list of objects. "
     "GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
-    "POST /session/{session_id}/check with {'proofs': {'<id>': '<lean>'}}.",
+    "POST /session/{session_id}/check with {'proof_files': {'<id>': '<absolute path to .lean>'}} "
+    "— the server reads them, so you do not have to load and escape each file into JSON. "
+    "{'proofs': {'<id>': '<lean>'}} still works when the proof is not on the server's disk.",
     "For each failure, read its error and hint, fix that proof, and resubmit only the ids "
     "that failed — the first submission carries everything, a retry carries only what broke. "
     "Repeat until 'complete' is true.",
@@ -185,6 +187,8 @@ def _formalize() -> str:
             prompts.AUTOFORMALIZE_SYSTEM.strip(),
             _render(prompts.PROPERTY_FORMALIZE_AND_PROVE_USER),
             "## Submitting",
+            "Point the check endpoint at your .lean files with `proof_files` and let the server "
+            "read them; pass `proofs` inline only when the server cannot see your disk. "
             "Send every proof for the session in one request: they are checked in a single Lean "
             "invocation, so one request costs one Mathlib import rather than one per proof. Retries "
             "are the exception — resubmit only the ids that failed, since anything already accepted "

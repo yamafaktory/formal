@@ -59,7 +59,10 @@ class SessionResponse(BaseModel):
 
 
 class CheckRequest(BaseModel):
-    proofs: dict[str, str]
+    proofs: dict[str, str] = Field(default_factory=dict)
+    # Absolute paths to .lean files, read by the server. Every caller so far wrote a
+    # script to load these and escape them into `proofs`; this removes the need.
+    proof_files: dict[str, str] = Field(default_factory=dict)
 
 
 class FailureOut(BaseModel):
@@ -148,8 +151,16 @@ def read_session(session_id: str):
 @app.post("/session/{session_id}/check", response_model=CheckResponse)
 def check_session(session_id: str, req: CheckRequest):
     session = _require(session_id)
+    if bool(req.proofs) == bool(req.proof_files):
+        raise HTTPException(status_code=400, detail="Provide either 'proofs' or 'proof_files', not both")
+
     try:
-        outcomes = sessions.check(session, req.proofs)
+        proofs = req.proofs or specs.read_proofs(req.proof_files)
+    except specs.SpecError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        outcomes = sessions.check(session, proofs)
     except sessions.UnknownProperty as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
