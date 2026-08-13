@@ -119,9 +119,16 @@ def _extract() -> str:
             prompts.PROPERTY_EXTRACTION_SYSTEM.strip(),
             _render(prompts.PROPERTY_EXTRACTION_USER),
             "## Step 3 — write the spec file",
-            "Take the properties from step 2, drop any with verifiable=false, and write the rest "
-            "to the spec file described by GET /guide. Add source_file and function_code to each. "
-            "Choose ids that you would choose again next run — they are how a human reads the diff.",
+            "Write the properties you judged verifiable into the spec file described by GET /guide, "
+            "one entry each, with source_file and function_code filled in. Choose ids you would "
+            "choose again next run: they are the diff a human reads, and the spec file is the thing "
+            "you commit.",
+            "function_code must be a contiguous slice of source_file, copied verbatim. Staleness is "
+            "checked by looking for that text in the current file, compared with trailing whitespace "
+            "ignored — so reindenting the file is not a change, but editing the function is, and the "
+            "property is then reported stale rather than proved. Include anything the property "
+            "actually depends on: if it is about a lookup table the function reads, put the table in "
+            "the slice too, so editing the table invalidates the property.",
         ]
     )
 

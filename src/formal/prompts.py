@@ -196,20 +196,12 @@ Output ONLY a lean4 code block with the proof filled in."""
 DECOMPOSE_SYSTEM = """You are an expert at separating pure logic from side-effectful code.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
-DECOMPOSE_USER = """Analyze this {language} feature code and decompose it.
+DECOMPOSE_USER = """Separate the pure logic in the file from everything else.
 
-Return a JSON object with:
-{{
-  "pure_functions": [
-    {{
-      "name": "function name",
-      "code": "the extracted pure function as a string",
-      "description": "what it does in one sentence"
-    }}
-  ],
-  "impure_parts": ["description of side effects: DB calls, HTTP, I/O, etc."],
-  "feature_summary": "one sentence describing the overall feature"
-}}
+For each function, decide whether it is pure: the same inputs always produce the same
+result, with no I/O, no database, no network and no global state. This step produces no
+document — you are deciding which functions are worth stating properties about, and
+noting in a sentence what the file does overall. Carry that into the next step.
 
 Rules:
 - Pure functions: no DB, no I/O, no HTTP, no global state, same input always gives same output
@@ -220,22 +212,14 @@ Rules:
   arguments are almost always pure — classify them as pure unless they explicitly do I/O or mutate
   state reachable from outside.
 - If a function mixes pure and impure, extract just the pure computation as a new helper
-- If nothing is pure, return empty pure_functions array
-- Preserve the original {language} syntax when extracting pure function code
-
-Feature code:
-{code}"""
+- If nothing in the file is pure, there is nothing to prove here — say so and stop
+- When you record a function's source in the spec file, copy it verbatim from the file"""
 
 PROPERTY_EXTRACTION_SYSTEM = """You are an expert in formal verification and Lean 4.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
-PROPERTY_EXTRACTION_USER = """Given these pure {language} functions, identify properties worth verifying in Lean 4,
-and assess each one for Lean formalizability in a single pass.
-
-Pure functions:
-{pure_functions}
-
-Feature summary: {feature_summary}
+PROPERTY_EXTRACTION_USER = """For each pure function you identified, work out the properties worth proving about it,
+and assess each one for Lean formalizability in the same pass.
 
 A property is VERIFIABLE if:
 - It can be expressed purely in terms of mathematical structures
@@ -263,40 +247,36 @@ A property is UNVERIFIABLE only if it fundamentally depends on something outside
 - External state, I/O, or time
 
 String properties — verifiability rules:
-- `startsWith` / `isPrefixOf` with free-variable strings: mark verifiable=true.
+- `startsWith` / `isPrefixOf` with free-variable strings: verifiable.
   Add to assumptions: "Strings modeled as List Char; proof via simp [List.isPrefixOf]"
 - String injectivity WITHOUT a separator precondition (e.g. f(a,b) = prefix++a++mid++b is injective
-  because prefix and mid are unique delimiters): mark verifiable=true.
+  because prefix and mid are unique delimiters): verifiable.
   Add to assumptions: "Strings modeled as List Char; proof via List.append_inj"
 - String injectivity WITH a separator precondition (the proof requires assuming the separator does
-  NOT appear inside either input string): mark verifiable=FALSE.
-  unverifiable_reason: "Separator-precondition string injectivity requires substring-absence reasoning
-  that Lean/Mathlib cannot discharge within practical timeouts — always times out."
+  NOT appear inside either input string): not verifiable. Substring-absence reasoning is not
+  something Lean and Mathlib discharge within practical timeouts — it always times out.
 
-When in doubt, mark as verifiable — ordering, bounds, identity, idempotency, and
+When in doubt, treat it as verifiable — ordering, bounds, identity, idempotency, and
 monotonicity properties are almost always verifiable under these models.
 
-Return a JSON object:
-{{
-  "properties": [
-    {{
-      "id": "prop_1",
-      "description": "human-readable property description",
-      "function": "which pure function this applies to",
-      "kind": "one of: bound, identity, monotonicity, commutativity, idempotency, invariant",
-      "formal": "mathematical statement, e.g. forall x, f(x) <= x",
-      "preconditions": ["what must hold on inputs, e.g. 'n > 0', 'list is non-empty'"],
-      "assumptions": ["modeling assumptions, e.g. 'no overflow', 'elements are comparable', 'floats as rationals'"],
-      "verifiable": true,
-      "unverifiable_reason": ""
-    }}
-  ]
-}}
+Write the ones you judge verifiable into the spec file described by GET /guide, and drop
+the rest — there is no field for an unverifiable property, and nothing downstream reads
+one. If leaving something out was a real decision, say so in your report to the user;
+the spec file records what you are checking, not what you considered.
 
-Focus on properties that are mathematically precise and meaningful for correctness (not trivial).
-Aim for 2-5 properties per pure function. Max 10 total.
-Set verifiable=false and explain in unverifiable_reason only for properties that genuinely cannot
-be modelled in Lean 4 under the assumptions above."""
+Each property needs a `kind`, which is one of:
+  bound          a value is constrained — non-negative, within a range, never empty
+  identity       two expressions are equal, or one rewrites to the other
+  monotonicity   ordering is preserved: larger input, no smaller output
+  commutativity  order of arguments or operations does not matter
+  idempotency    applying twice is the same as applying once
+  invariant      something is preserved or always holds — a count, a well-formedness
+
+Pick the one that describes the shape of the statement. `kind` is part of the cache key,
+so use the same one for the same property across runs; when two fit, prefer the more
+specific. Aim for 2-5 properties per pure function, at most 10 in total, and prefer
+properties that would catch a real mistake over ones that restate the implementation.
+"""
 
 PROPERTY_FORMALIZE_AND_PROVE_USER = """Formalize this property as a Lean 4 theorem AND provide a complete proof.
 No sorry.
@@ -497,6 +477,16 @@ moves the failure, and pushed far enough it crashes the process instead of error
 
   Each branch is now a ground proposition about one literal, which `rfl`, `decide` or
   `norm_num` closes instantly.
+
+  The same applies one level up. A nested bounded quantifier over a table of pairs
+  — `∀ p ∈ table, f p.1 = p.2` — is not small either; take the cases the same way:
+
+    simp only [table, List.mem_cons, List.not_mem_nil, or_false]
+    rintro p (rfl | rfl | rfl)
+    all_goals rfl
+
+  Note `List.not_mem_nil` here where the single-list case above wants
+  `List.mem_nil_iff`; both exist and they are not interchangeable.
 
 Long `if`-chains over character literals
   `split_ifs` and `fin_cases` both hand the whole chain to `simp`, and a dozen

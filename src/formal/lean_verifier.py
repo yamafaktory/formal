@@ -481,6 +481,30 @@ class LeanResult:
                 "You applied too many arguments — the term is already a value or proposition, not a function. "
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
             )
+        lowered = data.lower()
+        if "maximum recursion depth" in lowered or "deep recursion" in lowered:
+            return (
+                "Lean ran out of recursion budget rather than rejecting the proof. Raising "
+                "`maxRecDepth` moves the failure and, pushed far enough, crashes instead of "
+                "erroring — restructure instead.\n"
+                "The usual cause is `decide` on something that only looks small: a bounded `∀` over "
+                "a list of `Char`, or a nested one over a table of pairs, evaluates a decision "
+                "procedure across the whole type. Turn the membership into a disjunction and take "
+                "the cases, so each branch is ground:\n"
+                "  simp only [theTable, List.mem_cons, List.not_mem_nil, or_false]\n"
+                "  rintro p (rfl | rfl | rfl)\n"
+                "  all_goals rfl\n"
+                "For a long `if`-chain, `by_cases` with `rw [if_pos]`/`rw [if_neg]` costs far less "
+                "than `split_ifs` or `fin_cases`."
+            )
+        if "maximum number of heartbeats" in lowered or "deterministic) timeout" in lowered:
+            return (
+                "Lean hit its heartbeat budget — a tactic is doing far more work than the goal "
+                "warrants, usually a bare `simp` or `decide` over something large. Name the lemmas "
+                "with `simp only [...]`, or case-split by hand so each goal is small. "
+                "`set_option maxHeartbeats` raises the ceiling but rarely fixes the cause."
+            )
+
         tactic_failure = re.search(r"[Tt]actic `([^`]+)` failed", data)
         if tactic_failure:
             name = tactic_failure.group(1)

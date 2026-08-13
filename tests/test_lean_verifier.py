@@ -535,3 +535,31 @@ class TestRebase:
     def test_a_positionless_error_is_left_alone(self):
         entry = self._entry()
         assert _rebase({"data": "boom"}, entry) == {"data": "boom"}
+
+
+class TestLimitFailures:
+    """Lean exhausting a budget reads like a rejection but needs the opposite response.
+
+    A live agent hit maxRecDepth on a nested bounded forall and was told to "review
+    Lean 4 syntax", then raised the limit — which is the one thing that does not help.
+    """
+
+    def test_a_recursion_limit_is_recognised(self):
+        hint = make_result(
+            "maximum recursion depth has been reached\nuse `set_option maxRecDepth <num>` to increase limit"
+        ).hint_for_error()
+        assert not hint.startswith("Review Lean 4 syntax")
+        assert "restructure" in hint
+
+    def test_it_says_raising_the_limit_is_not_the_fix(self):
+        hint = make_result("maximum recursion depth has been reached").hint_for_error()
+        assert "moves the failure" in hint
+
+    def test_it_offers_the_pattern_that_replaces_decide(self):
+        hint = make_result("maximum recursion depth has been reached").hint_for_error()
+        assert "List.mem_cons" in hint and "rintro" in hint
+
+    def test_a_heartbeat_limit_is_recognised(self):
+        hint = make_result("maximum number of heartbeats has been reached").hint_for_error()
+        assert "heartbeat" in hint
+        assert not hint.startswith("Review Lean 4 syntax")

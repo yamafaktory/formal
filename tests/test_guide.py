@@ -208,3 +208,39 @@ class TestDocumentedLemmasExist:
         for name in sorted(CITED_AS_ABSENT):
             result = verify(f"import Mathlib\n\n#check @{name}")
             assert not result.success, f"{name} now exists — the guide still warns against it"
+
+
+class TestExtractReadsAsInstructions:
+    """It was a prompt template: placeholders for a caller that no longer exists, and an
+    output schema with fields the spec file has no home for. Two agents worked around it."""
+
+    def test_no_input_placeholder_survives(self):
+        assert not re.findall(r"<the [^>]+>", guide.topic("extract"))
+
+    def test_the_dead_output_schema_is_gone(self):
+        text = guide.topic("extract")
+        assert "unverifiable_reason" not in text
+        assert "verifiable=" not in text
+
+    def test_every_kind_the_schema_allows_is_defined(self):
+        """The six values were listed as an enum and never explained."""
+        text = guide.topic("extract")
+        for kind in ("bound", "identity", "monotonicity", "commutativity", "idempotency", "invariant"):
+            assert re.search(rf"^  {kind}\s+\S", text, re.M), f"{kind} is listed but not defined"
+
+    def test_staleness_matching_is_documented(self):
+        """A caller guessed substring semantics and had no way to confirm it."""
+        assert "trailing whitespace ignored" in guide.topic("extract")
+
+
+class TestNestedCaseAnalysis:
+    def test_the_nested_pair_case_is_covered(self):
+        """Flat membership was documented; a table of pairs blew the limit anyway."""
+        text = guide.topic("tactics")
+        assert "table of pairs" in text
+        assert "List.not_mem_nil" in text
+
+    def test_the_two_nil_lemmas_are_distinguished(self):
+        """They are not interchangeable and the wrong one costs a retry."""
+        text = guide.topic("tactics")
+        assert "List.mem_nil_iff" in text and "List.not_mem_nil" in text
