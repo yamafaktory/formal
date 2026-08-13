@@ -61,6 +61,34 @@ class TestCacheKey:
         assert all(c in "0123456789abcdef" for c in k)
 
 
+class TestCollisions:
+    """Two distinct properties sharing a key means one is served the other's proof.
+
+    Both of these were found by an agent proving properties about this very module.
+    """
+
+    def test_a_word_operator_does_not_swallow_an_identifier(self):
+        """`∈` mapped to " in ", then whitespace went, so `a∈b` and `ainb` merged."""
+        assert cache_key("c", "k", "a∈b") == cache_key("c", "k", "a in b")
+        assert cache_key("c", "k", "a∈b") != cache_key("c", "k", "ainb")
+
+    def test_a_quantifier_does_not_swallow_an_identifier(self):
+        assert cache_key("c", "k", "∀x") == cache_key("c", "k", "forall x")
+        assert cache_key("c", "k", "∀x") != cache_key("c", "k", "forallx")
+
+    def test_a_negation_does_not_swallow_an_identifier(self):
+        assert cache_key("c", "k", "¬p") == cache_key("c", "k", "not p")
+        assert cache_key("c", "k", "¬p") != cache_key("c", "k", "notp")
+
+    def test_no_field_can_imitate_the_boundary_between_two_others(self):
+        """Joining on a newline: ("X\\na","b","c") and ("X","a\\nb","c") hashed alike."""
+        assert cache_key("X\na", "b", "c") != cache_key("X", "a\nb", "c")
+
+    def test_an_empty_field_is_still_distinguishable(self):
+        assert cache_key("", "ab", "c") != cache_key("a", "b", "c")
+        assert cache_key("a", "", "bc") != cache_key("a", "b", "c")
+
+
 class TestKeySurvivesParaphrase:
     """The key identifies what is proved. Prose describing it is free to vary.
 

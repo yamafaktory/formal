@@ -38,60 +38,60 @@ def _evict_expired() -> None:
             path.unlink(missing_ok=True)
 
 
-def json_key(*parts: str) -> str:
-    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+# Canonical form is the symbol, not the word. Words were the wrong direction: with
+# whitespace stripped, `∀x` became `forallx`, which is also what the identifier
+# `forallx` becomes. The symbols cannot occur inside an identifier, so they can.
+# Longest first — `<->` contains `->`.
+_ASCII_OPERATORS = (
+    ("<->", "↔"),
+    ("->", "→"),
+    ("/\\", "∧"),
+    ("\\/", "∨"),
+    ("<>", "≠"),
+    ("<=", "≤"),
+    (">=", "≥"),
+    ("⟶", "→"),
+)
 
+# Spelled as words, so they only count on a word boundary: `in` inside `ainb` is not
+# the membership operator, and treating it as one merged unrelated statements.
+_WORD_OPERATORS = {"forall": "∀", "exists": "∃", "not": "¬", "in": "∈"}
 
-def load_json(name: str) -> dict | None:
-    path = _CACHE_DIR / f"{name}.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        return None
-
-
-def save_json(name: str, payload: dict) -> None:
-    """Best-effort — a cache miss must never be worse than a write failure."""
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        (_CACHE_DIR / f"{name}.json").write_text(json.dumps(payload, indent=2))
-    except OSError as e:
-        log(_log, "CACHE", f"could not write {name[:20]}… — {e}")
-
-
-_OPERATORS = {
-    "∀": "forall",
-    "∃": "exists",
-    "→": "->",
-    "⟶": "->",
-    "↔": "<->",
-    "∧": "/\\",
-    "∨": "\\/",
-    "¬": "not",
-    "≠": "<>",
-    "≤": "<=",
-    "≥": ">=",
-    "∈": " in ",
-}
+_WORD_PATTERN = re.compile(r"\b(" + "|".join(_WORD_OPERATORS) + r")\b")
 
 
 def normalise_formal(formal: str) -> str:
     """Reduce a formal statement to the form two writers of it should agree on.
 
     Operator spelling and spacing are free choices — `∀ x, p x → q x` and
-    `forall x, p x -> q x` are one statement — and an agent picks differently
-    from run to run where a fixed prompt at temperature 0 did not.
+    `forall x, p x -> q x` are one statement — and an agent picks differently from
+    run to run where a fixed prompt at temperature 0 did not.
+
+    Word-spelled operators are matched on word boundaries, and only before the
+    whitespace goes. Replacing them afterwards, or by substring, merges statements
+    that merely contain the letters: `a∈b` and the unrelated `ainb` both reduced to
+    `ainb` under the previous version.
     """
-    for symbol, ascii_form in _OPERATORS.items():
-        formal = formal.replace(symbol, ascii_form)
+    for ascii_form, symbol in _ASCII_OPERATORS:
+        formal = formal.replace(ascii_form, symbol)
+    formal = _WORD_PATTERN.sub(lambda m: _WORD_OPERATORS[m.group(1)], formal)
     return re.sub(r"\s+", "", formal)
 
 
 def normalise_code(function_code: str) -> str:
     """Indentation is meaning in Python, so only trailing and surrounding space goes."""
     return "\n".join(line.rstrip() for line in function_code.strip().splitlines())
+
+
+def _framed(*parts: str) -> str:
+    """Join fields so that no field can imitate the boundary between two others.
+
+    Joining on a newline was ambiguous: normalised code and the kind may both contain
+    one, so ("X\na", "b", "c") and ("X", "a\nb", "c") produced the same payload and
+    therefore the same key — two distinct properties sharing one cached proof.
+    Length-prefixing each field removes the ambiguity whatever the field contains.
+    """
+    return "".join(f"{len(part)}:{part}" for part in parts)
 
 
 def cache_key(function_code: str, kind: str, formal: str) -> str:
@@ -108,7 +108,7 @@ def cache_key(function_code: str, kind: str, formal: str) -> str:
     a prompt change that alters the formalisation changes `formal`, which changes
     the key anyway.
     """
-    payload = "\n".join([normalise_code(function_code), kind.strip().lower(), normalise_formal(formal)])
+    payload = _framed(normalise_code(function_code), kind.strip().lower(), normalise_formal(formal))
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

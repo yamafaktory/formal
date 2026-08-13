@@ -61,7 +61,8 @@ class TestNormalisationIsStableOverTheCorpus:
 
     def test_unicode_and_ascii_spellings_agree_across_the_corpus(self, corpus):
         """Rewriting each statement the way another writer might must not move its key."""
-        swaps = [("forall", "∀"), ("exists", "∃"), ("->", "→"), ("<->", "↔"), ("/\\", "∧"), ("\\/", "∨")]
+        # Longest first, or "->" mangles "<->" into "<→" before it can be matched.
+        swaps = [("<->", "↔"), ("->", "→"), ("/\\", "∧"), ("\\/", "∨"), ("forall", "∀"), ("exists", "∃")]
         for prop in corpus:
             rewritten = prop["formal"]
             for ascii_form, symbol in swaps:
