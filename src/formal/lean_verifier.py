@@ -527,8 +527,10 @@ class LeanResult:
                 "ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` "
                 "for products.",
             }.get(name)
-            goal = "\nThe error prints the goal state after the failure — read it before rewriting the "
-            "proof; it usually shows the goal is not the one you think you are proving."
+            goal = (
+                "\nThe error prints the goal state after the failure — read it before rewriting the "
+                "proof; it usually shows the goal is not the one you think you are proving."
+            )
             return (
                 f"The `{name}` tactic ran and failed to close the goal." + (f" {specific}" if specific else "") + goal
             )

@@ -45,11 +45,17 @@ target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "I", "UP", "B018"]
 # E: pycodestyle errors
 # F: pyflakes (unused imports, undefined names)
 # I: isort (import ordering)
 # UP: pyupgrade (modernise syntax)
+# B018: a string on its own line that was meant to continue the one above it —
+#       this silently truncated a hint mid-sentence for months.
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach for an attribute precisely to assert it raises.
+"tests/*" = ["B018"]
 
 [tool.ruff.format]
 quote-style = "double"
