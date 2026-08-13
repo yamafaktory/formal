@@ -1,7 +1,7 @@
 [project]
 name = "formal"
 version = "1.0.0"
-description = "An LLM-driven property checker for code, backed by Lean 4 as a proof engine."
+description = "Property checker for code, backed by Lean 4 and Mathlib. Your agent writes the properties and the proofs; formal checks them."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
@@ -18,6 +18,10 @@ formal = "formal.cli:main"
 dev = [
     "ruff>=0.4.0",
     "pytest>=8.0.0",
+    # starlette's TestClient needs an HTTP client, and it arrived transitively via
+    # openai until the LLM pipeline was removed. httpx2 rather than httpx: starlette
+    # deprecates the latter for the testclient.
+    "httpx2>=2.10.0",
 ]
 
 [build-system]

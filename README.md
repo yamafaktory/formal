@@ -2,19 +2,22 @@
 
 [![Checks](https://github.com/yamafaktory/formal/actions/workflows/checks.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/checks.yml)
 
-A Lean 4 proof service for the agent working on your code.
+**Property checker for code, backed by Lean 4 and Mathlib. Your agent writes the
+properties and the proofs; formal checks them.**
 
-You state properties about your pure functions; formal turns them into checked Lean
-theorems and tells you which hold. What Lean accepts is mechanically verified — within
-the limits described below.
+State a property about a pure function — that splitting preserves line count, that a
+discount stays between 0 and 1 — as a Lean 4 theorem. formal checks it against Mathlib
+and tells you whether it holds. What Lean accepts is mechanically verified, within the
+limits described below.
 
-**formal does not call a model.** It has no API key, no backend setting and no opinion
-about which model you use. The agent already reading your code writes the properties and
-the Lean; formal checks them, recovers the failures it can without help, remembers what
-was proved, and tells you when the code moves out from under a property.
+**formal does not call a model.** No API key, no backend setting, no opinion about which
+model you use. The agent already reading your code writes the properties and the Lean;
+formal runs Lean over them in one batched invocation, recovers the failures it can
+without help — auto-tactics, then a Mathlib premise search — remembers every proof Lean
+accepted, and tells you when the code moves out from under a property.
 
-That split is the whole design. An agent that can write Lean does not need a second
-model started on its behalf to do it.
+That split is the whole design. An agent that can write Lean does not need a second model
+started on its behalf to do it.
 
 ## What this actually is
 
