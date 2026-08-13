@@ -185,7 +185,7 @@ class LeanResult:
                 "Change every `[h : T]` in the theorem signature to `(h : T)` (round brackets). "
                 "Example: `[h : op = PLUS]` → `(h : op = PLUS)`."
             )
-        if any(k in data for k in ("unknown identifier", "unknown tactic", "Unknown constant", "unknown constant")):
+        if any(k in data.lower() for k in ("unknown identifier", "unknown tactic", "unknown constant")):
             import re as _re
 
             # Check for specific commonly-guessed wrong lemma names and give the correct replacement
@@ -260,16 +260,21 @@ class LeanResult:
                 if name in _KNOWN_RENAMES:
                     return f"`{name}` does not exist. Use {_KNOWN_RENAMES[name]}."
 
-            # Distinguish missing local hypotheses (e.g. h2, hne) from missing Mathlib names
-            local_hyp = _re.search(r"[Uu]nknown identifier [`']([a-z_][a-zA-Z0-9_']*)[`']", data)
-            if local_hyp and "." not in local_hyp.group(1):
-                return (
+            # A missing hypothesis and a guessed lemma name are different mistakes with
+            # different fixes. Hypotheses look like h, h2, hne; a snake_case name with
+            # words in it is someone hoping a lemma exists.
+            local_hyp = _re.search(r"[Uu]nknown identifier [`']((?:h|ih)[a-z]{0,4}[0-9']*)[`']", data)
+            if local_hyp:
+                hint = (
                     f"`{local_hyp.group(1)}` is not in the local context — it was never introduced. "
-                    "`split_ifs with h1 h2` only names as many hypotheses as there are if-conditions split "
-                    "in that goal; some branches may have fewer. "
-                    "Use `simp [hypothesis]` to discharge conditions directly, or check the goal state "
-                    "to see which names were actually introduced."
+                    "Check the goal state for the names that actually exist there."
                 )
+                if "split_ifs" in data:
+                    hint += (
+                        " `split_ifs with h1 h2` names only as many hypotheses as there are if-conditions "
+                        "in that goal, and some branches have fewer."
+                    )
+                return hint
             return (
                 "That identifier or constant does not exist in Mathlib. Do not guess lemma names. "
                 "Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding "
@@ -476,6 +481,33 @@ class LeanResult:
                 "You applied too many arguments — the term is already a value or proposition, not a function. "
                 "Remove the extra argument(s) and use `exact` to close the goal directly."
             )
+        tactic_failure = re.search(r"[Tt]actic `([^`]+)` failed", data)
+        if tactic_failure:
+            name = tactic_failure.group(1)
+            specific = {
+                "rfl": "The two sides are not definitionally equal, so no amount of unfolding will close "
+                "this. Prove it by `induction` or `simp` with the relevant lemmas, or check the statement "
+                "is actually true — `rfl` failing on something you expected to be trivial usually means "
+                "the model does not say what you meant.",
+                "decide": "The proposition is not closed, or deciding it exhausts the recursion budget. "
+                "`decide` only works on ground decidable propositions; case-split the free variables "
+                "first, and prefer explicit `rcases`/`by_cases` over `decide` on anything ranging over a "
+                "large type such as `Char`.",
+                "omega": "`omega` handles linear integer and natural arithmetic only. Everything else in "
+                "the goal is an opaque term to it, including unreduced projections and function calls — "
+                "reduce those first, then call it.",
+                "simp": "`simp` could not make progress or could not close the goal. Give it the lemmas "
+                "it needs — `simp [thoseLemmas]` — or use `simp only [...]` to keep it from rewriting into "
+                "a shape you did not intend.",
+                "linarith": "`linarith` needs the goal and hypotheses to be linear arithmetic over an "
+                "ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` "
+                "for products.",
+            }.get(name)
+            goal = "\nThe error prints the goal state after the failure — read it before rewriting the "
+            "proof; it usually shows the goal is not the one you think you are proving."
+            return (
+                f"The `{name}` tactic ran and failed to close the goal." + (f" {specific}" if specific else "") + goal
+            )
         return "Review Lean 4 syntax and ensure all imports are present."
 
 
@@ -644,13 +676,30 @@ class BatchEntry:
     lean_code: str
     first_line: int = 0
     last_line: int = 0
+    # Where each body line came from in the submitted proof. Imports are hoisted out
+    # of the batch, so the nth body line is rarely the nth line the caller wrote, and
+    # a position it cannot locate in its own file is worse than none.
+    source_lines: list[int] = field(default_factory=list)
 
 
-def _split_imports(lean_code: str) -> tuple[list[str], list[str]]:
-    imports, body = [], []
-    for line in lean_code.splitlines():
-        (imports if line.strip().startswith("import ") else body).append(line)
-    return imports, body
+def error_position(error: dict) -> tuple[int | None, int | None]:
+    """Lean reports a position under `pos`; older shapes used flat keys."""
+    pos = error.get("pos") or {}
+    line = pos.get("line", error.get("line"))
+    col = pos.get("column", error.get("col"))
+    return line, col
+
+
+def _split_imports(lean_code: str) -> tuple[list[str], list[str], list[int]]:
+    """Split off the imports, remembering where each surviving line started."""
+    imports, body, source_lines = [], [], []
+    for number, line in enumerate(lean_code.splitlines(), start=1):
+        if line.strip().startswith("import "):
+            imports.append(line)
+        else:
+            body.append(line)
+            source_lines.append(number)
+    return imports, body, source_lines
 
 
 def build_batch(entries: list[BatchEntry]) -> str:
@@ -662,7 +711,7 @@ def build_batch(entries: list[BatchEntry]) -> str:
     seen_imports: list[str] = []
     blocks: list[str] = []
     for index, entry in enumerate(entries):
-        imports, body = _split_imports(entry.lean_code)
+        imports, body, entry.source_lines = _split_imports(entry.lean_code)
         for line in imports:
             if line.strip() not in seen_imports:
                 seen_imports.append(line.strip())
@@ -698,7 +747,7 @@ def verify_batch(entries: list[BatchEntry], timeout: int | None = None) -> dict[
     # An error outside every namespace (a bad hoisted import, say) invalidates the
     # whole batch rather than any one proof.
     for error in result.errors:
-        line = error.get("pos", {}).get("line") or error.get("line") or 0
+        line = error_position(error)[0] or 0
         if not any(e.first_line <= line <= e.last_line for e in entries):
             return None
     if not result.success and not result.errors:
@@ -707,9 +756,9 @@ def verify_batch(entries: list[BatchEntry], timeout: int | None = None) -> dict[
     per_key: dict[str, LeanResult] = {}
     for entry in entries:
         errors = [
-            e
+            _rebase(e, entry)
             for e in result.errors
-            if entry.first_line <= (e.get("pos", {}).get("line") or e.get("line") or 0) <= entry.last_line
+            if entry.first_line <= (error_position(e)[0] or 0) <= entry.last_line
         ]
         per_key[entry.key] = LeanResult(
             success=not errors,
@@ -717,3 +766,16 @@ def verify_batch(entries: list[BatchEntry], timeout: int | None = None) -> dict[
             errors=errors,
         )
     return per_key
+
+
+def _rebase(error: dict, entry: BatchEntry) -> dict:
+    """Move a position from the concatenated batch back into the submitted proof."""
+    line = error_position(error)[0]
+    if line is None:
+        return error
+    index = line - entry.first_line
+    if not 0 <= index < len(entry.source_lines):
+        return error
+    rebased = {**error, "pos": {**(error.get("pos") or {}), "line": entry.source_lines[index]}}
+    rebased.pop("line", None)
+    return rebased

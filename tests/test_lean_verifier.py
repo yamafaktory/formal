@@ -6,10 +6,13 @@ import time
 from formal.lean_verifier import (
     BatchEntry,
     LeanResult,
+    _rebase,
+    _split_imports,
     as_auto_tactic_attempt,
     as_premise_search,
     build_batch,
     check_syntax,
+    error_position,
     replace_proof,
     suggested_tactic,
     sweep_stale_temps,
@@ -135,6 +138,39 @@ class TestHintForError:
             "application type mismatch\nhas type\n  Option String\nbut is expected to have type\n  Option Nat"
         ).hint_for_error()
         assert "map" in hint or "Option" in hint
+
+    def test_a_capitalised_unknown_identifier_is_not_generic(self):
+        """Lean 4.29 says "Unknown identifier"; the guard listed only the lowercase form.
+
+        The same guard already carried both casings of "Unknown constant", so the
+        neighbour had been fixed once and this one missed.
+        """
+        hint = make_result("Unknown identifier `made_up_lemma`").hint_for_error()
+        assert not hint.startswith("Review Lean 4 syntax")
+        assert "guess" in hint
+
+    def test_a_guessed_lemma_is_not_reported_as_a_missing_hypothesis(self):
+        hint = make_result("Unknown identifier `made_up_lemma`").hint_for_error()
+        assert "local context" not in hint
+
+    def test_a_missing_hypothesis_still_reads_as_one(self):
+        hint = make_result("unknown identifier `h2`").hint_for_error()
+        assert "local context" in hint
+
+    def test_split_ifs_advice_only_appears_when_split_ifs_does(self):
+        assert "split_ifs" not in make_result("unknown identifier `h2`").hint_for_error()
+        assert "split_ifs" in make_result("unknown identifier `h2`, split_ifs with h1").hint_for_error()
+
+    def test_a_failing_tactic_is_named(self):
+        """Lean 4.29 reports "Tactic `x` failed"; no branch matched that shape at all."""
+        hint = make_result("Tactic `rfl` failed: The left-hand side\n  l.reverse\nis not").hint_for_error()
+        assert "`rfl`" in hint
+        assert "definitionally equal" in hint
+
+    def test_a_failing_decide_is_told_why_it_is_the_wrong_tactic(self):
+        hint = make_result("Tactic `decide` failed: maximum recursion depth").hint_for_error()
+        assert "decide" in hint
+        assert "recursion" in hint or "ground" in hint
 
     def test_fallback_hint(self):
         hint = make_result("some completely unknown error xyz").hint_for_error()
@@ -444,3 +480,57 @@ class TestSuggestedTactic:
     def test_only_the_first_line_of_a_suggestion_is_taken(self):
         out = self._line("Try this:\n [apply] exact foo bar\nsome trailing noise")
         assert suggested_tactic(out) == "exact foo bar"
+
+
+# ── error positions ───────────────────────────────────────────────────────────
+
+
+class TestErrorPosition:
+    """Lean reports positions under `pos`; the checker read flat `line`/`col` keys,
+    so every failure came back positionless — with a batch that is bisecting blind."""
+
+    def test_reads_the_position_lean_actually_sends(self):
+        assert error_position({"pos": {"line": 12, "column": 4}}) == (12, 4)
+
+    def test_falls_back_to_flat_keys(self):
+        assert error_position({"line": 7, "col": 1}) == (7, 1)
+
+    def test_absent_position_is_none(self):
+        assert error_position({"data": "boom"}) == (None, None)
+
+
+class TestSplitImportsTracksSource:
+    def test_body_lines_remember_where_they_came_from(self):
+        imports, body, source_lines = _split_imports("import Mathlib\n\ntheorem t : True := by\n  trivial")
+        assert imports == ["import Mathlib"]
+        assert body == ["", "theorem t : True := by", "  trivial"]
+        assert source_lines == [2, 3, 4]
+
+    def test_an_import_lower_down_still_shifts_the_rest(self):
+        _, body, source_lines = _split_imports("theorem a : True := by trivial\nimport Foo\ntheorem b : True := by trivial")
+        assert len(body) == len(source_lines) == 2
+        assert source_lines == [1, 3]
+
+
+class TestRebase:
+    """A batch line number points into a file the caller never saw."""
+
+    def _entry(self):
+        entry = BatchEntry(key="k", lean_code="import Mathlib\n\ntheorem t : True := by\n  trivial")
+        build_batch([entry])
+        return entry
+
+    def test_a_batch_position_becomes_a_position_in_the_submitted_proof(self):
+        entry = self._entry()
+        # the second body line, wherever build_batch happened to place it
+        rebased = _rebase({"pos": {"line": entry.first_line + 1, "column": 3}}, entry)
+        assert error_position(rebased) == (entry.source_lines[1], 3)
+
+    def test_a_position_outside_the_entry_is_left_alone(self):
+        entry = self._entry()
+        original = {"pos": {"line": 9999, "column": 1}}
+        assert _rebase(original, entry) == original
+
+    def test_a_positionless_error_is_left_alone(self):
+        entry = self._entry()
+        assert _rebase({"data": "boom"}, entry) == {"data": "boom"}

@@ -239,3 +239,62 @@ class TestCanCache:
             outcome = check_batch([Submission(id="p1", lean_code="ok")])[0]
 
         assert not outcome.checked
+
+
+class TestLeanFailedWithoutADiagnostic:
+    """A crash, a timeout, or a blown recursion limit produces no parseable error.
+
+    That path returned `error: "unknown error"` with an empty hint — the caller was
+    told a proof failed and given nothing whatsoever to act on.
+    """
+
+    def _crashed(self, output=""):
+        return LeanResult(success=False, output=output, errors=[])
+
+    def test_whatever_lean_did_say_is_handed_over(self):
+        noise = "\n".join(f"line {i}" for i in range(40)) + "\nmaximum recursion depth has been reached"
+        with (
+            patch("formal.checker.check_syntax", return_value=(True, "")),
+            patch("formal.checker.verify", return_value=self._crashed(noise)),
+            patch("formal.checker.verify_batch", return_value=None),
+            patch("formal.checker.recover_without_llm", return_value=None),
+        ):
+            outcome = check_batch(_subs("p1"))[0]
+
+        assert "maximum recursion depth" in outcome.error
+        assert "line 0" not in outcome.error, "only the tail is useful; the rest is noise"
+
+    def test_the_hint_names_the_class_of_failure(self):
+        with (
+            patch("formal.checker.check_syntax", return_value=(True, "")),
+            patch("formal.checker.verify", return_value=self._crashed("boom")),
+            patch("formal.checker.verify_batch", return_value=None),
+            patch("formal.checker.recover_without_llm", return_value=None),
+        ):
+            outcome = check_batch(_subs("p1"))[0]
+
+        assert "maxRecDepth" in outcome.hint
+        assert outcome.hint != ""
+
+    def test_silence_from_lean_still_says_something(self):
+        with (
+            patch("formal.checker.check_syntax", return_value=(True, "")),
+            patch("formal.checker.verify", return_value=self._crashed("")),
+            patch("formal.checker.verify_batch", return_value=None),
+            patch("formal.checker.recover_without_llm", return_value=None),
+        ):
+            outcome = check_batch(_subs("p1"))[0]
+
+        assert outcome.error == "Lean produced no output and no diagnostics"
+
+    def test_a_normal_failure_still_carries_its_position(self):
+        result = LeanResult(success=False, output="x", errors=[{"data": "boom", "pos": {"line": 4, "column": 2}}])
+        with (
+            patch("formal.checker.check_syntax", return_value=(True, "")),
+            patch("formal.checker.verify", return_value=result),
+            patch("formal.checker.verify_batch", return_value=None),
+            patch("formal.checker.recover_without_llm", return_value=None),
+        ):
+            outcome = check_batch(_subs("p1"))[0]
+
+        assert (outcome.line, outcome.col) == (4, 2)

@@ -17,6 +17,7 @@ from .lean_verifier import (
     as_auto_tactic_attempt,
     as_premise_search,
     check_syntax,
+    error_position,
     replace_proof,
     suggested_tactic,
     verify,
@@ -119,14 +120,37 @@ def fmt_elapsed(seconds: float) -> str:
 def _to_outcome(entry_id: str, lean_code: str, result: LeanResult) -> Outcome:
     if result.success:
         return Outcome(id=entry_id, status="verified", lean_code=lean_code, checked=True)
-    err = result.first_error or {}
+
+    err = result.first_error
+    if err is None:
+        # Lean exited without a diagnostic anyone can act on — a crash, a timeout, a
+        # blown recursion limit. Returning "unknown error" and no hint left the caller
+        # with nothing at all, so hand over whatever Lean did say.
+        tail = "\n".join(result.output.strip().splitlines()[-12:])
+        return Outcome(
+            id=entry_id,
+            status="failed",
+            lean_code=lean_code,
+            error=tail or "Lean produced no output and no diagnostics",
+            hint=(
+                "Lean failed without reporting a position, which usually means it crashed or hit a "
+                "limit rather than rejecting the proof: a blown `maxRecDepth`, `maxHeartbeats`, or a "
+                "tactic that diverged. Reduce what the tactic has to chew on — case-split by hand "
+                "instead of `decide` over a large finite type, and prefer `simp only [...]` with named "
+                "lemmas over bare `simp`. Raising the limit usually moves the failure rather than "
+                "removing it."
+            ),
+            checked=True,
+        )
+
+    line, col = error_position(err)
     return Outcome(
         id=entry_id,
         status="failed",
         lean_code=lean_code,
         error=str(err.get("data", "unknown error")),
-        line=err.get("line"),
-        col=err.get("col"),
+        line=line,
+        col=col,
         hint=result.hint_for_error(),
         checked=True,
     )
