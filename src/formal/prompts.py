@@ -319,7 +319,7 @@ Modeling rules:
 - NEVER leave a type opaque. Every value must have a concrete Lean 4 type:
     numbers          →  Nat, Int, or Rat
     equality checks  →  = (Lean's structural equality)
-    strings          →  String (use = for comparisons)
+    strings          →  List Char (NOT String — see the note above on why)
     lists / arrays   →  List T
     sets             →  Finset T
     maps             →  Finset (K × V) or K → Option V

@@ -507,7 +507,8 @@ class TestSplitImportsTracksSource:
         assert source_lines == [2, 3, 4]
 
     def test_an_import_lower_down_still_shifts_the_rest(self):
-        _, body, source_lines = _split_imports("theorem a : True := by trivial\nimport Foo\ntheorem b : True := by trivial")
+        code = "theorem a : True := by trivial\nimport Foo\ntheorem b : True := by trivial"
+        _, body, source_lines = _split_imports(code)
         assert len(body) == len(source_lines) == 2
         assert source_lines == [1, 3]
 

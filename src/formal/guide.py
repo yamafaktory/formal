@@ -39,14 +39,31 @@ WORKFLOW = [
     "Write those properties to a spec file (see spec_file below), adding source_file and "
     "function_code to each. Commit it: it is reviewable, and identical bytes each run are "
     "what let the proof cache work at all.",
-    "POST /session with {'spec_file': '<path>'}. The reply says which properties are already "
-    "cached, which need proving, and which are stale.",
+    "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are "
+    "already cached, which need proving, and which are stale. The path must be absolute: the "
+    "server resolves it, and its working directory is not yours.",
     "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work'. "
     "GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
     "POST /session/{session_id}/check with {'proofs': {'<id>': '<lean>'}}.",
     "For each failure, read its error and hint, fix that proof, and resubmit only the ids "
-    "that failed. Repeat until 'complete' is true.",
+    "that failed — the first submission carries everything, a retry carries only what broke. "
+    "Repeat until 'complete' is true.",
 ]
+
+SESSION_LIFETIME = (
+    "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by "
+    "default), and it is lost if the server restarts. Once it is gone, POST /session again with "
+    "the same spec file: anything already proved comes straight back as a cache hit, so you never "
+    "reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on."
+)
+
+WHAT_VERIFIED_MEANS = (
+    "A verified id means Lean accepted a proof of that theorem — not necessarily the proof you "
+    "sent. Before reporting a failure, formal retries the goal with a fixed tactic chain and then "
+    "searches Mathlib for a lemma that closes it, so a proof of yours that did not work may still "
+    "come back verified because something else did. The proof that was accepted is what gets "
+    "cached."
+)
 
 STALE_ADVICE = (
     "A stale id means the function changed since the property was written against it, so the "
@@ -130,8 +147,14 @@ def _formalize() -> str:
             _render(prompts.PROPERTY_FORMALIZE_AND_PROVE_USER),
             "## Submitting",
             "Send every proof for the session in one request: they are checked in a single Lean "
-            "invocation, so one request costs one Mathlib import rather than one per proof. "
-            "A proof that still contains `sorry` is a failure, not a partial credit.",
+            "invocation, so one request costs one Mathlib import rather than one per proof. Retries "
+            "are the exception — resubmit only the ids that failed, since anything already accepted "
+            "is never rechecked. A proof that still contains `sorry` is a failure, not partial credit.",
+            "Your proofs are concatenated into one file to be checked together, but you do not have "
+            "to defend against that. Imports are hoisted and de-duplicated, and each proof is wrapped "
+            "in its own namespace, so identical theorem or definition names across proofs cannot "
+            "collide. Keep `import Mathlib` at the top of each proof and name things whatever you "
+            "like. Reported line numbers are rebased onto the file you submitted, not the batch.",
         ]
     )
 
@@ -148,6 +171,8 @@ def index() -> dict:
         "workflow": WORKFLOW,
         "spec_file": SPEC_FILE,
         "stale": STALE_ADVICE,
+        "sessions": SESSION_LIFETIME,
+        "verified": WHAT_VERIFIED_MEANS,
         "topics": {name: summary for name, (summary, _) in TOPICS.items()},
     }
 

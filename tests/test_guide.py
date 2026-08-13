@@ -6,6 +6,7 @@ when that stops being true, or when a template placeholder reaches an agent
 unsubstituted and it tries to prove something about `{function_code}`.
 """
 
+import json
 import pathlib
 import re
 
@@ -34,6 +35,18 @@ class TestIndex:
         for endpoint in ("/guide/extract", "/guide/formalize", "/guide/tactics", "/session", "/check"):
             assert endpoint in steps
 
+    def test_it_answers_the_questions_the_first_caller_had_to_work_out(self):
+        """Each of these cost a live test agent turns it should not have spent."""
+        blob = json.dumps(guide.index())
+        assert "expires" in blob, "sessions are ephemeral and a 404 does not say so"
+        assert "must be absolute" in blob, "spec_file is resolved by the server, not the caller"
+        assert "not necessarily the proof you" in blob, "recovery can replace a submitted proof"
+
+    def test_batching_semantics_are_stated_not_inferred(self):
+        text = guide.topic("formalize")
+        assert "own namespace" in text, "callers defensively namespaced work build_batch already does"
+        assert "rebased" in text, "line numbers are proof-relative, which is not obvious"
+
     def test_the_schema_lists_every_field_the_loader_requires(self):
         from formal.specs import REQUIRED
 
@@ -42,9 +55,7 @@ class TestIndex:
 
     def test_the_index_stays_small(self):
         """Every agent pays for this one, whether or not it goes further."""
-        import json
-
-        assert len(json.dumps(guide.index())) < 4000
+        assert len(json.dumps(guide.index())) < 6000
 
 
 class TestTopics:
