@@ -1,7 +1,5 @@
-"""Installation and backend configuration, driven by `formal setup`."""
+"""Installation of the Lean toolchain, driven by `formal setup`."""
 
-import getpass
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,11 +10,9 @@ from .paths import FORMAL_HOME, LEAN_PROJECT_DIR
 ELAN_INSTALLER = "https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh"
 
 
-# Every key formal understands. CLAUDE_CONFIG_DIR is consumed by the claude CLI
-# subprocess rather than read here, and is recognised for that reason.
+# Every key formal understands. A key outside this set is reported by `formal status`.
 KNOWN_ENV_KEYS = frozenset(
     {
-        "CLAUDE_CONFIG_DIR",
         "ELAN_HOME",
         "FORMAL_HOME",
         "FORMAL_HOST",
@@ -25,16 +21,6 @@ KNOWN_ENV_KEYS = frozenset(
         "FORMAL_SANDBOX",
         "LEAN_PROJECT_DIR",
         "LEAN_TIMEOUT",
-        "LLM_API_KEY",
-        "LLM_BACKEND",
-        "LLM_BASE_URL",
-        "LLM_CLI_CMD",
-        "LLM_FAILURE_STREAK",
-        "LLM_MODEL",
-        "LLM_TEMPERATURE",
-        "LLM_TIMEOUT",
-        "MAX_PARALLEL_PROPERTIES",
-        "MAX_PROOF_RETRIES",
         "NO_COLOR",
         "PROOF_CACHE_DIR",
         "PROOF_CACHE_TTL_DAYS",
@@ -241,127 +227,9 @@ def install_lean() -> bool:
     return True
 
 
-def _pick(options: list[str], prompt: str) -> str:
-    _say("")
-    for index, option in enumerate(options, start=1):
-        _say(f"  {index}) {option}")
-    while True:
-        choice = _ask(prompt)
-        if choice.isdigit() and 1 <= int(choice) <= len(options):
-            return options[int(choice) - 1]
-        _say("Invalid choice, try again.")
-
-
-def _claude_models(config_dir: str) -> list[str]:
-    try:
-        result = subprocess.run(
-            ["claude", "-p", "List only the model IDs you support, one per line, no explanation."],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env={**os.environ, "CLAUDE_CONFIG_DIR": config_dir},
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return sorted(line.strip() for line in result.stdout.splitlines() if line.strip().startswith("claude"))
-
-
-def _choose_model(models: list[str]) -> str:
-    if models:
-        return _pick(models, "Pick a number: ")
-    _say("Could not fetch the model list.")
-    model = _ask("Enter model name manually: ")
-    if not model:
-        raise SystemExit("A model name is required.")
-    return model
-
-
-def configure_claude_cli() -> None:
-    raw = _ask("Claude config directory [~/.claude]: ", "~/.claude")
-    config_dir = Path(raw).expanduser()
-    if not config_dir.is_dir():
-        raise SystemExit(f"'{config_dir}' is not a directory.")
-
-    _say("Fetching available models via the claude CLI...")
-    model = _choose_model(_claude_models(str(config_dir)))
-
-    write_env(
-        {
-            "LLM_BACKEND": "claude-cli",
-            "CLAUDE_CONFIG_DIR": str(config_dir),
-            "LLM_MODEL": model,
-            "PROOF_CACHE_TTL_DAYS": "7",
-        },
-        drop=("LLM_BASE_URL", "LLM_API_KEY"),
-    )
-    _say("")
-    _say(f"Saved to {env_file()}")
-    _say("  LLM_BACKEND       = claude-cli")
-    _say(f"  CLAUDE_CONFIG_DIR = {config_dir}")
-    _say(f"  LLM_MODEL         = {model}")
-
-
-def configure_openai() -> None:
-    _say("")
-    _say("Common base URLs:")
-    for name, url in (
-        ("OpenAI", "https://api.openai.com/v1"),
-        ("Anthropic", "https://api.anthropic.com/v1"),
-        ("Groq", "https://api.groq.com/openai/v1"),
-        ("Ollama", "http://localhost:11434/v1"),
-        ("LM Studio", "http://localhost:1234/v1"),
-    ):
-        _say(f"  {name:<10} {url}")
-    _say("")
-
-    base_url = _ask("LLM_BASE_URL: ")
-    if not base_url:
-        raise SystemExit("A base URL is required.")
-    api_key = getpass.getpass("LLM_API_KEY (blank for local models): ").strip()
-
-    os.environ["LLM_BASE_URL"] = base_url
-    os.environ["LLM_API_KEY"] = api_key
-    _say("Fetching available models...")
-
-    from .llm_client import list_models
-
-    model = _choose_model(list_models())
-
-    write_env(
-        {
-            "LLM_BACKEND": "openai",
-            "LLM_BASE_URL": base_url,
-            "LLM_API_KEY": api_key,
-            "LLM_MODEL": model,
-            "PROOF_CACHE_TTL_DAYS": "7",
-        },
-        drop=("CLAUDE_CONFIG_DIR",),
-    )
-    _say("")
-    _say(f"Saved to {env_file()}")
-    _say(f"  LLM_BASE_URL = {base_url}")
-    _say(f"  LLM_MODEL    = {model}")
-
-
-def configure_backend() -> None:
-    _say("")
-    _say("Choose a backend:")
-    _say("  1) Claude Code  (local claude CLI — uses your Pro plan, no API key needed)")
-    _say("  2) OpenAI-compatible API  (OpenAI, Anthropic, Groq, Ollama, LM Studio, …)")
-    choice = _ask("Pick 1 or 2: ")
-    if choice == "1":
-        configure_claude_cli()
-    elif choice == "2":
-        configure_openai()
-    else:
-        raise SystemExit("Invalid choice.")
-
-
-def run(lean_only: bool = False, backend_only: bool = False) -> int:
-    if not backend_only and not install_lean():
+def run() -> int:
+    if not install_lean():
         return 1
-    if not lean_only:
-        configure_backend()
 
     if sandbox.available() is None:
         _say("")

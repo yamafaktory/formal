@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from . import proof_cache
 from .checker import Outcome, Submission, can_cache, check_batch
 from .logger import get_logger, log
-from .property_verifier import PropertyResult
+from .results import PropertyResult
 
 _log = get_logger(__name__)
 

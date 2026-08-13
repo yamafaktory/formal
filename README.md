@@ -2,39 +2,37 @@
 
 [![Checks](https://github.com/yamafaktory/formal/actions/workflows/checks.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/checks.yml)
 
-A property checker for code, backed by Lean 4 as a proof engine.
+A Lean 4 proof service for the agent working on your code.
 
-Properties are stated about your pure functions, translated into Lean 4 theorems, and
-checked against Mathlib. What Lean accepts is mechanically verified — but only within
+You state properties about your pure functions; formal turns them into checked Lean
+theorems and tells you which hold. What Lean accepts is mechanically verified — within
 the limits described below.
 
-There are two ways to run it, and they differ in who does the thinking:
+**formal does not call a model.** It has no API key, no backend setting and no opinion
+about which model you use. The agent already reading your code writes the properties and
+the Lean; formal checks them, recovers the failures it can without help, remembers what
+was proved, and tells you when the code moves out from under a property.
 
-| | Who writes the properties and proofs | Cost | Use when |
-|---|---|---|---|
-| **Agent-driven** | The agent already driving your session | Its own tokens, nothing extra | An agent is working on the code (the common case) |
-| **Autonomous** | formal, via a configured LLM backend | One backend call per property, plus retries | CI, a plain shell, no agent in the loop |
-
-Both paths share the same Lean checking, the same recovery chain, and the same proof
-cache. Agent-driven is the cheaper one by a wide margin, because it does not start a
-second model to do work the first one can already do.
+That split is the whole design. An agent that can write Lean does not need a second
+model started on its behalf to do it.
 
 ## What this actually is
 
-Three steps happen before Lean ever runs:
+Three judgements happen before Lean ever runs, and the agent makes all three:
 
-1. **Decomposition** — reading the code and identifying which parts are pure functions
-2. **Property extraction** — deciding what those functions should satisfy, with explicit
+1. **Decomposition** — which parts of the code are pure functions
+2. **Property extraction** — what those functions should satisfy, with explicit
    preconditions and modelling assumptions
-3. **Formalization** — translating each property into a Lean 4 theorem
+3. **Formalization** — the Lean 4 theorem that says so
 
 Only then does Lean check the proof. Lean is mechanically sound — it cannot be fooled —
-but it only checks what it is given. If those three steps misread your function, or
+but it only checks what it is given. If those three judgements misread your function, or
 produced a property that is technically true but misses the point, Lean will happily
-prove the wrong thing.
+prove the wrong thing. `GET /guide` serves the instructions formal has for making them
+well; it cannot make them for you.
 
-**What "verified" means here:** Lean accepted a proof of a theorem derived from your
-code. That is a meaningful signal — LLMs make logical errors and Lean catches them —
+**What "verified" means here:** Lean accepted a proof of a theorem someone derived from
+your code. That is a meaningful signal — LLMs make logical errors and Lean catches them —
 but it is not equivalent to a certified compiler or a formal proof that your source is
 correct.
 
@@ -69,9 +67,8 @@ Working on formal itself? Clone it and run `./formal setup` instead; a checkout 
 its Lean project and results inside the repo.
 
 `formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
-toolchain, downloads prebuilt Mathlib oleans, and asks which LLM backend to configure.
-Re-running is safe: completed steps are skipped. `--lean-only` and `--backend-only` run
-one half.
+toolchain, then downloads prebuilt Mathlib oleans. That is all it does — there is no
+backend to configure. Re-running is safe: completed steps are skipped.
 
 Any elan already on your system is used as-is. Nothing is added to your shell
 configuration — formal locates the toolchain under `ELAN_HOME` (default `~/.elan`)
@@ -82,30 +79,6 @@ Then check it:
 ```sh
 formal status
 ```
-
-### LLM backend
-
-**Only the autonomous path needs one.** If an agent drives formal, it supplies the
-proofs and no backend is configured or called.
-
-**1 — Claude Code CLI** — uses your local `claude` binary and Pro/Max plan, no API key.
-Convenient, but be aware of what it costs: each call starts a full Claude Code process,
-which pays for its own system prompt, tool definitions and `CLAUDE.md` before it sees
-your prompt. That overhead is per call and is not cached between them. Fine for a file;
-expensive for a repository.
-
-**2 — OpenAI-compatible API** — any provider with an OpenAI-compatible endpoint:
-
-| Provider | Base URL |
-|---|---|
-| OpenAI | `https://api.openai.com/v1` |
-| Anthropic | `https://api.anthropic.com/v1` |
-| Groq | `https://api.groq.com/openai/v1` |
-| Ollama (local) | `http://localhost:11434/v1` |
-| LM Studio | `http://localhost:1234/v1` |
-
-Settings are written to `.env`. Models are fetched from `/v1/models`; enter the name
-manually if the provider does not support that.
 
 ## Driving formal from an agent
 
@@ -224,81 +197,9 @@ proof is not evidence about your code. A `stale` id means the function changed a
 property needs rewriting.
 ````
 
-Do **not** point an agent at `formal verify` for this. That runs the autonomous pipeline,
-which starts a separate model to do the work the agent is already able to do.
-
-## Running it autonomously
-
-`formal verify` runs the whole pipeline in-process using the configured backend. No agent
-and no server involved.
-
-```sh
-formal verify path/to/Feature.java          # language from the extension
-formal verify --code 'def f(x): return max(0, x)' --lang Python
-formal verify path/to/Feature.java --json
-formal verify path/to/Feature.java --no-parallel
-formal verify path/to/Feature.java --check-fidelity
-```
-
-Exit codes, so it can gate a commit hook or a CI step:
-
-| Code | Meaning |
-|---|---|
-| `0` | Every verifiable property was proved |
-| `1` | At least one property was not proved — investigate |
-| `2` | formal itself failed; no verdict was reached |
-| `3` | No pure logic found, so nothing was checked |
-
-`3` is deliberately distinct from `0`: a file that was never checked should not look like
-a file that passed. Decomposition is an LLM step and can miss functions it found last
-run, so treat `3` on a file you expect to have pure logic as a reason to re-run.
-
-Progress streams to stderr so the result on stdout stays pipeable:
-
-```
-[PIPELINE] Decomposing feature [Java]: SomeService.java
-[PIPELINE] Pure functions: ['computePrice', 'applyDiscount']
-[SCREEN  ] ✓ prop_1: VERIFIABLE — discount is always between 0 and 1
-[CACHE   ] prop_1 [bound] cache hit — skipping proof
-[VERIFY  ] prop_2 trying auto-tactics before an LLM retry...
-[OK      ] prop_2 ✓ verified
-[PIPELINE] Done — verified: 4, failed: 0, unverifiable: 1
-```
-
-```
-─────────────────────────────────────────
-File:    path/to/Feature.java
-Score:   full  (4/5 verified, 1 unverifiable)
-Pure functions: computePrice, applyDiscount
-─────────────────────────────────────────
-  ✓ [bound] discount is always between 0 and 1
-      Preconditions: discount is a float
-      Assumptions:   floats modeled as rationals, no NaN or Inf
-  ~ [invariant] bundleId reference matches stored entity
-      → depends on JVM reference equality, not structural equality
-─────────────────────────────────────────
-```
-
-| Score | Meaning |
-|---|---|
-| `full` | Every property was checked and proved |
-| `partial` | ≥50% of checked properties proved, or something could not be checked |
-| `failed` | <50% of verifiable properties proved |
-| `no_pure_logic` | No pure functions found |
-| `error` | Nothing could be checked — formal itself failed, no verdict was reached |
-
-| Status | Meaning |
-|---|---|
-| `verified` | Lean accepted the proof under the stated preconditions and assumptions |
-| `failed` | No proof found — may be a logic bug or a bad translation |
-| `unverifiable` | Cannot be modelled in Lean (not a bug) |
-| `error` | formal failed while checking this property — a tool failure, not a verdict |
-
 ## API reference
 
 `formal serve` binds `127.0.0.1:1337` by default (`FORMAL_HOST`, `FORMAL_PORT`).
-
-### Agent-driven
 
 | Endpoint | Purpose |
 |---|---|
@@ -344,16 +245,6 @@ curl -X POST localhost:1337/session/$SID/check -H 'content-type: application/jso
 Sessions expire after `SESSION_TTL_MINUTES` (default 60). Passing `properties` inline
 instead of `spec_file` works for ad-hoc use, but nothing is reusable across runs.
 
-### Autonomous
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /verify-feature` | `{"file": path}` or `{"code": …, "language": …}` — runs the full pipeline |
-| `POST /verify` | `{"task": "…"}` — generates Python for a description, then verifies it |
-| `GET /health` | Liveness |
-
-Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#, C++, C, Ruby, Zig.
-
 ## Configuration
 
 Set in `.env` (created by `formal setup`), overridable by environment variable.
@@ -361,17 +252,6 @@ Set in `.env` (created by `formal setup`), overridable by environment variable.
 
 | Variable | Description |
 |---|---|
-| `LLM_BACKEND` | `claude-cli` or `openai`. Autonomous path only. |
-| `LLM_BASE_URL` | Base URL of an OpenAI-compatible endpoint |
-| `LLM_API_KEY` | API key (empty for local models) |
-| `LLM_MODEL` | Model name as the provider accepts it |
-| `LLM_CLI_CMD` | Binary for the `claude-cli` backend (default: `claude`) |
-| `CLAUDE_CONFIG_DIR` | Claude config directory — selects which account the CLI backend bills |
-| `LLM_TEMPERATURE` | Sampling temperature, OpenAI backend (default `0`, for repeatable decomposition) |
-| `LLM_TIMEOUT` | Seconds before an LLM call times out (default `480`) |
-| `LLM_FAILURE_STREAK` | Identical consecutive backend failures before the run is abandoned (default `3`) |
-| `MAX_PROOF_RETRIES` | Retry attempts per property (default `3`) |
-| `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default `4`) |
 | `FORMAL_HOST` | Server bind address (default `127.0.0.1`) |
 | `FORMAL_PORT` | Server port (default `1337`) |
 | `SESSION_TTL_MINUTES` | Idle lifetime of a proof session (default `60`) |
@@ -386,9 +266,8 @@ Set in `.env` (created by `formal setup`), overridable by environment variable.
 | `XDG_DATA_HOME` | Honoured when resolving the default `FORMAL_HOME` outside a checkout |
 | `NO_COLOR` | Honoured — suppresses colour in progress output |
 
-`CLAUDE_CONFIG_DIR` is inherited by the `claude` subprocess, so whichever account it
-names is the one billed. If formal is launched from a shell that already sets it, that
-value wins — the `.env` entry only applies when nothing else set it.
+An `.env` left over from before the LLM pipeline was removed will list keys formal no
+longer reads; `formal status` names them so they can be deleted.
 
 ## Proof cache
 
@@ -432,8 +311,8 @@ is the property you wanted — if formalization misread your code, Lean proves t
 thing and reports success. That is the failure this tool is least able to notice, because
 it looks exactly like a pass.
 
-`formal verify --check-fidelity` reads each proved theorem back into English *without
-showing the model the original description*, then compares the two:
+formal used to do this itself, reading each proved theorem back into English *without
+showing the model the original description* and comparing the two:
 
 ```
   ✓ [bound] discount is always between 0 and 1
@@ -442,13 +321,13 @@ showing the model the original description*, then compares the two:
         Lean theorem states: for any rational d, if 0 ≤ d ≤ 1 then 0 ≤ d ≤ 1
 ```
 
-It runs only on properties Lean accepted, and each verdict is cached like a proof. Two
-extra LLM calls per verified property, which is why it is opt-in.
+That check went with the pipeline, and nothing replaces it. It is now yours to do: read
+the theorem you wrote and ask whether it says what the property says.
 
-Treat a flag as a prompt to read the theorem, not a verdict: the model that mistranslated
-is also the one judging the translation. A clean result is weaker evidence than a flagged
-one. On the agent-driven path this is the agent's job — read the theorem you wrote and
-ask whether it says what the property says.
+Be aware of what you lose. The removed check was *blinded* — it back-translated without
+seeing the original description, so the comparison was between two independent readings.
+An agent checking its own translation has already seen both, and cannot un-see them. That
+is weaker, and it is the one capability full inversion cost outright.
 
 ## Sandboxing
 
@@ -473,9 +352,11 @@ Do not expose it beyond the loopback interface.
 
 ## Limitations
 
-- **Whoever states the properties decides what is checked.** Extraction can misread code,
-  miss properties, or produce theorems that are true but irrelevant. Lean only checks what
-  it is given.
+- **The agent decides what is checked.** It can misread code, miss properties, or produce
+  theorems that are true but irrelevant. Lean only checks what it is given, and formal has
+  no second opinion to offer — it does not run a model.
+- **No blinded fidelity check.** An agent verifying that its own theorem matches its own
+  property has seen both. See [Checking the formalization](#checking-the-formalization).
 - **Preconditions and assumptions may be wrong.** A proof built on a wrong assumption is
   not evidence your code is correct.
 - **Pure logic only.** Side effects are excluded by design.

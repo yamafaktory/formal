@@ -64,22 +64,6 @@ class TestPrompts:
         monkeypatch.setattr("builtins.input", lambda _: answer)
         assert setup._confirm("? ") is expected
 
-    def test_pick_rejects_out_of_range_then_accepts(self, monkeypatch):
-        answers = iter(["9", "0", "abc", "2"])
-        monkeypatch.setattr("builtins.input", lambda _: next(answers))
-        assert setup._pick(["a", "b"], "? ") == "b"
-
-
-class TestChooseModel:
-    def test_falls_back_to_manual_entry(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "typed-model")
-        assert setup._choose_model([]) == "typed-model"
-
-    def test_refuses_an_empty_manual_entry(self, monkeypatch):
-        monkeypatch.setattr("builtins.input", lambda _: "")
-        with pytest.raises(SystemExit):
-            setup._choose_model([])
-
 
 class TestEnsureElan:
     def test_existing_lake_needs_no_install(self, monkeypatch):
@@ -299,56 +283,38 @@ class TestInstallLean:
 
 
 class TestRun:
-    def test_lean_only_skips_backend_configuration(self, monkeypatch):
+    def test_a_successful_install_reports_success(self, monkeypatch):
         monkeypatch.setattr(setup, "install_lean", lambda: True)
         monkeypatch.setattr(setup.sandbox, "available", lambda: "/usr/bin/bwrap")
-        with patch.object(setup, "configure_backend") as configure:
-            assert setup.run(lean_only=True) == 0
-        configure.assert_not_called()
-
-    def test_backend_only_skips_the_lean_install(self, monkeypatch):
-        monkeypatch.setattr(setup.sandbox, "available", lambda: "/usr/bin/bwrap")
-        with patch.object(setup, "install_lean") as install, patch.object(setup, "configure_backend"):
-            assert setup.run(backend_only=True) == 0
-        install.assert_not_called()
+        assert setup.run() == 0
 
     def test_a_failed_lean_install_is_reported(self, monkeypatch):
         monkeypatch.setattr(setup, "install_lean", lambda: False)
-        with patch.object(setup, "configure_backend") as configure:
-            assert setup.run() == 1
-        configure.assert_not_called()
+        assert setup.run() == 1
 
 
 class TestUnknownEnvKeys:
-    """A key nothing reads is a silent misconfiguration — CLAUDE_CLI_CMD sat unused for weeks."""
+    """A key nothing reads is a silent misconfiguration."""
 
     def test_recognised_keys_are_not_reported(self, env_path):
-        env_path.write_text("LLM_BACKEND=claude-cli\nLLM_MODEL=x\nCLAUDE_CONFIG_DIR=/tmp\n")
+        env_path.write_text("FORMAL_PORT=1337\nLEAN_TIMEOUT=120\nSESSION_TTL_MINUTES=60\n")
         assert setup.unknown_env_keys() == []
 
     def test_unknown_keys_are_reported_sorted(self, env_path):
-        env_path.write_text("LLM_MODEL=x\nZED=1\nCOMPOSE_FILE=y\n")
+        env_path.write_text("FORMAL_PORT=1\nZED=1\nCOMPOSE_FILE=y\n")
         assert setup.unknown_env_keys() == ["COMPOSE_FILE", "ZED"]
 
-    def test_a_near_miss_is_caught(self, env_path):
-        """CLAUDE_CLI_CMD looks plausible; the code reads LLM_CLI_CMD."""
-        env_path.write_text("CLAUDE_CLI_CMD=claude-cf\n")
-        assert setup.unknown_env_keys() == ["CLAUDE_CLI_CMD"]
+    def test_keys_from_the_removed_backend_are_reported(self, env_path):
+        """An .env from before the LLM pipeline was removed should say so, not stay silent."""
+        env_path.write_text("LLM_BACKEND=claude-cli\nCLAUDE_CONFIG_DIR=/tmp\n")
+        assert setup.unknown_env_keys() == ["CLAUDE_CONFIG_DIR", "LLM_BACKEND"]
 
     def test_missing_env_file_is_empty(self, env_path):
         assert setup.unknown_env_keys() == []
 
     def test_every_key_setup_writes_is_recognised(self, env_path):
         """Whatever setup writes must never show up as unused."""
-        written = {
-            "LLM_BACKEND",
-            "CLAUDE_CONFIG_DIR",
-            "LLM_MODEL",
-            "PROOF_CACHE_TTL_DAYS",
-            "LLM_BASE_URL",
-            "LLM_API_KEY",
-        }
-        assert written <= setup.KNOWN_ENV_KEYS
+        assert {"PROOF_CACHE_TTL_DAYS"} <= setup.KNOWN_ENV_KEYS
 
 
 class TestDocumentedEnvKeys:

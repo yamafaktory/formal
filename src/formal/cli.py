@@ -1,11 +1,8 @@
-"""Command-line entry point — runs the verification pipeline in-process."""
+"""Command-line entry point — installs the toolchain and runs the server."""
 
 import argparse
-import json
 import os
-import shutil
 import sys
-from pathlib import Path
 
 
 def _load_env() -> None:
@@ -22,67 +19,9 @@ def _load_env() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
-def _result_to_dict(result) -> dict:
-    return {
-        "feature_file": result.feature_file,
-        "feature_summary": result.feature_summary,
-        "pure_functions": result.pure_functions,
-        "impure_parts": result.impure_parts,
-        "properties_found": result.properties_found,
-        "properties_verified": result.properties_verified,
-        "properties_unverifiable": result.properties_unverifiable,
-        "properties_errored": result.properties_errored,
-        "properties_diverging": result.properties_diverging,
-        "overall_score": result.overall_score,
-        "results": [r.__dict__ for r in result.results],
-    }
-
-
-def _cmd_verify(args: argparse.Namespace) -> int:
-    from .feature_pipeline import run_feature_pipeline, run_feature_pipeline_from_file
-
-    if args.code:
-        result = run_feature_pipeline(
-            args.code,
-            feature_file="<inline>",
-            parallel=not args.no_parallel,
-            language=args.lang or "Python",
-            check_fidelity=args.check_fidelity,
-        )
-    else:
-        path = Path(args.file).expanduser()
-        if not path.is_file():
-            print(f"formal: no such file: {path}", file=sys.stderr)
-            return 2
-        result = run_feature_pipeline_from_file(str(path), language=args.lang, check_fidelity=args.check_fidelity)
-
-    if args.json:
-        print(json.dumps(_result_to_dict(result), indent=2))
-    else:
-        print(result.summary())
-
-    if result.properties_errored:
-        return 2
-    if result.overall_score == "no_pure_logic":
-        return 3
-    return 0 if result.overall_score == "full" else 1
-
-
 def _cmd_status(args: argparse.Namespace) -> int:
     from . import sandbox, server, setup, toolchain
     from .paths import FORMAL_HOME, LEAN_PROJECT_DIR, PROOF_CACHE_DIR
-
-    backend = os.getenv("LLM_BACKEND", "openai").strip().lower()
-    model = os.getenv("LLM_MODEL", "").strip()
-
-    if backend == "claude-cli":
-        cli_cmd = os.getenv("LLM_CLI_CMD", "claude")
-        llm_ok = shutil.which(cli_cmd) is not None
-        llm_detail = f"{cli_cmd} ({'found' if llm_ok else 'not on PATH'})"
-    else:
-        base_url = os.getenv("LLM_BASE_URL", "").strip()
-        llm_ok = bool(base_url)
-        llm_detail = base_url or "LLM_BASE_URL not set"
 
     lake = toolchain.which("lake")
     toolchain_file = LEAN_PROJECT_DIR / "lean-toolchain"
@@ -97,9 +36,6 @@ def _cmd_status(args: argparse.Namespace) -> int:
         ("lean toolchain", toolchain_file.read_text().strip() if toolchain_file.is_file() else "missing"),
         ("mathlib oleans", "built" if mathlib_oleans.is_dir() else "missing — run: formal setup"),
         ("lean sandbox", sandbox.describe()),
-        ("llm backend", backend),
-        ("llm endpoint", llm_detail),
-        ("llm model", model or "not set"),
         ("server", f"{server.base_url()} ({'running' if server.is_running() else 'not running'})"),
     ]
 
@@ -111,7 +47,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
     for key, value in rows:
         print(f"{key.ljust(width)}  {value}")
 
-    return 0 if lean_ok and llm_ok and model else 1
+    return 0 if lean_ok else 1
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -151,28 +87,15 @@ def _cmd_stop(args: argparse.Namespace) -> int:
 def _cmd_setup(args: argparse.Namespace) -> int:
     from . import setup
 
-    return setup.run(lean_only=args.lean_only, backend_only=args.backend_only)
+    return setup.run()
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="formal",
-        description="LLM-driven property checker for code, backed by Lean 4.",
+        description="Property checker for code, backed by Lean 4. Agents drive it over HTTP.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-
-    verify = sub.add_parser("verify", help="verify a source file or a snippet")
-    verify.add_argument("file", nargs="?", help="path to the source file")
-    verify.add_argument("--code", help="verify inline code instead of a file")
-    verify.add_argument("--lang", help="source language (auto-detected from the extension)")
-    verify.add_argument("--no-parallel", action="store_true", help="verify properties one at a time")
-    verify.add_argument("--json", action="store_true", help="emit the full result as JSON")
-    verify.add_argument(
-        "--check-fidelity",
-        action="store_true",
-        help="read each proved theorem back into English and check it against the property",
-    )
-    verify.set_defaults(func=_cmd_verify)
 
     status = sub.add_parser("status", help="show the resolved configuration and toolchain state")
     status.set_defaults(func=_cmd_status)
@@ -194,9 +117,7 @@ def _build_parser() -> argparse.ArgumentParser:
     stop.add_argument("--port", type=int, default=server.port())
     stop.set_defaults(func=_cmd_stop)
 
-    setup = sub.add_parser("setup", help="install the Lean toolchain and configure the LLM backend")
-    setup.add_argument("--lean-only", action="store_true", help="install Lean and Mathlib, skip backend configuration")
-    setup.add_argument("--backend-only", action="store_true", help="configure the LLM backend, skip the Lean install")
+    setup = sub.add_parser("setup", help="install the Lean toolchain and Mathlib")
     setup.set_defaults(func=_cmd_setup)
 
     return parser
@@ -206,11 +127,6 @@ def main() -> int:
     _load_env()
     parser = _build_parser()
     args = parser.parse_args()
-
-    if args.command == "verify" and not args.file and not args.code:
-        parser.error("verify needs a file path or --code")
-    if args.command == "verify" and args.file and args.code:
-        parser.error("verify takes a file path or --code, not both")
 
     try:
         return args.func(args)
