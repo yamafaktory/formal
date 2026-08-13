@@ -5,8 +5,8 @@ import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from . import guide, specs
 from . import session as sessions
-from . import specs
 from .feature_pipeline import (
     FeaturePipelineResult,
     run_feature_pipeline,
@@ -230,6 +230,19 @@ def verify_feature(req: VerifyFeatureRequest):
         overall_score=result.overall_score,
         results=[PropertyResultOut(**r.__dict__) for r in result.results],
     )
+
+
+@app.get("/guide")
+def read_guide():
+    return guide.index()
+
+
+@app.get("/guide/{topic}")
+def read_guide_topic(topic: str):
+    try:
+        return {"topic": topic, "instructions": guide.topic(topic)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"No such topic: {topic}. Try: {', '.join(guide.TOPICS)}")
 
 
 @app.post("/session", response_model=SessionResponse)
