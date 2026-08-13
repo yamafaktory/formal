@@ -68,6 +68,35 @@ class TestHintForError:
         hint = make_result("Unknown constant `List.some_made_up_lemma`").hint_for_error()
         assert "Mathlib" in hint or "simp" in hint
 
+    def test_omega_on_a_string_literal_length(self):
+        hint = make_result('omega could not prove the goal:\nwhere\n a := ↑"WEIGHTED_SUM((".length').hint_for_error()
+        assert "string literal" in hint
+        assert "from rfl" in hint
+
+    def test_omega_on_a_list_length_is_not_told_about_string_literals(self):
+        """The regression: any omega failure mentioning .length got the string-literal advice.
+
+        This one is a list length with an unreduced pair projection. The string hint sends
+        the reader after `show "PREFIX".length = N from rfl`, which cannot apply here — and
+        on the LLM path that misdirection costs a retry.
+        """
+        hint = make_result(
+            "omega could not prove the goal:\n"
+            "a possible counterexample may satisfy the constraints\n"
+            "  c - d - e ≥ 1\n"
+            "where\n"
+            " b := ↑(List.filter p t, List.filter (not ∘ p) t).2.length\n"
+            " c := ↑t.length\n"
+            " d := ↑(List.filter p t).length"
+        ).hint_for_error()
+        assert "string literal" not in hint
+        assert "from rfl" not in hint
+        assert "opaque" in hint
+
+    def test_omega_without_any_length_still_gets_help(self):
+        hint = make_result("omega could not prove the goal:\nwhere\n a := ↑(f x)").hint_for_error()
+        assert "linear integer arithmetic" in hint
+
     def test_type_mismatch_true_eq_true(self):
         hint = make_result(
             "type mismatch\n  hb\nhas type\n  x.field = true\nbut is expected to have type\n  true = true"

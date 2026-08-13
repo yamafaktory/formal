@@ -382,7 +382,7 @@ class LeanResult:
                 "Use `simp`, `omega`, `ring`, or `linarith` instead, or case-split on the "
                 "free variables until the remaining goals are ground."
             )
-        if "omega could not prove" in data and ".length" in data:
+        if "omega could not prove" in data and '".length' in data:
             return (
                 '`omega` cannot evaluate string literal lengths (e.g. `"WEIGHTED_SUM((".length`) — '
                 "they appear as opaque variables to omega. "
@@ -398,6 +398,19 @@ class LeanResult:
                 "IMPORTANT: do NOT use `simp [String.length]` or `simp [String.length_append, "
                 "String.length]` — `String.length` unfolds recursively and causes maximum recursion depth errors.\n"
                 "Also do NOT use `String.length_mk` — it does not exist in Mathlib."
+            )
+        if "omega could not prove" in data:
+            return (
+                "`omega` reasons about linear integer arithmetic only — every other subterm is an "
+                "opaque variable to it, which is why the counterexample it prints mentions terms you "
+                "expected to have been reduced away.\n"
+                "Look at the `where` block in the error: if the same value appears under two different "
+                "names (typically an unreduced projection such as `(a, b).2` alongside the `b` it should "
+                "have become), omega cannot know they are equal. Reduce it before calling omega — "
+                "`simp` the projection away, rewrite with the lemma that states the equality, or prove "
+                "the arithmetic fact as a standalone `have` over the already-reduced form and close the "
+                "goal with `simpa using` it.\n"
+                "Adding more hypotheses to omega will not help while the terms remain opaque."
             )
         if "ForwardPattern" in data or "Slice.Pattern" in data:
             return STRING_PREFIX_HINT
