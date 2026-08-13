@@ -1,6 +1,6 @@
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from . import prompts, proof_cache
 from .checker import fmt_elapsed, recover_without_llm
@@ -14,28 +14,9 @@ from .lean_verifier import (
 )
 from .llm_client import call_llm, extract_code_block
 from .logger import get_logger, log
+from .results import PropertyResult
 
 _log = get_logger(__name__)
-
-
-@dataclass
-class PropertyResult:
-    property_id: str
-    description: str
-    kind: str
-    function: str
-    verified: bool
-    lean_code: str
-    lean_output: str
-    retries: int
-    reason: str = ""
-    status: str = "failed"  # "verified" | "failed" | "unverifiable" | "error"
-    fidelity: str = "unchecked"  # "ok" | "diverges" | "unchecked"
-    back_translation: str = ""
-    fidelity_reason: str = ""
-    preconditions: list[str] = field(default_factory=list)
-    assumptions: list[str] = field(default_factory=list)
-    cached: bool = False
 
 
 def error_result(prop: Property, reason: str) -> "PropertyResult":

@@ -3,7 +3,7 @@
 import pytest
 
 from formal.feature_pipeline import FeaturePipelineResult
-from formal.property_verifier import PropertyResult
+from formal.results import PropertyResult
 
 
 def _prop(status, property_id="p"):

@@ -15,13 +15,10 @@ import hashlib
 import json
 import os
 import re
-from typing import TYPE_CHECKING
 
 from .logger import get_logger, log
 from .paths import PROOF_CACHE_DIR
-
-if TYPE_CHECKING:
-    from .property_verifier import PropertyResult
+from .results import PropertyResult
 
 _log = get_logger(__name__)
 
@@ -115,9 +112,7 @@ def cache_key(function_code: str, kind: str, formal: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def load(key: str) -> "PropertyResult | None":
-    from .property_verifier import PropertyResult
-
+def load(key: str) -> PropertyResult | None:
     path = _CACHE_DIR / f"{key}.json"
     if not path.exists():
         return None
@@ -128,7 +123,7 @@ def load(key: str) -> "PropertyResult | None":
         return None
 
 
-def save(key: str, result: "PropertyResult") -> None:
+def save(key: str, result: PropertyResult) -> None:
     """Best-effort — the cache is an optimisation and never changes a verdict."""
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)

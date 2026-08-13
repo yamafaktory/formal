@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from formal import fidelity
-from formal.property_verifier import PropertyResult
+from formal.results import PropertyResult
 
 
 def _verdict(agrees, reason="because"):

@@ -20,7 +20,7 @@ def tmp_cache(tmp_path, monkeypatch):
 
 def make_result(**kwargs):
     """Build a minimal PropertyResult-like object via the real dataclass."""
-    from formal.property_verifier import PropertyResult
+    from formal.results import PropertyResult
 
     defaults = dict(
         property_id="prop_1",

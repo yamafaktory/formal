@@ -115,7 +115,7 @@ class TestLanguageDetection:
 
 class TestErrorExitCode:
     def _errored(self):
-        from formal.property_verifier import PropertyResult
+        from formal.results import PropertyResult
 
         return FeaturePipelineResult(
             feature_file="mod.py",
