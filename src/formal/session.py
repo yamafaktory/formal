@@ -70,6 +70,7 @@ class Session:
     verified: dict[str, str] = field(default_factory=dict)
     attempts: dict[str, int] = field(default_factory=dict)
     hits: dict[str, CacheHit] = field(default_factory=dict)
+    stale: list[str] = field(default_factory=list)
 
     @property
     def cached_ids(self) -> list[str]:
@@ -81,7 +82,7 @@ class Session:
 
     @property
     def complete(self) -> bool:
-        return not self.work_ids
+        return not self.work_ids and not self.stale
 
 
 def _evict_expired() -> None:
@@ -90,8 +91,13 @@ def _evict_expired() -> None:
         del _SESSIONS[sid]
 
 
-def create(specs: list[PropertySpec]) -> Session:
-    """Open a session, settling whatever the proof cache already knows."""
+def create(specs: list[PropertySpec], stale: list[str] | None = None) -> Session:
+    """Open a session, settling whatever the proof cache already knows.
+
+    `stale` names properties whose source has changed since they were written
+    down. They are reported rather than registered: proving a property against
+    code it no longer describes produces a true theorem about nothing.
+    """
     _evict_expired()
 
     session = Session(
@@ -99,6 +105,7 @@ def create(specs: list[PropertySpec]) -> Session:
         created_at=time.time(),
         specs={spec.id: spec for spec in specs},
         keys={spec.id: spec.cache_key() for spec in specs},
+        stale=list(stale or []),
     )
     for spec in specs:
         cached = proof_cache.load(session.keys[spec.id])

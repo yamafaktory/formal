@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import session as sessions
+from . import specs
 from .feature_pipeline import (
     FeaturePipelineResult,
     run_feature_pipeline,
@@ -104,7 +105,9 @@ class PropertySpecIn(BaseModel):
 
 
 class SessionRequest(BaseModel):
-    properties: list[PropertySpecIn]
+    properties: list[PropertySpecIn] = Field(default_factory=list)
+    spec_file: str | None = None
+    root: str | None = None  # resolves each spec's source_file; defaults to the spec file's directory
 
 
 class CacheHitOut(BaseModel):
@@ -119,6 +122,7 @@ class SessionResponse(BaseModel):
     cached: list[CacheHitOut]
     work: list[str]
     complete: bool
+    stale: list[str] = Field(default_factory=list)
 
 
 class CheckRequest(BaseModel):
@@ -230,20 +234,27 @@ def verify_feature(req: VerifyFeatureRequest):
 
 @app.post("/session", response_model=SessionResponse)
 def open_session(req: SessionRequest):
-    if not req.properties:
-        raise HTTPException(status_code=400, detail="Provide at least one property")
+    if bool(req.properties) == bool(req.spec_file):
+        raise HTTPException(status_code=400, detail="Provide either 'properties' or 'spec_file', not both")
 
-    ids = [p.id for p in req.properties]
-    duplicates = sorted({pid for pid in ids if ids.count(pid) > 1})
-    if duplicates:
-        raise HTTPException(status_code=400, detail=f"Duplicate property ids: {', '.join(duplicates)}")
-
-    session = sessions.create([PropertySpec(**p.model_dump()) for p in req.properties])
+    if req.spec_file:
+        try:
+            loaded = specs.load(req.spec_file, root=req.root)
+        except specs.SpecError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        session = sessions.create(loaded.specs, stale=loaded.stale_ids)
+    else:
+        ids = [p.id for p in req.properties]
+        duplicates = sorted({pid for pid in ids if ids.count(pid) > 1})
+        if duplicates:
+            raise HTTPException(status_code=400, detail=f"Duplicate property ids: {', '.join(duplicates)}")
+        session = sessions.create([PropertySpec(**p.model_dump()) for p in req.properties])
     return SessionResponse(
         session_id=session.id,
         cached=[CacheHitOut(**vars(session.hits[pid])) for pid in session.cached_ids if pid in session.hits],
         work=session.work_ids,
         complete=session.complete,
+        stale=session.stale,
     )
 
 
@@ -255,6 +266,7 @@ def read_session(session_id: str):
         cached=[CacheHitOut(**vars(session.hits[pid])) for pid in session.cached_ids if pid in session.hits],
         work=session.work_ids,
         complete=session.complete,
+        stale=session.stale,
     )
 
 
