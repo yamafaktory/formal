@@ -107,9 +107,16 @@ class SessionRequest(BaseModel):
     properties: list[PropertySpecIn]
 
 
+class CacheHitOut(BaseModel):
+    id: str
+    description: str
+    kind: str
+    assumptions: list[str] = Field(default_factory=list)
+
+
 class SessionResponse(BaseModel):
     session_id: str
-    cached: list[str]
+    cached: list[CacheHitOut]
     work: list[str]
     complete: bool
 
@@ -234,7 +241,7 @@ def open_session(req: SessionRequest):
     session = sessions.create([PropertySpec(**p.model_dump()) for p in req.properties])
     return SessionResponse(
         session_id=session.id,
-        cached=session.cached_ids,
+        cached=[CacheHitOut(**vars(session.hits[pid])) for pid in session.cached_ids if pid in session.hits],
         work=session.work_ids,
         complete=session.complete,
     )
@@ -245,7 +252,7 @@ def read_session(session_id: str):
     session = _require(session_id)
     return SessionResponse(
         session_id=session.id,
-        cached=session.cached_ids,
+        cached=[CacheHitOut(**vars(session.hits[pid])) for pid in session.cached_ids if pid in session.hits],
         work=session.work_ids,
         complete=session.complete,
     )

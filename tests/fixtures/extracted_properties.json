@@ -1,0 +1,742 @@
+[
+ {
+  "function": "hint_for_error",
+  "kind": "invariant",
+  "formal": "forall errs, hint_for_error(errs) = [] <-> errs = []"
+ },
+ {
+  "function": "hint_for_error",
+  "kind": "invariant",
+  "formal": "forall e1 e2 t1 t2, data(e1) = data(e2) -> hint_for_error(e1 :: t1) = hint_for_error(e2 :: t2)"
+ },
+ {
+  "function": "hint_for_error",
+  "kind": "identity",
+  "formal": "forall d, matches_branch_1(d) -> hint(d) = LENGTH_HINT"
+ },
+ {
+  "function": "first_error",
+  "kind": "identity",
+  "formal": "forall l, first_error(l) = l.head?"
+ },
+ {
+  "function": "check_syntax",
+  "kind": "invariant",
+  "formal": "forall s, fst(check_syntax(s)) = true <-> (s has non-whitespace chars AND exists k in required, k <<: s); and fst = true -> snd = []"
+ },
+ {
+  "function": "check_syntax",
+  "kind": "monotonicity",
+  "formal": "forall s t, fst(check_syntax(s)) = true -> fst(check_syntax(s ++ t)) = true AND fst(check_syntax(t ++ s)) = true"
+ },
+ {
+  "function": "as_auto_tactic_attempt",
+  "kind": "invariant",
+  "formal": "forall s r, as_auto_tactic_attempt(s) = some r -> count(\":= by\", s) = 1 AND (head_of_partition(s) ++ \":= by \") <+: r"
+ },
+ {
+  "function": "with_auto_tactics",
+  "kind": "idempotency",
+  "formal": "forall s, with_auto_tactics(with_auto_tactics(s)) = with_auto_tactics(s)"
+ },
+ {
+  "function": "_split_imports",
+  "kind": "invariant",
+  "formal": "forall ls, let (i, b) = _split_imports(ls) in i = ls.filter(isImport) AND b = ls.filter(not . isImport) AND i.length + b.length = ls.length"
+ },
+ {
+  "function": "build_batch_lines",
+  "kind": "invariant",
+  "formal": "forall cs, let (lines, spans) = build_batch_lines(cs) in spans.length = cs.length AND forall i < j, spans[i].2 < spans[j].1 AND forall s in spans, s.2 <= lines.length"
+ },
+ {
+  "function": "build_colour_map",
+  "kind": "invariant",
+  "formal": "forall k, k ∈ keys(build_colour_map(false)) -> build_colour_map(false)[k] = []"
+ },
+ {
+  "function": "build_colour_map",
+  "kind": "invariant",
+  "formal": "keys(build_colour_map(true)) = keys(build_colour_map(false))"
+ },
+ {
+  "function": "build_colour_map",
+  "kind": "invariant",
+  "formal": "forall k v, (k,v) ∈ build_colour_map(true) -> ['\\x1b','['] <+: v"
+ },
+ {
+  "function": "build_colour_map",
+  "kind": "identity",
+  "formal": "forall b k, k ∈ [reset,bold,grey,cyan,yellow,green,red,magenta,blue] -> (build_colour_map(b)) k ≠ none"
+ },
+ {
+  "function": "resolve_tag_style",
+  "kind": "identity",
+  "formal": "forall t m, m t = none -> resolve_tag_style(t,m) = (grey, ljust(t,8))"
+ },
+ {
+  "function": "resolve_tag_style",
+  "kind": "identity",
+  "formal": "forall t m v, m t = some v -> resolve_tag_style(t,m) = v"
+ },
+ {
+  "function": "resolve_tag_style",
+  "kind": "bound",
+  "formal": "forall t m, m t = none -> length(snd(resolve_tag_style(t,m))) = max(length t, 8)"
+ },
+ {
+  "function": "format_record_line",
+  "kind": "invariant",
+  "formal": "forall t m p c, exists pre, format_record_line(t,m,p,c) = pre ++ ' ' :: m"
+ },
+ {
+  "function": "format_record_line",
+  "kind": "identity",
+  "formal": "forall t m p, format_record_line(t,m,p,build_colour_map(false)) = '[' :: label ++ ']' :: ' ' :: m where label = snd(resolve_tag_style(t,p))"
+ },
+ {
+  "function": "format_record_line",
+  "kind": "identity",
+  "formal": "forall t p c m1 m2, format_record_line(t,m1,p,c) = format_record_line(t,m2,p,c) -> m1 = m2"
+ },
+ {
+  "function": "extract_code_block",
+  "kind": "invariant",
+  "formal": "forall text lang, (¬ exists i, isLineStart text i ∧ isPrefixOf ('`'::'`'::'`'::lang) (drop i text)) -> extract_code_block text lang = []"
+ },
+ {
+  "function": "extract_code_block",
+  "kind": "invariant",
+  "formal": "forall text lang, let r := extract_code_block text lang in r ≠ [] -> ¬ isSpace (head r) ∧ ¬ isSpace (getLast r)"
+ },
+ {
+  "function": "extract_code_block",
+  "kind": "invariant",
+  "formal": "forall text lang, extract_code_block text lang <+: ... ∨ exists pre suf, text = pre ++ raw ++ suf ∧ extract_code_block text lang = strip raw"
+ },
+ {
+  "function": "_failure_signature",
+  "kind": "bound",
+  "formal": "forall m, length (_failure_signature m) ≤ 200"
+ },
+ {
+  "function": "_failure_signature",
+  "kind": "idempotency",
+  "formal": "forall m, _failure_signature (_failure_signature m) = _failure_signature m"
+ },
+ {
+  "function": "_build_cli_command",
+  "kind": "bound",
+  "formal": "forall c s u m, head (_build_cli_command c s u m) = c ∧ length (_build_cli_command c s u none) = 3 ∧ (m ≠ [] -> length (_build_cli_command c s u (some m)) = 5)"
+ },
+ {
+  "function": "_build_cli_command",
+  "kind": "identity",
+  "formal": "forall c s u m, _build_cli_command c s u none <+: _build_cli_command c s u (some m) ∧ (_build_cli_command c s u none).get 2 = s ++ ['\\n','\\n'] ++ u"
+ },
+ {
+  "function": "_error_from_result",
+  "kind": "invariant",
+  "formal": "forall e o rc, _error_from_result e o rc ≠ []"
+ },
+ {
+  "function": "_next_streak",
+  "kind": "invariant",
+  "formal": "forall p n s, (_next_streak p n s).1 = s ∧ (_next_streak p n s).2 = if s = p then n + 1 else 1 ∧ (n ≥ 1 -> (_next_streak p n s).2 ≥ 1)"
+ },
+ {
+  "function": "_sorted_model_ids",
+  "kind": "invariant",
+  "formal": "forall ms, Sorted (≤) (_sorted_model_ids ms) ∧ Perm (_sorted_model_ids ms) (map id ms.data) ∧ length (_sorted_model_ids ms) = length ms.data"
+ },
+ {
+  "function": "parse_judge_response",
+  "kind": "identity",
+  "formal": "forall raw, not (isValidJson (cleanJson raw)) -> parseJudgeResponse raw = (true, \"fidelity judge returned unparseable output\")"
+ },
+ {
+  "function": "parse_judge_response",
+  "kind": "identity",
+  "formal": "forall raw obj, jsonParse (cleanJson raw) = some obj -> lookup obj \"agrees\" = none -> (parseJudgeResponse raw).fst = true"
+ },
+ {
+  "function": "parse_judge_response",
+  "kind": "idempotency",
+  "formal": "forall raw, strip ((parseJudgeResponse raw).snd) = (parseJudgeResponse raw).snd"
+ },
+ {
+  "function": "parse_judge_response",
+  "kind": "identity",
+  "formal": "forall raw obj, jsonParse (cleanJson raw) = some obj -> lookup obj \"reason\" = none -> (parseJudgeResponse raw).snd = []"
+ },
+ {
+  "function": "_cache_name",
+  "kind": "identity",
+  "formal": "forall d1 c1 d2 c2, d1 = d2 -> c1 = c2 -> cacheName d1 c1 = cacheName d2 c2"
+ },
+ {
+  "function": "_cache_name",
+  "kind": "invariant",
+  "formal": "forall d c, List.isPrefixOf \"fidelity_\".toList (cacheName d c) = true"
+ },
+ {
+  "function": "_cache_name",
+  "kind": "identity",
+  "formal": "forall d1 c1 d2 c2, cacheName d1 c1 = cacheName d2 c2 -> d1 = d2 and c1 = c2"
+ },
+ {
+  "function": "build_fidelity",
+  "kind": "identity",
+  "formal": "forall a t r, (buildFidelity a t r).verdict = (if a then OK else DIVERGES) and (buildFidelity a t r).backTranslation = t and (buildFidelity a t r).reason = r"
+ },
+ {
+  "function": "select_verified",
+  "kind": "idempotency",
+  "formal": "forall rs, (selectVerified rs <+ rs) and (forall r, r ∈ selectVerified rs -> r.status = \"verified\" and r.leanCode ≠ []) and selectVerified (selectVerified rs) = selectVerified rs"
+ },
+ {
+  "function": "count_divergences",
+  "kind": "bound",
+  "formal": "forall fs, countDivergences fs <= fs.length and (countDivergences fs = 0 <-> forall f, f ∈ fs -> f.verdict ≠ DIVERGES) and forall f fs, countDivergences (f :: fs) = countDivergences fs + (if f.verdict = DIVERGES then 1 else 0)"
+ },
+ {
+  "function": "normalize_mode",
+  "kind": "idempotency",
+  "formal": "forall raw : Option (List Char), normalize_mode (some (normalize_mode raw)) = normalize_mode raw"
+ },
+ {
+  "function": "normalize_mode",
+  "kind": "identity",
+  "formal": "normalize_mode none = ['a','u','t','o']"
+ },
+ {
+  "function": "normalize_mode",
+  "kind": "invariant",
+  "formal": "forall raw, (forall c ∈ normalize_mode raw, ¬ c.isUpper) ∧ (normalize_mode raw ≠ [] → ¬ (normalize_mode raw).head!.isWhitespace ∧ ¬ (normalize_mode raw).getLast!.isWhitespace)"
+ },
+ {
+  "function": "is_off",
+  "kind": "invariant",
+  "formal": "forall s : List Char, is_off s = true ↔ s ∈ (_OFF : Finset (List Char))"
+ },
+ {
+  "function": "describe_mode",
+  "kind": "invariant",
+  "formal": "forall current bwrap, describe_mode current bwrap = \"off (FORMAL_SANDBOX)\" ↔ is_off current = true"
+ },
+ {
+  "function": "describe_mode",
+  "kind": "invariant",
+  "formal": "forall current bwrap, (describe_mode current bwrap = \"bubblewrap\" ↔ (is_off current = false ∧ bwrap.isSome)) ∧ describe_mode current bwrap ∈ [\"off (FORMAL_SANDBOX)\", \"unavailable — install bubblewrap\", \"bubblewrap\"]"
+ },
+ {
+  "function": "bwrap_args",
+  "kind": "invariant",
+  "formal": "forall bwrap home elan project, (bwrap_args bwrap home elan project).length = 30 ∧ (bwrap_args bwrap home elan project).head! = bwrap ∧ (bwrap_args bwrap home elan project).getLast! = \"--\""
+ },
+ {
+  "function": "bwrap_args",
+  "kind": "invariant",
+  "formal": "forall bwrap home elan project, let a := bwrap_args bwrap home elan project; \"--unshare-net\" ∈ a ∧ \"--tmpfs\" ∈ a ∧ home ∈ a ∧ \"--bind\" ∈ a ∧ project ∈ a ∧ \"--chdir\" ∈ a"
+ },
+ {
+  "function": "wrap_cmd",
+  "kind": "invariant",
+  "formal": "forall cmd bwrap home elan project, (wrap_cmd cmd bwrap home elan project).length = cmd.length + 30 ∧ (bwrap_args bwrap home elan project) <+: (wrap_cmd cmd bwrap home elan project) ∧ ∃ p, wrap_cmd cmd bwrap home elan project = p ++ cmd"
+ },
+ {
+  "function": "wrap_cmd",
+  "kind": "identity",
+  "formal": "forall cmd1 cmd2 bwrap home elan project, wrap_cmd cmd1 bwrap home elan project = wrap_cmd cmd2 bwrap home elan project → cmd1 = cmd2"
+ },
+ {
+  "function": "_parse_env_line",
+  "kind": "invariant",
+  "formal": "forall raw, _parse_env_line(raw) = none <-> (let l = trim raw; l = [] \\/ l.head? = some '#' \\/ '=' ∉ l)"
+ },
+ {
+  "function": "_parse_env_line",
+  "kind": "invariant",
+  "formal": "forall raw k v, _parse_env_line(raw) = some (k, v) -> '=' ∉ k"
+ },
+ {
+  "function": "_parse_env_line",
+  "kind": "idempotency",
+  "formal": "forall raw k v, _parse_env_line(raw) = some (k, v) /\\ k <> [] -> exists v', _parse_env_line(k ++ ['='] ++ v) = some (k, v')"
+ },
+ {
+  "function": "_parse_env_text",
+  "kind": "bound",
+  "formal": "forall text, (_parse_env_text text).card <= (splitLines text).length"
+ },
+ {
+  "function": "_parse_env_text",
+  "kind": "invariant",
+  "formal": "forall text k, lookup k (_parse_env_text text) = the value of the first line whose parsed key is k"
+ },
+ {
+  "function": "_parse_env_text",
+  "kind": "identity",
+  "formal": "forall text, (forall raw ∈ splitLines text, _parse_env_line raw = none) -> _parse_env_text text = empty"
+ },
+ {
+  "function": "_verify_exit_code",
+  "kind": "bound",
+  "formal": "forall e s, _verify_exit_code e s ∈ {0,1,2,3} /\\ (_verify_exit_code e s = 0 <-> e = 0 /\\ s = \"full\")"
+ },
+ {
+  "function": "_verify_exit_code",
+  "kind": "invariant",
+  "formal": "forall e s, e > 0 -> _verify_exit_code e s = 2"
+ },
+ {
+  "function": "_status_exit_code",
+  "kind": "monotonicity",
+  "formal": "forall l1 l2 m, _status_exit_code l1 l2 m = 0 <-> (l1 = true /\\ l2 = true /\\ m <> [])"
+ },
+ {
+  "function": "_format_rows",
+  "kind": "invariant",
+  "formal": "forall rows, rows <> [] -> forall (k,v) ∈ rows, (ljust k width).length = width where width = max over rows of k.length"
+ },
+ {
+  "function": "_fmt_elapsed",
+  "kind": "invariant",
+  "formal": "forall s : Rat, (s < 60 -> exists d, fmt_elapsed s = d ++ ['s'] /\\ 'm' ∉ fmt_elapsed s) /\\ (s >= 60 -> 'm' ∈ fmt_elapsed s)"
+ },
+ {
+  "function": "_fmt_elapsed",
+  "kind": "bound",
+  "formal": "forall n : Nat, n >= 60 -> (n / 60, n % 60).2 < 60"
+ },
+ {
+  "function": "_fmt_elapsed",
+  "kind": "identity",
+  "formal": "forall n : Nat, 60 * (n / 60) + (n % 60) = n"
+ },
+ {
+  "function": "_fmt_elapsed",
+  "kind": "monotonicity",
+  "formal": "forall a b : Nat, a <= b -> a / 60 <= b / 60"
+ },
+ {
+  "function": "error_result",
+  "kind": "invariant",
+  "formal": "forall p r, let e := error_result p r; let u := unverifiable_result p r; e.property_id = u.property_id /\\ e.description = u.description /\\ e.kind = u.kind /\\ e.function = u.function /\\ e.preconditions = u.preconditions /\\ e.assumptions = u.assumptions /\\ e.verified = u.verified /\\ e.status ≠ u.status"
+ },
+ {
+  "function": "unverifiable_result",
+  "kind": "invariant",
+  "formal": "forall p r, (unverifiable_result p r).verified = false /\\ (unverifiable_result p r).lean_code = [] /\\ (unverifiable_result p r).lean_output = [] /\\ (unverifiable_result p r).retries = 0 /\\ (unverifiable_result p r).reason = r"
+ },
+ {
+  "function": "format_bullet_list",
+  "kind": "invariant",
+  "formal": "forall xs : List (List Char), (xs = [] -> format_bullet_list xs = \"none\".toList) /\\ (xs ≠ [] -> ['-', ' '] <+: format_bullet_list xs)"
+ },
+ {
+  "function": "format_bullet_list",
+  "kind": "invariant",
+  "formal": "forall xs : List (List Char), xs ≠ [] -> (format_bullet_list xs).count '\\n' = xs.length - 1 + (xs.map (fun s => s.count '\\n')).sum"
+ },
+ {
+  "function": "error_data",
+  "kind": "invariant",
+  "formal": "forall (r : Option LeanResult), error_data r ≠ [] /\\ (r = none -> error_data r = \"no result\".toList)"
+ },
+ {
+  "function": "should_stop_retrying",
+  "kind": "identity",
+  "formal": "forall e : List Char, should_stop_retrying e (some e) = true /\\ should_stop_retrying e none = false /\\ forall a b, should_stop_retrying a b = should_stop_retrying b a"
+ },
+ {
+  "function": "json_key",
+  "kind": "identity",
+  "formal": "forall (xs ys : List (List Char)), join '\\n' (xs ++ ys) = (if xs = [] then join '\\n' ys else if ys = [] then join '\\n' xs else join '\\n' xs ++ ['\\n'] ++ join '\\n' ys)"
+ },
+ {
+  "function": "json_key",
+  "kind": "identity",
+  "formal": "forall (s : List Char), join '\\n' [s] = s"
+ },
+ {
+  "function": "cache_key",
+  "kind": "invariant",
+  "formal": "forall ph fc d k f pre asm, isPrefixOf ph (payload ph fc d k f pre asm) = true"
+ },
+ {
+  "function": "cache_key",
+  "kind": "identity",
+  "formal": "forall a b, payload a = payload b -> a = b"
+ },
+ {
+  "function": "cache_key",
+  "kind": "monotonicity",
+  "formal": "forall ph fc d k f pre asm x, length (payload ph fc d k f pre (asm ++ [x])) >= length (payload ph fc d k f pre asm)"
+ },
+ {
+  "function": "_prompt_hash_of",
+  "kind": "bound",
+  "formal": "forall (d : List Char), length (take 8 d) <= 8 /\\ isPrefixOf (take 8 d) d = true"
+ },
+ {
+  "function": "_is_expired",
+  "kind": "monotonicity",
+  "formal": "forall m1 m2 now ttl, m1 <= m2 -> (_is_expired m2 now ttl = true -> _is_expired m1 now ttl = true)"
+ },
+ {
+  "function": "_is_expired",
+  "kind": "monotonicity",
+  "formal": "forall m now t1 t2, t1 <= t2 -> (_is_expired m now t2 = true -> _is_expired m now t1 = true)"
+ },
+ {
+  "function": "_is_expired",
+  "kind": "bound",
+  "formal": "forall m now ttl, now <= m -> 0 <= ttl -> _is_expired m now ttl = false"
+ },
+ {
+  "function": "_entry_path",
+  "kind": "identity",
+  "formal": "forall dir n1 n2, dir ++ ['/'] ++ n1 ++ suffix = dir ++ ['/'] ++ n2 ++ suffix -> n1 = n2"
+ },
+ {
+  "function": "assign_unique_ids",
+  "kind": "invariant",
+  "formal": "forall ps, (assign_unique_ids ps).map id |>.Nodup"
+ },
+ {
+  "function": "assign_unique_ids",
+  "kind": "invariant",
+  "formal": "forall ps, (assign_unique_ids ps).length = ps.length"
+ },
+ {
+  "function": "assign_unique_ids",
+  "kind": "invariant",
+  "formal": "forall ps, forall p in assign_unique_ids ps, p.id != []"
+ },
+ {
+  "function": "assign_unique_ids",
+  "kind": "idempotency",
+  "formal": "forall ps, assign_unique_ids (assign_unique_ids ps) = assign_unique_ids ps"
+ },
+ {
+  "function": "assign_unique_ids",
+  "kind": "invariant",
+  "formal": "forall ps, forall i, let q := (assign_unique_ids ps)[i]; (ps[i].id != [] -> ps[i].id <+: q.id) and (ps[i].id = [] -> (\"prop_\" ++ toChars (i+1)) <+: q.id)"
+ },
+ {
+  "function": "_parse_properties",
+  "kind": "invariant",
+  "formal": "forall d, (_parse_properties d).length = (d.properties).length"
+ },
+ {
+  "function": "_parse_properties",
+  "kind": "invariant",
+  "formal": "forall d, (_parse_properties d).map id |>.Nodup"
+ },
+ {
+  "function": "_clean_json",
+  "kind": "idempotency",
+  "formal": "forall t, _clean_json (_clean_json t) = _clean_json t"
+ },
+ {
+  "function": "_clean_json",
+  "kind": "bound",
+  "formal": "forall t, (_clean_json t).length <= t.length"
+ },
+ {
+  "function": "_feature_from_dict",
+  "kind": "identity",
+  "formal": "forall f, f.properties = [] -> _feature_from_dict (_feature_to_dict f) = f"
+ },
+ {
+  "function": "_from_env",
+  "kind": "identity",
+  "formal": "forall (name : List Char) (default : List Char), trim (getenv name) = [] -> fromEnv name default = default"
+ },
+ {
+  "function": "_from_env",
+  "kind": "invariant",
+  "formal": "forall name default, fromEnv name default = default \\/ fromEnv name default = expanduser (trim (env name))"
+ },
+ {
+  "function": "_from_env",
+  "kind": "identity",
+  "formal": "forall name d1 d2, d1 = d2 -> fromEnv name d1 = fromEnv name d2"
+ },
+ {
+  "function": "_from_env",
+  "kind": "invariant",
+  "formal": "forall name d1 d2, trim (env name) <> [] -> fromEnv name d1 = fromEnv name d2"
+ },
+ {
+  "function": "_from_env",
+  "kind": "idempotency",
+  "formal": "forall (s : List Char), trim (trim s) = trim s"
+ },
+ {
+  "function": "_from_env",
+  "kind": "invariant",
+  "formal": "forall (s : List Char), (trim s).length <= s.length /\\ List.IsInfix (trim s) s"
+ },
+ {
+  "function": "_from_env",
+  "kind": "invariant",
+  "formal": "forall name default, default <> [] -> (forall s, s <> [] -> expanduser s <> []) -> fromEnv name default <> []"
+ },
+ {
+  "function": "_from_env",
+  "kind": "invariant",
+  "formal": "forall n1 n2 d, n1 <> n2 -> (env n1 = env n2 -> fromEnv n1 d = fromEnv n2 d)"
+ },
+ {
+  "function": "prepend_to_path",
+  "kind": "idempotency",
+  "formal": "forall entry current sep, prepend(entry, prepend(entry, current, sep), sep) = prepend(entry, current, sep)"
+ },
+ {
+  "function": "prepend_to_path",
+  "kind": "invariant",
+  "formal": "forall entry current sep s, s ∈ split(current, sep) -> s ∈ split(prepend(entry, current, sep), sep)"
+ },
+ {
+  "function": "prepend_to_path",
+  "kind": "invariant",
+  "formal": "forall entry current sep, entry ∈ split(prepend(entry, current, sep), sep)"
+ },
+ {
+  "function": "prepend_to_path",
+  "kind": "identity",
+  "formal": "forall entry current sep, (entry ∈ split(current, sep) -> prepend(entry, current, sep) = current) ∧ (entry ∉ split(current, sep) ∧ current ≠ [] -> length(split(prepend(entry,current,sep), sep)) = length(split(current, sep)) + 1)"
+ },
+ {
+  "function": "prepend_to_path",
+  "kind": "invariant",
+  "formal": "forall entry current sep, entry ∉ split(current, sep) -> split(prepend(entry, current, sep), sep) = entry :: split(current, sep) ∨ (current = [] ∧ prepend(entry,current,sep) = entry)"
+ },
+ {
+  "function": "resolve_elan_home",
+  "kind": "invariant",
+  "formal": "forall v home, resolve(v, home) = if strip(orEmpty v) = [] then home ++ \"/.elan\" else expand(strip(orEmpty v))"
+ },
+ {
+  "function": "resolve_elan_home",
+  "kind": "identity",
+  "formal": "forall v home, (v = none ∨ all isWhitespace (getD v [])) -> resolve(v, home) = home ++ \"/.elan\""
+ },
+ {
+  "function": "resolve_elan_home",
+  "kind": "invariant",
+  "formal": "forall v home ws1 ws2, all isWhitespace ws1 -> all isWhitespace ws2 -> resolve(some (ws1 ++ v ++ ws2), home) = resolve(some v, home)"
+ },
+ {
+  "function": "merged_env",
+  "kind": "invariant",
+  "formal": "forall base bin ex sep k, k ≠ \"PATH\" -> lookup(merged(base,bin,ex,sep), k) = lookup(base, k) ∧ (lookup(merged(base,bin,ex,sep), k) ≠ none -> lookup(base,k) ≠ none)"
+ },
+ {
+  "function": "merged_env",
+  "kind": "identity",
+  "formal": "forall base bin sep, lookup(merged(base,bin,false,sep), \"PATH\") = some (getD (lookup(base,\"PATH\")) []) ∧ lookup(merged(base,bin,true,sep), \"PATH\") = some (prepend(bin, getD (lookup(base,\"PATH\")) [], sep))"
+ },
+ {
+  "function": "_result_filename",
+  "kind": "bound",
+  "formal": "forall prefix label, length (_result_filename prefix label) <= length prefix + 75"
+ },
+ {
+  "function": "_result_filename",
+  "kind": "invariant",
+  "formal": "forall label c, c ∈ (take 60 (map (fun c => if isAlnum c then c else '_') label)) -> isAlnum c ∨ c = '_'"
+ },
+ {
+  "function": "_result_filename",
+  "kind": "identity",
+  "formal": "forall label, length (take 60 (map sanitise label)) = min 60 (length label)"
+ },
+ {
+  "function": "_result_filename",
+  "kind": "identity",
+  "formal": "forall p a b, _result_filename p a = _result_filename p b -> sha256_8 a = sha256_8 b"
+ },
+ {
+  "function": "_extract_lean_code",
+  "kind": "invariant",
+  "formal": "forall stages, (find (fun s => s.name = \"Proof generation\") stages = none) -> _extract_lean_code stages = []"
+ },
+ {
+  "function": "_extract_lean_code",
+  "kind": "invariant",
+  "formal": "forall s stages, s.name ≠ \"Proof generation\" -> _extract_lean_code (s :: stages) = _extract_lean_code stages"
+ },
+ {
+  "function": "_extract_lean_output",
+  "kind": "identity",
+  "formal": "forall o, _extract_lean_output o = Option.elim o [] (fun r => r.output)"
+ },
+ {
+  "function": "_verify_payload",
+  "kind": "invariant",
+  "formal": "forall result, map stageDict result.stages = (_verify_payload result).stages ∧ length (_verify_payload result).stages = length result.stages"
+ },
+ {
+  "function": "_feature_payload",
+  "kind": "bound",
+  "formal": "forall result, result.properties_verified <= result.properties_found -> (_feature_payload result).verified <= (_feature_payload result).total"
+ },
+ {
+  "function": "_resolve_feature_inputs",
+  "kind": "idempotency",
+  "formal": "forall l f, _resolve_feature_inputs (some (fst (_resolve_feature_inputs l f))) (some (snd (_resolve_feature_inputs l f))) = _resolve_feature_inputs l f ∧ fst (_resolve_feature_inputs l f) ≠ []"
+ },
+ {
+  "function": "_detect_language",
+  "kind": "invariant",
+  "formal": "forall s, detect_language s = detect_language (map toLower s)"
+ },
+ {
+  "function": "_detect_language",
+  "kind": "invariant",
+  "formal": "forall s, (map lookup (map toLower s) = none) <-> detect_language s = \"unknown\".toList"
+ },
+ {
+  "function": "properties_errored",
+  "kind": "bound",
+  "formal": "forall rs, countErrored rs <= length rs /\\ forall rs ys, countErrored rs <= countErrored (rs ++ ys)"
+ },
+ {
+  "function": "_count_by_status",
+  "kind": "invariant",
+  "formal": "forall rs, countBy rs \"verified\" + countBy rs \"unverifiable\" + countBy rs \"error\" <= length rs"
+ },
+ {
+  "function": "overall_score",
+  "kind": "invariant",
+  "formal": "forall c, (verifiableCount c = 0 -> overallScore c = \"error\" \\/ overallScore c = \"no_pure_logic\") /\\ (verifiableCount c <> 0 -> overallScore c ∈ [\"full\",\"partial\",\"failed\"])"
+ },
+ {
+  "function": "overall_score",
+  "kind": "invariant",
+  "formal": "forall c, overallScore c = \"full\" -> (verified c = verifiableCount c /\\ verifiableCount c > 0 /\\ errored c = 0)"
+ },
+ {
+  "function": "overall_score",
+  "kind": "monotonicity",
+  "formal": "forall c v1 v2, v1 <= v2 <= verifiableCount c -> rank (overallScore (c with verified := v1)) <= rank (overallScore (c with verified := v2))"
+ },
+ {
+  "function": "_status_icon",
+  "kind": "identity",
+  "formal": "forall a b, a ∈ known /\\ b ∈ known /\\ statusIcon a = statusIcon b -> a = b"
+ },
+ {
+  "function": "_partition_properties",
+  "kind": "invariant",
+  "formal": "forall ps, length (fst (partition ps)) + length (snd (partition ps)) = length ps /\\ forall p, p ∈ ps <-> (p ∈ fst (partition ps) \\/ p ∈ snd (partition ps))"
+ },
+ {
+  "function": "_sort_results_to_property_order",
+  "kind": "idempotency",
+  "formal": "forall rs ps, Multiset.ofList (sortToOrder rs ps) = Multiset.ofList rs /\\ sortToOrder (sortToOrder rs ps) ps = sortToOrder rs ps"
+ },
+ {
+  "function": "resolve_code_block",
+  "kind": "invariant",
+  "formal": "forall raw langs, resolve(raw, langs) = match (langs.filterMap (fun l => let b := extract raw l; if b ≠ [] then some b else none)).head? with | some b => b | none => strip raw"
+ },
+ {
+  "function": "resolve_code_block",
+  "kind": "invariant",
+  "formal": "forall raw langs, (exists l ∈ langs, extract raw l ≠ []) ∨ strip raw ≠ [] → resolve(raw, langs) ≠ []"
+ },
+ {
+  "function": "resolve_code_block",
+  "kind": "identity",
+  "formal": "forall raw, resolve(raw, []) = strip raw"
+ },
+ {
+  "function": "build_stage_result",
+  "kind": "invariant",
+  "formal": "forall n o r, (build n o r).success = true ↔ o ≠ [] ∧ (build n o r).name = n ∧ (build n o r).output = o ∧ (build n o r).retries = r"
+ },
+ {
+  "function": "build_proof_stage_result",
+  "kind": "invariant",
+  "formal": "forall code lr n, (build code lr n).success = (match lr with | none => false | some r => r.success) ∧ ((build code lr n).error = [] ↔ (build code lr n).success = true ∨ (lr = none))"
+ },
+ {
+  "function": "build_proof_stage_result",
+  "kind": "identity",
+  "formal": "forall code lr n, (build code lr n).success = is_verified lr ∧ (build code lr n).output = code ∧ (build code lr n).retries = n"
+ },
+ {
+  "function": "is_verified",
+  "kind": "identity",
+  "formal": "is_verified none = false ∧ forall r, is_verified (some r) = r.success ∧ forall lr, is_verified lr = (lr.map (fun r => r.success)).getD false"
+ },
+ {
+  "function": "error_message_from_result",
+  "kind": "invariant",
+  "formal": "forall lr, error_message lr = (match lr with | none => \"unknown error\" | some r => match r.first_error with | none => \"unknown error\" | some e => (lookup e \"data\").getD \"unknown error\")"
+ },
+ {
+  "function": "error_message_from_result",
+  "kind": "bound",
+  "formal": "forall lr, (forall e v, first_error lr = some e → lookup e \"data\" = some v → v ≠ []) → error_message lr ≠ []"
+ },
+ {
+  "function": "parse_max_retries",
+  "kind": "invariant",
+  "formal": "forall raw d, (raw = none ∨ strip (raw.getD []) = []) → parse raw d = d ∧ forall s d, strip s ≠ [] → parse (some s) d = toInt s"
+ },
+ {
+  "function": "filter_unknown_env_keys",
+  "kind": "invariant",
+  "formal": "forall env known, Sorted (<=) (filter_unknown_env_keys env known) /\\ (forall k, k ∈ filter_unknown_env_keys env known <-> (k ∈ keys env /\\ k ∉ known))"
+ },
+ {
+  "function": "filter_unknown_env_keys",
+  "kind": "identity",
+  "formal": "forall env, (filter_unknown_env_keys env ∅) ~ sorted (keys env) /\\ (keys env ⊆ known -> filter_unknown_env_keys env known = [])"
+ },
+ {
+  "function": "parse_env_text",
+  "kind": "invariant",
+  "formal": "forall text k v, (k, v) ∈ parse_env_text text -> (k = strip k /\\ v = strip v /\\ ¬ isPrefix ['#'] (strip (k ++ ['='] ++ v)))"
+ },
+ {
+  "function": "parse_env_text",
+  "kind": "identity",
+  "formal": "forall m, parse_env_text (render_env_text m) = m"
+ },
+ {
+  "function": "merge_env_values",
+  "kind": "invariant",
+  "formal": "forall vs us d k, lookup (merge_env_values vs us d) k = if k ∈ d then none else (lookup us k).orElse (lookup vs k)"
+ },
+ {
+  "function": "merge_env_values",
+  "kind": "idempotency",
+  "formal": "forall vs us d, merge_env_values (merge_env_values vs us d) us d = merge_env_values vs us d"
+ },
+ {
+  "function": "render_env_text",
+  "kind": "invariant",
+  "formal": "forall m, length (splitLines (render_env_text m)) = card m /\\ forall line ∈ splitLines (render_env_text m), exists k v, (k,v) ∈ m /\\ line = k ++ ['='] ++ v"
+ },
+ {
+  "function": "parse_model_list",
+  "kind": "invariant",
+  "formal": "forall out, Sorted (<=) (parse_model_list out) /\\ (forall s, s ∈ parse_model_list out -> isPrefixOf ['c','l','a','u','d','e'] s)"
+ },
+ {
+  "function": "install_steps",
+  "kind": "invariant",
+  "formal": "forall b, (install_steps true).length = 2 /\\ (install_steps false).length = 3 /\\ (install_steps false) = (\"Resolving dependencies\", [\"update\"]) :: (install_steps true) /\\ isSuffixOf (install_steps true) (install_steps b)"
+ },
+ {
+  "function": "parse_menu_choice",
+  "kind": "identity",
+  "formal": "forall opts n, n < opts.length -> parse_menu_choice (toDigits (n+1)) opts.length = some n /\\ forall c cnt, parse_menu_choice c cnt = some i -> i < cnt /\\ (render_menu opts).length = opts.length"
+ }
+]

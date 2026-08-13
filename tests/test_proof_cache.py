@@ -44,34 +44,50 @@ def make_result(**kwargs):
 
 class TestCacheKey:
     def test_same_inputs_same_key(self):
-        k1 = cache_key("code", "desc", "kind", "formal", [], [])
-        k2 = cache_key("code", "desc", "kind", "formal", [], [])
-        assert k1 == k2
+        assert cache_key("code", "kind", "formal") == cache_key("code", "kind", "formal")
 
     def test_different_code_different_key(self):
-        k1 = cache_key("code_a", "desc", "kind", "formal", [], [])
-        k2 = cache_key("code_b", "desc", "kind", "formal", [], [])
-        assert k1 != k2
+        assert cache_key("code_a", "kind", "formal") != cache_key("code_b", "kind", "formal")
 
-    def test_different_preconditions_different_key(self):
-        k1 = cache_key("code", "desc", "kind", "formal", ["n > 0"], [])
-        k2 = cache_key("code", "desc", "kind", "formal", [], [])
-        assert k1 != k2
+    def test_different_kind_different_key(self):
+        assert cache_key("code", "bound", "formal") != cache_key("code", "identity", "formal")
 
-    def test_different_assumptions_different_key(self):
-        k1 = cache_key("code", "desc", "kind", "formal", [], ["floats as rationals"])
-        k2 = cache_key("code", "desc", "kind", "formal", [], [])
-        assert k1 != k2
-
-    def test_precondition_order_matters(self):
-        k1 = cache_key("code", "desc", "kind", "formal", ["a", "b"], [])
-        k2 = cache_key("code", "desc", "kind", "formal", ["b", "a"], [])
-        assert k1 != k2
+    def test_different_formal_different_key(self):
+        assert cache_key("code", "kind", "f x = x") != cache_key("code", "kind", "f x = y")
 
     def test_returns_hex_string(self):
-        k = cache_key("code", "desc", "kind", "formal", [], [])
+        k = cache_key("code", "kind", "formal")
         assert len(k) == 64
         assert all(c in "0123456789abcdef" for c in k)
+
+
+class TestKeySurvivesParaphrase:
+    """The key identifies what is proved. Prose describing it is free to vary.
+
+    A fixed prompt at temperature 0 reproduced its own wording, so mixing prose
+    into the key was harmless. An agent paraphrases every run, and each paraphrase
+    was a fresh key and a re-proof of something already proved.
+    """
+
+    def test_operator_spelling_does_not_split_the_key(self):
+        assert cache_key("code", "kind", "∀ x, p x → q x") == cache_key("code", "kind", "forall x, p x -> q x")
+
+    def test_spacing_does_not_split_the_key(self):
+        assert cache_key("code", "kind", "f(f(x)) == f(x)") == cache_key("code", "kind", "f( f( x ) )  ==  f(x)")
+
+    def test_kind_casing_does_not_split_the_key(self):
+        assert cache_key("code", "Idempotence", "formal") == cache_key("code", "idempotence", "formal")
+
+    def test_trailing_whitespace_in_code_does_not_split_the_key(self):
+        assert cache_key("def f():\n    return 1", "kind", "formal") == cache_key(
+            "\ndef f():   \n    return 1  \n", "kind", "formal"
+        )
+
+    def test_indentation_still_splits_the_key(self):
+        """Indentation is meaning in Python — two bodies are two functions."""
+        assert cache_key("def f():\n  return 1", "kind", "formal") != cache_key(
+            "def f():\n      return 1", "kind", "formal"
+        )
 
 
 # ── save / load ───────────────────────────────────────────────────────────────
@@ -80,7 +96,7 @@ class TestCacheKey:
 class TestSaveLoad:
     def test_roundtrip(self, tmp_cache):
         result = make_result()
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, result)
         loaded = load(key)
         assert loaded is not None
@@ -97,7 +113,7 @@ class TestSaveLoad:
 
     def test_loaded_result_has_cached_false(self, tmp_cache):
         result = make_result()
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, result)
         loaded = load(key)
         # Saved result has cached=False; caller marks it True after loading
@@ -105,7 +121,7 @@ class TestSaveLoad:
 
     def test_preconditions_and_assumptions_survive_roundtrip(self, tmp_cache):
         result = make_result(preconditions=["n > 0"], assumptions=["floats as rationals"])
-        key = cache_key("code", "desc", "kind", "formal", ["n > 0"], ["floats as rationals"])
+        key = cache_key("code", "kind", "formal")
         save(key, result)
         loaded = load(key)
         assert loaded.preconditions == ["n > 0"]
@@ -121,7 +137,7 @@ class TestTTLEviction:
 
         monkeypatch.setattr(pc, "_CACHE_TTL_DAYS", 7)
         result = make_result()
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, result)
         # Save again to trigger eviction check
         save(key, result)
@@ -132,7 +148,7 @@ class TestTTLEviction:
 
         monkeypatch.setattr(pc, "_CACHE_TTL_DAYS", 7)
         result = make_result()
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
 
         # Write a cache file and backdate its mtime to 8 days ago
         save(key, result)
@@ -143,7 +159,7 @@ class TestTTLEviction:
         os.utime(cache_file, (old_time, old_time))
 
         # Saving a second entry triggers eviction
-        key2 = cache_key("code2", "desc", "kind", "formal", [], [])
+        key2 = cache_key("code2", "kind", "formal")
         save(key2, make_result(property_id="prop_2"))
 
         assert not cache_file.exists()
@@ -155,7 +171,7 @@ class TestTTLEviction:
 
         monkeypatch.setattr(pc, "_CACHE_TTL_DAYS", 365)
         result = make_result()
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, result)
 
         # Backdate the file to 8 days ago — still within 365-day TTL
@@ -164,7 +180,7 @@ class TestTTLEviction:
         os.utime(cache_file, (old_time, old_time))
 
         # Saving a second entry triggers eviction — 8-day-old file should survive
-        key2 = cache_key("code2", "desc", "kind", "formal", [], [])
+        key2 = cache_key("code2", "kind", "formal")
         save(key2, make_result(property_id="prop_2"))
 
         assert cache_file.exists()
@@ -180,18 +196,18 @@ class TestSaveFailuresAreNonFatal:
         locked.mkdir(mode=0o500)
         monkeypatch.setattr(pc, "_CACHE_DIR", locked / "cache")
 
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, make_result())
 
     def test_unwritable_file_does_not_raise(self, tmp_cache, monkeypatch):
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         blocker = tmp_cache / f"{key}.json"
         blocker.mkdir()
 
         save(key, make_result())
 
     def test_a_healthy_cache_still_writes(self, tmp_cache):
-        key = cache_key("code", "desc", "kind", "formal", [], [])
+        key = cache_key("code", "kind", "formal")
         save(key, make_result())
 
         assert (tmp_cache / f"{key}.json").is_file()

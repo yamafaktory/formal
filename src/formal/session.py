@@ -42,14 +42,23 @@ class PropertySpec:
     assumptions: list[str] = field(default_factory=list)
 
     def cache_key(self) -> str:
-        return proof_cache.cache_key(
-            self.function_code,
-            self.description,
-            self.kind,
-            self.formal,
-            self.preconditions,
-            self.assumptions,
-        )
+        return proof_cache.cache_key(self.function_code, self.kind, self.formal)
+
+
+@dataclass
+class CacheHit:
+    """What a cached proof actually established, so a caller can reject a mismatch.
+
+    The key covers the function, the kind and the formal statement — not the prose
+    that came with them. Two callers can therefore agree on a statement while
+    modelling it differently, so the modelling recorded when the proof was accepted
+    travels back with the hit rather than being taken on trust.
+    """
+
+    id: str
+    description: str
+    kind: str
+    assumptions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,6 +69,7 @@ class Session:
     keys: dict[str, str]
     verified: dict[str, str] = field(default_factory=dict)
     attempts: dict[str, int] = field(default_factory=dict)
+    hits: dict[str, CacheHit] = field(default_factory=dict)
 
     @property
     def cached_ids(self) -> list[str]:
@@ -94,6 +104,12 @@ def create(specs: list[PropertySpec]) -> Session:
         cached = proof_cache.load(session.keys[spec.id])
         if cached is not None and cached.verified:
             session.verified[spec.id] = cached.lean_code
+            session.hits[spec.id] = CacheHit(
+                id=spec.id,
+                description=cached.description,
+                kind=cached.kind,
+                assumptions=list(cached.assumptions),
+            )
             log(_log, "CACHE", f"{spec.id} cache hit — no proof needed")
 
     _SESSIONS[session.id] = session

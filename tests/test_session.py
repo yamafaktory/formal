@@ -19,14 +19,16 @@ def isolated_sessions(monkeypatch):
     monkeypatch.setattr(sessions, "_SESSIONS", {})
 
 
-def _spec(pid="p1", description="f is idempotent"):
+def _spec(pid="p1", description="f is idempotent", formal=""):
+    """The formal statement tracks the description: that is what tells two
+    properties apart under the cache key, where the prose no longer does."""
     return PropertySpec(
         id=pid,
         description=description,
         kind="idempotence",
         function="f",
         function_code="def f(x): return x",
-        formal="f(f(x)) == f(x)",
+        formal=formal or f"forall x, {description}",
     )
 
 
@@ -243,3 +245,51 @@ class TestCacheGuard:
             sessions.check(session, {"p1": "x"})
 
         assert self._stored(spec) is not None
+
+
+class TestCacheHitIsAuditable:
+    """Prose left the key, so a hit must say what it actually established.
+
+    Two callers can agree on a formal statement while modelling it differently.
+    The key cannot tell them apart, so the modelling recorded when the proof was
+    accepted travels back with the hit and the caller decides whether it matches.
+    """
+
+    def _prove(self, spec, description, assumptions):
+        stored = PropertySpec(
+            id=spec.id,
+            description=description,
+            kind=spec.kind,
+            function=spec.function,
+            function_code=spec.function_code,
+            formal=spec.formal,
+            assumptions=assumptions,
+        )
+        session = sessions.create([stored])
+        with patch("formal.session.check_batch", return_value=[_verified(stored.id)]):
+            sessions.check(session, {stored.id: "x"})
+
+    def test_a_hit_reports_what_was_proved(self):
+        spec = _spec()
+        self._prove(spec, "applying f twice changes nothing", ["Strings modeled as List Char"])
+
+        reopened = sessions.create([spec])
+        hit = reopened.hits["p1"]
+        assert hit.description == "applying f twice changes nothing"
+        assert hit.assumptions == ["Strings modeled as List Char"]
+
+    def test_a_paraphrase_still_hits(self):
+        """The point of the rework: different words, same theorem, no re-proof."""
+        self._prove(_spec(formal="∀ x, f (f x) = f x"), "idempotent", [])
+
+        reopened = sessions.create([_spec(description="totally different words", formal="forall x, f(f x) = f x")])
+        assert reopened.cached_ids == ["p1"]
+
+    def test_differing_assumptions_hit_but_are_visible(self):
+        """The accepted risk: the caller has to read the hit to catch this."""
+        spec = _spec()
+        self._prove(spec, "same statement", ["floats modeled as rationals"])
+
+        reopened = sessions.create([spec])
+        assert reopened.cached_ids == ["p1"]
+        assert reopened.hits["p1"].assumptions == ["floats modeled as rationals"]

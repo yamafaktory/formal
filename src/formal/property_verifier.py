@@ -106,9 +106,7 @@ def formalize(
     function_code = pure_fn.code if pure_fn else ""
 
     # ── Cache lookup ──────────────────────────────────────────────────────────
-    key = proof_cache.cache_key(
-        function_code, prop.description, prop.kind, prop.formal, prop.preconditions, prop.assumptions
-    )
+    key = proof_cache.cache_key(function_code, prop.kind, prop.formal)
     cached = proof_cache.load(key)
     if cached is not None:
         elapsed = fmt_elapsed(time.monotonic() - _t0)
