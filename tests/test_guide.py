@@ -129,9 +129,10 @@ class TestEveryPromptIsReachable:
         The ones worth keeping were re-homed into a topic; this stops the rest coming
         back, and stops a future topic edit stranding one silently.
         """
-        defined = set(re.findall(r"^([A-Z_]+) = ", pathlib.Path(prompts.__file__).read_text(), re.M))
+        on_disk = set(prompts.names())
         rendered = set(re.findall(r"prompts\.([A-Z_]+)", pathlib.Path(guide.__file__).read_text()))
-        assert defined - rendered == set(), f"unreachable prompts: {sorted(defined - rendered)}"
+        assert on_disk - rendered == set(), f"guidance files nothing serves: {sorted(on_disk - rendered)}"
+        assert rendered - on_disk == set(), f"guide names files that do not exist: {sorted(rendered - on_disk)}"
 
 
 class TestTacticsCoversWhatActuallyFailed:
@@ -344,3 +345,35 @@ class TestTheGuideNamesNoLanguage:
         served = json.dumps(guide.index())
         found = [s for s in self.SPELLINGS if s in served]
         assert found == [], f"language-specific spellings in the index: {found}"
+
+
+class TestGuidanceLivesOnDisk:
+    """The text formal serves changes on Lean's and Mathlib's schedule, not ours — twice
+    in one day. It lives in guidance/*.md so that a rename upstream is a prose diff
+    rather than a Python edit, and so the diff reads as what was actually said."""
+
+    def test_every_file_round_trips_byte_for_byte(self):
+        """Some guidance ends mid-sentence, some with a blank line. Both must survive."""
+        for name in prompts.names():
+            raw = (prompts.GUIDANCE_DIR / f"{name.lower()}.md").read_text()
+            assert getattr(prompts, name) + "\n" == raw
+
+    def test_an_unknown_name_is_an_attribute_error(self):
+        with pytest.raises(AttributeError):
+            prompts.NO_SUCH_GUIDANCE
+
+    def test_lower_case_attributes_are_not_files(self):
+        with pytest.raises(AttributeError):
+            prompts.not_guidance
+
+    def test_no_prose_is_left_in_the_module(self):
+        """If a prompt creeps back into Python, editing it needs a code change again."""
+        import ast
+
+        tree = ast.parse(pathlib.Path(prompts.__file__).read_text())
+        long_strings = [
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and len(n.value) > 600
+        ]
+        assert long_strings == [], "guidance belongs in guidance/*.md, not in the module"
