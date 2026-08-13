@@ -1,4 +1,6 @@
 import logging
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed_version
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -9,7 +11,16 @@ from .session import PropertySpec
 
 logger = logging.getLogger("formal.api")
 
-app = FastAPI(title="formal", version="2.0.0")
+
+def _version() -> str:
+    """Read from the installed metadata — a second copy here drifted from pyproject once."""
+    try:
+        return _installed_version("formal")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+app = FastAPI(title="formal", version=_version())
 
 
 # ── /session ──────────────────────────────────────────────────────────────────

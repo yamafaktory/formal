@@ -10,6 +10,7 @@ agent is a cache hit for a later autonomous run, and the reverse.
 """
 
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +23,11 @@ from .results import PropertyResult
 _log = get_logger(__name__)
 
 _SESSIONS: dict[str, "Session"] = {}
+
+# Sync endpoints run in a threadpool, so two requests can reach the registry at
+# once. The lock covers the registry only — never a Lean run, which is slow and
+# belongs to exactly one session anyway.
+_REGISTRY_LOCK = threading.Lock()
 
 
 def _ttl_seconds() -> int:
@@ -87,8 +93,9 @@ class Session:
 
 def _evict_expired() -> None:
     cutoff = time.time() - _ttl_seconds()
-    for sid in [s for s, sess in _SESSIONS.items() if sess.created_at < cutoff]:
-        del _SESSIONS[sid]
+    with _REGISTRY_LOCK:
+        for sid in [s for s, sess in _SESSIONS.items() if sess.created_at < cutoff]:
+            _SESSIONS.pop(sid, None)
 
 
 def create(specs: list[PropertySpec], stale: list[str] | None = None) -> Session:
@@ -119,7 +126,8 @@ def create(specs: list[PropertySpec], stale: list[str] | None = None) -> Session
             )
             log(_log, "CACHE", f"{spec.id} cache hit — no proof needed")
 
-    _SESSIONS[session.id] = session
+    with _REGISTRY_LOCK:
+        _SESSIONS[session.id] = session
     log(
         _log,
         "SESSION",
@@ -130,11 +138,13 @@ def create(specs: list[PropertySpec], stale: list[str] | None = None) -> Session
 
 def get(session_id: str) -> Session | None:
     _evict_expired()
-    return _SESSIONS.get(session_id)
+    with _REGISTRY_LOCK:
+        return _SESSIONS.get(session_id)
 
 
 def drop(session_id: str) -> bool:
-    return _SESSIONS.pop(session_id, None) is not None
+    with _REGISTRY_LOCK:
+        return _SESSIONS.pop(session_id, None) is not None
 
 
 class UnknownProperty(KeyError):

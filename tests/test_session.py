@@ -293,3 +293,55 @@ class TestCacheHitIsAuditable:
         reopened = sessions.create([spec])
         assert reopened.cached_ids == ["p1"]
         assert reopened.hits["p1"].assumptions == ["floats modeled as rationals"]
+
+
+class TestRegistryUnderConcurrency:
+    """Sync endpoints run in a threadpool, so the registry has more than one caller.
+
+    Eviction used to build a list of expired ids and then `del` each one. Two
+    threads selecting the same id meant the second raised KeyError out of a
+    request that had done nothing wrong.
+    """
+
+    def test_evicting_an_id_another_caller_already_removed_is_safe(self, monkeypatch):
+        """The race, made deterministic — threads alone will not reproduce it reliably."""
+        monkeypatch.setenv("SESSION_TTL_MINUTES", "1")
+        session = sessions.create([_spec()])
+        session.created_at -= 10_000
+
+        class RegistryEmptiedByAnotherCaller(dict):
+            def items(self):
+                snapshot = list(super().items())
+                self.clear()
+                return snapshot
+
+        monkeypatch.setattr(sessions, "_SESSIONS", RegistryEmptiedByAnotherCaller({session.id: session}))
+        sessions._evict_expired()
+
+    def test_churn_from_many_threads_leaves_the_registry_consistent(self):
+        import threading
+
+        errors = []
+
+        def churn(n):
+            try:
+                for i in range(15):
+                    session = sessions.create([_spec(f"p{n}_{i}")])
+                    sessions.get(session.id)
+                    sessions.drop(session.id)
+            except Exception as e:  # noqa: BLE001 - the point is that nothing escapes
+                errors.append(e)
+
+        threads = [threading.Thread(target=churn, args=(n,)) for n in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        assert sessions._SESSIONS == {}
+
+    def test_dropping_a_session_twice_from_two_callers_is_survivable(self):
+        session = sessions.create([_spec()])
+        assert sessions.drop(session.id)
+        assert not sessions.drop(session.id)

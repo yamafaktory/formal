@@ -115,3 +115,14 @@ class TestSpecFileSessions:
 
     def test_neither_properties_nor_spec_file_is_refused(self, client):
         assert client.post("/session", json={}).status_code == 400
+
+
+class TestVersion:
+    def test_the_api_reports_the_installed_version(self):
+        """It was hardcoded, and said 2.0.0 while the package said 1.0.0."""
+        import pathlib
+        import re
+
+        pyproject = (pathlib.Path(__file__).parent.parent / "pyproject.toml").read_text()
+        declared = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
+        assert api.app.version == declared
