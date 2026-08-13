@@ -244,3 +244,26 @@ class TestNestedCaseAnalysis:
         """They are not interchangeable and the wrong one costs a retry."""
         text = guide.topic("tactics")
         assert "List.mem_nil_iff" in text and "List.not_mem_nil" in text
+
+
+class TestSecondRunGuidance:
+    """Run 3 arrived at a directory that already had a spec file. The workflow only said
+    to write one, never what to do when one exists — and regenerating it discards every
+    cached proof, which is the whole point of committing it."""
+
+    def test_it_says_to_reuse_an_existing_spec_file(self):
+        steps = " ".join(guide.index()["workflow"])
+        assert "already exists" in steps
+        assert "do not replace it" in steps
+
+    def test_the_asymmetric_response_shapes_are_called_out(self):
+        """cached is a list of objects, work a list of strings; a caller coded the wrong one."""
+        steps = " ".join(guide.index()["workflow"])
+        assert "bare id strings" in steps
+
+    def test_the_schema_endpoint_is_advertised(self):
+        assert "openapi.json" in json.dumps(guide.index())
+
+    def test_a_counterexample_has_a_kind(self):
+        """Two proven collisions had no honest kind; the caller filed them as identity."""
+        assert "counterexample" in guide.topic("extract")

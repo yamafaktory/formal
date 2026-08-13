@@ -271,6 +271,8 @@ Each property needs a `kind`, which is one of:
   commutativity  order of arguments or operations does not matter
   idempotency    applying twice is the same as applying once
   invariant      something is preserved or always holds — a count, a well-formedness
+  counterexample two concrete inputs that must differ and do not, or must agree and do
+                 not — a proven defect rather than a reassurance
 
 Pick the one that describes the shape of the statement. `kind` is part of the cache key,
 so use the same one for the same property across runs; when two fit, prefer the more

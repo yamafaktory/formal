@@ -167,9 +167,15 @@ def check_session(session_id: str, req: CheckRequest):
     )
 
 
-@app.get("/session/{session_id}/proof/{property_id}", response_model=ProofOut)
+@app.get("/session/{session_id}/proof/{property_id:path}", response_model=ProofOut)
 def read_proof(session_id: str, property_id: str):
-    """The proof Lean actually accepted, which is also the one that was cached."""
+    """The proof Lean actually accepted, which is also the one that was cached.
+
+    property_id takes the rest of the path. The guide recommends ids shaped
+    `function/property`, and without this the endpoint was unreachable for every id
+    that followed that advice — percent-encoding does not help, since the path is
+    decoded before routing.
+    """
     session = _require(session_id)
     if property_id not in session.specs:
         raise HTTPException(status_code=404, detail=f"Not registered in this session: {property_id}")

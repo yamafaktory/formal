@@ -100,8 +100,10 @@ def cache_key(function_code: str, kind: str, formal: str) -> str:
     The description, preconditions and assumptions that used to be mixed in here
     are English prose. A fixed prompt reproduces them verbatim, so the key worked
     while formal wrote them itself; an agent paraphrases, and every paraphrase was
-    a fresh key and a re-proof. Across the 148 properties in a real run, the
-    function, its kind and the normalised formal statement separate all of them.
+    a fresh key and a re-proof. Across the 148 properties observed in a real run, the
+    function, its kind and the normalised formal statement separated all of them —
+    an observation about that corpus, not a theorem about the function. Distinctness
+    of digests would rest on sha256, which nothing here establishes.
 
     The prompt hash is gone with them. What is cached is a proof Lean accepted,
     and Lean's verdict does not depend on which prompt produced the theorem — and

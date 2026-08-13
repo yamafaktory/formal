@@ -39,10 +39,14 @@ WORKFLOW = [
     "Write those properties to a spec file (see spec_file below), adding source_file and "
     "function_code to each. Commit it: it is reviewable, and identical bytes each run are "
     "what let the proof cache work at all.",
+    "If a spec file already exists, use it as it stands rather than regenerating it — its ids "
+    "and wordings are what the cached proofs are keyed on, and rewriting them throws every hit "
+    "away. Add to it; do not replace it.",
     "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are "
     "already cached, which need proving, and which are stale. The path must be absolute: the "
     "server resolves it, and its working directory is not yours.",
-    "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work'. "
+    "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work' — "
+    "that field is a list of bare id strings, while 'cached' is a list of objects. "
     "GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
     "POST /session/{session_id}/check with {'proofs': {'<id>': '<lean>'}}.",
     "For each failure, read its error and hint, fix that proof, and resubmit only the ids "
@@ -185,6 +189,8 @@ def index() -> dict:
         "spec_file": SPEC_FILE,
         "stale": STALE_ADVICE,
         "sessions": SESSION_LIFETIME,
+        "openapi": "GET /openapi.json is the full schema of every endpoint and response, "
+        "including field types. Read it rather than guessing at a shape.",
         "verified": WHAT_VERIFIED_MEANS,
         "topics": {name: summary for name, (summary, _) in TOPICS.items()},
     }

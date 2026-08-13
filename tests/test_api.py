@@ -157,3 +157,36 @@ class TestProofRetrieval:
     def test_an_unregistered_id_is_not_found(self, client):
         sid = self._session(client)
         assert client.get(f"/session/{sid}/proof/nope").status_code == 404
+
+
+class TestSlashedPropertyIds:
+    """The guide recommends ids shaped `function/property`. The proof endpoint could not
+    serve one: FastAPI does not match `/` in a plain path param, and percent-encoding
+    does not help because the path is decoded before routing. An agent burned turns
+    diagnosing it and worked around it by renaming every property."""
+
+    def test_a_slashed_id_reaches_the_proof_endpoint(self, client, tmp_path):
+        body = {
+            "properties": [
+                {
+                    "id": "normalise_formal/idempotency",
+                    "description": "d",
+                    "kind": "idempotency",
+                    "function": "normalise_formal",
+                    "function_code": "def f(): pass",
+                    "formal": "f (f x) = f x",
+                }
+            ]
+        }
+        sid = client.post("/session", json=body).json()["session_id"]
+        outcome = Outcome(id="normalise_formal/idempotency", status="verified", lean_code="accepted", checked=True)
+        with patch("formal.session.check_batch", return_value=[outcome]):
+            client.post(f"/session/{sid}/check", json={"proofs": {"normalise_formal/idempotency": "x"}})
+
+        response = client.get(f"/session/{sid}/proof/normalise_formal/idempotency")
+        assert response.status_code == 200
+        assert response.json()["lean_code"] == "accepted"
+
+    def test_an_unknown_slashed_id_is_still_a_404(self, client):
+        sid = client.post("/session", json=_props("p1")).json()["session_id"]
+        assert client.get(f"/session/{sid}/proof/no/such/thing").status_code == 404
