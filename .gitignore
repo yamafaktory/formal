@@ -1,5 +1,7 @@
 .env
 results/
+server.log
+server.pid
 .ruff_cache/
 .pytest_cache/
 __pycache__/

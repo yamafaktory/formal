@@ -19,6 +19,8 @@ KNOWN_ENV_KEYS = frozenset(
         "CLAUDE_CONFIG_DIR",
         "ELAN_HOME",
         "FORMAL_HOME",
+        "FORMAL_HOST",
+        "FORMAL_PORT",
         "FORMAL_RESULTS_DIR",
         "FORMAL_SANDBOX",
         "LEAN_PROJECT_DIR",
@@ -35,6 +37,7 @@ KNOWN_ENV_KEYS = frozenset(
         "NO_COLOR",
         "PROOF_CACHE_DIR",
         "PROOF_CACHE_TTL_DAYS",
+        "SESSION_TTL_MINUTES",
         "XDG_DATA_HOME",
     }
 )
