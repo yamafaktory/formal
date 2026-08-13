@@ -1,16 +1,36 @@
-"""Tests for api._save — distinct labels must never share a result file."""
+"""Tests for the HTTP surface: result files must not collide, and a session must
+reject anything it cannot attribute to a registered property."""
 
 import json
+from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 from formal import api
+from formal import session as sessions
+from formal.checker import Outcome
 
 
 @pytest.fixture
 def results_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "RESULTS_DIR", tmp_path)
     return tmp_path
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setattr(sessions, "_SESSIONS", {})
+    return TestClient(api.app)
+
+
+def _props(*ids):
+    return {
+        "properties": [
+            {"id": pid, "description": f"{pid} holds", "kind": "bound", "function": "f", "function_code": "def f(): 0"}
+            for pid in ids
+        ]
+    }
 
 
 def _written(results_dir):
@@ -61,3 +81,48 @@ class TestSaveNaming:
         api._save("feature", "x.py", {"verified": 3, "total": 4})
         name = _written(results_dir)[0]
         assert json.loads((results_dir / name).read_text()) == {"verified": 3, "total": 4}
+
+
+class TestSessionEndpoints:
+    def test_opening_reports_what_needs_proving(self, client):
+        body = client.post("/session", json=_props("p1", "p2")).json()
+        assert body["work"] == ["p1", "p2"]
+        assert body["cached"] == []
+        assert not body["complete"]
+
+    def test_an_empty_property_list_is_rejected(self, client):
+        assert client.post("/session", json={"properties": []}).status_code == 400
+
+    def test_duplicate_ids_are_rejected(self, client):
+        """Two properties under one id would silently share a verdict and a cache key."""
+        response = client.post("/session", json=_props("p1", "p1"))
+        assert response.status_code == 400
+        assert "p1" in response.json()["detail"]
+
+    def test_checking_returns_verdicts_and_what_remains(self, client):
+        sid = client.post("/session", json=_props("p1", "p2")).json()["session_id"]
+        outcomes = [
+            Outcome(id="p1", status="verified", lean_code="ok"),
+            Outcome(id="p2", status="failed", lean_code="bad", error="no goals", line=3, hint="drop a tactic"),
+        ]
+        with patch("formal.session.check_batch", return_value=outcomes):
+            body = client.post(f"/session/{sid}/check", json={"proofs": {"p1": "a", "p2": "b"}}).json()
+
+        assert body["verified"] == ["p1"]
+        assert body["failed"] == [{"id": "p2", "error": "no goals", "line": 3, "col": None, "hint": "drop a tactic"}]
+        assert body["remaining"] == ["p2"]
+        assert not body["complete"]
+
+    def test_a_proof_for_an_unregistered_id_is_rejected(self, client):
+        sid = client.post("/session", json=_props("p1")).json()["session_id"]
+        assert client.post(f"/session/{sid}/check", json={"proofs": {"zz": "x"}}).status_code == 400
+
+    def test_an_unknown_session_is_not_found(self, client):
+        assert client.get("/session/nope").status_code == 404
+        assert client.post("/session/nope/check", json={"proofs": {}}).status_code == 404
+        assert client.delete("/session/nope").status_code == 404
+
+    def test_a_session_can_be_closed(self, client):
+        sid = client.post("/session", json=_props("p1")).json()["session_id"]
+        assert client.delete(f"/session/{sid}").status_code == 200
+        assert client.get(f"/session/{sid}").status_code == 404

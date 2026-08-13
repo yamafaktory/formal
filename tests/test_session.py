@@ -1,0 +1,185 @@
+"""Tests for proof sessions — the state that keeps a retry from resending everything.
+
+The load-bearing behaviours: metadata is registered once, the cache is consulted
+before any Lean runs, and a proof an agent wrote is a cache hit for a later
+autonomous run (the key is derived from the same material either way).
+"""
+
+from unittest.mock import patch
+
+import pytest
+
+from formal import session as sessions
+from formal.checker import Outcome
+from formal.session import PropertySpec, UnknownProperty
+
+
+@pytest.fixture(autouse=True)
+def isolated_sessions(monkeypatch):
+    monkeypatch.setattr(sessions, "_SESSIONS", {})
+
+
+def _spec(pid="p1", description="f is idempotent"):
+    return PropertySpec(
+        id=pid,
+        description=description,
+        kind="idempotence",
+        function="f",
+        function_code="def f(x): return x",
+        formal="f(f(x)) == f(x)",
+    )
+
+
+def _verified(pid, lean="theorem t : True := by trivial"):
+    return Outcome(id=pid, status="verified", lean_code=lean)
+
+
+def _failed(pid, error="unknown identifier"):
+    return Outcome(id=pid, status="failed", lean_code="bad", error=error, hint="try decide")
+
+
+class TestCreate:
+    def test_everything_is_work_when_the_cache_is_empty(self):
+        session = sessions.create([_spec("p1"), _spec("p2", "f is total")])
+        assert session.work_ids == ["p1", "p2"]
+        assert session.cached_ids == []
+        assert not session.complete
+
+    def test_a_cache_hit_needs_no_proof(self):
+        first = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_verified("p1", "proved")]):
+            sessions.check(first, {"p1": "proved"})
+
+        second = sessions.create([_spec()])
+        assert second.cached_ids == ["p1"]
+        assert second.work_ids == []
+        assert second.complete
+
+    def test_distinct_properties_get_distinct_keys(self):
+        session = sessions.create([_spec("p1", "f is idempotent"), _spec("p2", "f is total")])
+        assert session.keys["p1"] != session.keys["p2"]
+
+    def test_the_session_is_retrievable(self):
+        session = sessions.create([_spec()])
+        assert sessions.get(session.id) is session
+
+    def test_an_unknown_session_is_none(self):
+        assert sessions.get("nope") is None
+
+
+class TestCheck:
+    def test_a_verified_proof_settles_the_property(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            outcomes = sessions.check(session, {"p1": "theorem t : True := by trivial"})
+
+        assert [o.id for o in outcomes] == ["p1"]
+        assert session.complete
+        assert session.work_ids == []
+
+    def test_a_failed_proof_stays_outstanding(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_failed("p1")]):
+            outcomes = sessions.check(session, {"p1": "nope"})
+
+        assert not outcomes[0].verified
+        assert session.work_ids == ["p1"]
+        assert not session.complete
+
+    def test_an_unregistered_id_is_rejected(self):
+        session = sessions.create([_spec("p1")])
+        with pytest.raises(UnknownProperty):
+            sessions.check(session, {"p9": "theorem t : True := by trivial"})
+
+    def test_a_settled_property_is_not_rechecked(self):
+        """Resending the whole set after a partial failure must not re-import Mathlib."""
+        session = sessions.create([_spec("p1"), _spec("p2", "f is total")])
+        with patch("formal.session.check_batch", return_value=[_verified("p1"), _failed("p2")]):
+            sessions.check(session, {"p1": "a", "p2": "b"})
+
+        with patch("formal.session.check_batch", return_value=[_verified("p2")]) as check_batch:
+            sessions.check(session, {"p1": "a", "p2": "b-fixed"})
+
+        submitted = [s.id for s in check_batch.call_args[0][0]]
+        assert submitted == ["p2"]
+
+    def test_nothing_to_check_runs_no_lean(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(session, {"p1": "a"})
+
+        with patch("formal.session.check_batch") as check_batch:
+            outcomes = sessions.check(session, {"p1": "a"})
+
+        assert outcomes == []
+        assert check_batch.call_count == 0
+
+    def test_attempts_are_counted_per_property(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_failed("p1")]):
+            sessions.check(session, {"p1": "one"})
+            sessions.check(session, {"p1": "two"})
+
+        assert session.attempts["p1"] == 2
+
+
+class TestCacheRoundTrip:
+    def test_an_agent_proof_is_reusable_by_the_llm_path(self):
+        """Same key material, so the two paths share one cache rather than two."""
+        from formal import proof_cache
+
+        spec = _spec()
+        session = sessions.create([spec])
+        with patch("formal.session.check_batch", return_value=[_verified("p1", "the proof")]):
+            sessions.check(session, {"p1": "the proof"})
+
+        cached = proof_cache.load(spec.cache_key())
+        assert cached is not None
+        assert cached.verified
+        assert cached.lean_code == "the proof"
+        assert cached.description == spec.description
+
+    def test_a_failure_is_never_cached(self):
+        from formal import proof_cache
+
+        spec = _spec()
+        session = sessions.create([spec])
+        with patch("formal.session.check_batch", return_value=[_failed("p1")]):
+            sessions.check(session, {"p1": "bad"})
+
+        assert proof_cache.load(spec.cache_key()) is None
+
+    def test_retries_are_recorded_on_the_cached_result(self):
+        from formal import proof_cache
+
+        spec = _spec()
+        session = sessions.create([spec])
+        with patch("formal.session.check_batch", return_value=[_failed("p1")]):
+            sessions.check(session, {"p1": "bad"})
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(session, {"p1": "good"})
+
+        assert proof_cache.load(spec.cache_key()).retries == 1
+
+
+class TestLifecycle:
+    def test_drop_removes_the_session(self):
+        session = sessions.create([_spec()])
+        assert sessions.drop(session.id)
+        assert sessions.get(session.id) is None
+
+    def test_dropping_twice_reports_the_second_as_absent(self):
+        session = sessions.create([_spec()])
+        sessions.drop(session.id)
+        assert not sessions.drop(session.id)
+
+    def test_an_expired_session_is_evicted(self, monkeypatch):
+        session = sessions.create([_spec()])
+        monkeypatch.setenv("SESSION_TTL_MINUTES", "1")
+        session.created_at -= 120
+        assert sessions.get(session.id) is None
+
+    def test_a_fresh_session_survives_eviction(self, monkeypatch):
+        monkeypatch.setenv("SESSION_TTL_MINUTES", "1")
+        session = sessions.create([_spec()])
+        assert sessions.get(session.id) is not None
