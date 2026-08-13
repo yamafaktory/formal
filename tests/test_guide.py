@@ -132,3 +132,28 @@ class TestEveryPromptIsReachable:
         defined = set(re.findall(r"^([A-Z_]+) = ", pathlib.Path(prompts.__file__).read_text(), re.M))
         rendered = set(re.findall(r"prompts\.([A-Z_]+)", pathlib.Path(guide.__file__).read_text()))
         assert defined - rendered == set(), f"unreachable prompts: {sorted(defined - rendered)}"
+
+
+class TestTacticsCoversWhatActuallyFailed:
+    """A live test agent hit three failures the tactics topic said nothing about.
+
+    All three were Lean running out of budget rather than rejecting a proof, which
+    is the case where a caller has least to go on and is most likely to burn turns
+    raising limits instead of restructuring.
+    """
+
+    def test_it_covers_decide_blowing_the_recursion_limit(self):
+        text = guide.topic("tactics")
+        assert "maxRecDepth" in text
+        assert "List.mem_cons" in text, "the membership-to-disjunction rewrite is the fix"
+
+    def test_it_covers_if_chains_exhausting_simp(self):
+        text = guide.topic("tactics")
+        assert "if_pos" in text and "if_neg" in text
+        assert "by_cases" in text
+
+    def test_it_warns_that_raising_a_limit_is_not_a_fix(self):
+        """Raising maxRecDepth to 100000 crashed the process rather than helping."""
+        text = guide.topic("tactics")
+        assert "set_option" in text
+        assert "moves the failure" in text
