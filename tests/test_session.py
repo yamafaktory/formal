@@ -30,8 +30,9 @@ def _spec(pid="p1", description="f is idempotent"):
     )
 
 
-def _verified(pid, lean="theorem t : True := by trivial"):
-    return Outcome(id=pid, status="verified", lean_code=lean)
+def _verified(pid, lean="import Mathlib\ntheorem t : True := by trivial"):
+    """A verdict Lean actually produced — `checked` is what the cache guard demands."""
+    return Outcome(id=pid, status="verified", lean_code=lean, checked=True)
 
 
 def _failed(pid, error="unknown identifier"):
@@ -47,8 +48,8 @@ class TestCreate:
 
     def test_a_cache_hit_needs_no_proof(self):
         first = sessions.create([_spec()])
-        with patch("formal.session.check_batch", return_value=[_verified("p1", "proved")]):
-            sessions.check(first, {"p1": "proved"})
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(first, {"p1": "import Mathlib\ntheorem t : True := by trivial"})
 
         second = sessions.create([_spec()])
         assert second.cached_ids == ["p1"]
@@ -130,13 +131,14 @@ class TestCacheRoundTrip:
 
         spec = _spec()
         session = sessions.create([spec])
-        with patch("formal.session.check_batch", return_value=[_verified("p1", "the proof")]):
-            sessions.check(session, {"p1": "the proof"})
+        proof = "import Mathlib\ntheorem t : True := by trivial"
+        with patch("formal.session.check_batch", return_value=[_verified("p1", proof)]):
+            sessions.check(session, {"p1": proof})
 
         cached = proof_cache.load(spec.cache_key())
         assert cached is not None
         assert cached.verified
-        assert cached.lean_code == "the proof"
+        assert cached.lean_code == proof
         assert cached.description == spec.description
 
     def test_a_failure_is_never_cached(self):
@@ -183,3 +185,61 @@ class TestLifecycle:
         monkeypatch.setenv("SESSION_TTL_MINUTES", "1")
         session = sessions.create([_spec()])
         assert sessions.get(session.id) is not None
+
+
+class TestCacheGuard:
+    """The cache outlives the run and is shared with the LLM path, so a wrong entry
+    is served as truth indefinitely. Only an evidenced verdict may be written."""
+
+    def _stored(self, spec):
+        from formal import proof_cache
+
+        return proof_cache.load(spec.cache_key())
+
+    def test_a_verdict_lean_never_produced_is_not_cached(self):
+        """The incident: a mocked verifier put lean_code "ok" into the real cache."""
+        spec = _spec()
+        session = sessions.create([spec])
+        stub = Outcome(id="p1", status="verified", lean_code="ok")
+        with patch("formal.session.check_batch", return_value=[stub]):
+            sessions.check(session, {"p1": "ok"})
+
+        assert self._stored(spec) is None
+
+    def test_the_session_still_reports_it_verified(self):
+        """Refusing to persist is not the same as overruling the checker."""
+        spec = _spec()
+        session = sessions.create([spec])
+        stub = Outcome(id="p1", status="verified", lean_code="ok")
+        with patch("formal.session.check_batch", return_value=[stub]):
+            outcomes = sessions.check(session, {"p1": "ok"})
+
+        assert outcomes[0].verified
+        assert session.complete
+
+    def test_a_proof_that_is_not_lean_is_not_cached(self):
+        spec = _spec()
+        session = sessions.create([spec])
+        stub = Outcome(id="p1", status="verified", lean_code="looks fine to me", checked=True)
+        with patch("formal.session.check_batch", return_value=[stub]):
+            sessions.check(session, {"p1": "looks fine to me"})
+
+        assert self._stored(spec) is None
+
+    def test_a_proof_containing_sorry_is_not_cached(self):
+        spec = _spec()
+        session = sessions.create([spec])
+        incomplete = "import Mathlib\ntheorem t : True := by sorry"
+        stub = Outcome(id="p1", status="verified", lean_code=incomplete, checked=True)
+        with patch("formal.session.check_batch", return_value=[stub]):
+            sessions.check(session, {"p1": "x"})
+
+        assert self._stored(spec) is None
+
+    def test_an_evidenced_proof_is_cached(self):
+        spec = _spec()
+        session = sessions.create([spec])
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(session, {"p1": "x"})
+
+        assert self._stored(spec) is not None

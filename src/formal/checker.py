@@ -51,10 +51,27 @@ class Outcome:
     line: int | None = None
     col: int | None = None
     hint: str = ""
+    checked: bool = False
 
     @property
     def verified(self) -> bool:
         return self.status == "verified"
+
+
+def can_cache(outcome: Outcome) -> bool:
+    """Whether a verdict has earned a place in the durable cache.
+
+    The cache outlives the run and is shared with the LLM pipeline, so a wrong
+    entry is served as truth indefinitely. A session verdict only has to be right
+    now; this has to be evidenced. `checked` is set where a LeanResult is turned
+    into an outcome and nowhere else, so a hand-built or stubbed outcome — the way
+    a mocked verifier reaches this code — cannot satisfy it.
+    """
+    if not outcome.verified or not outcome.checked:
+        return False
+    if "sorry" in outcome.lean_code:
+        return False
+    return check_syntax(outcome.lean_code)[0]
 
 
 def recover_without_llm(entry_id: str, proof_code: str, started_at: float) -> tuple[str, LeanResult] | None:
@@ -101,7 +118,7 @@ def fmt_elapsed(seconds: float) -> str:
 
 def _to_outcome(entry_id: str, lean_code: str, result: LeanResult) -> Outcome:
     if result.success:
-        return Outcome(id=entry_id, status="verified", lean_code=lean_code)
+        return Outcome(id=entry_id, status="verified", lean_code=lean_code, checked=True)
     err = result.first_error or {}
     return Outcome(
         id=entry_id,
@@ -111,6 +128,7 @@ def _to_outcome(entry_id: str, lean_code: str, result: LeanResult) -> Outcome:
         line=err.get("line"),
         col=err.get("col"),
         hint=result.hint_for_error(),
+        checked=True,
     )
 
 

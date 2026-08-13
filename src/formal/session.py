@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from . import proof_cache
-from .checker import Outcome, Submission, check_batch
+from .checker import Outcome, Submission, can_cache, check_batch
 from .logger import get_logger, log
 from .property_verifier import PropertyResult
 
@@ -138,9 +138,13 @@ def check(session: Session, proofs: dict[str, str]) -> list[Outcome]:
 
     outcomes = check_batch(submissions)
     for outcome in outcomes:
-        if outcome.verified:
-            session.verified[outcome.id] = outcome.lean_code
+        if not outcome.verified:
+            continue
+        session.verified[outcome.id] = outcome.lean_code
+        if can_cache(outcome):
             _cache(session, outcome)
+        else:
+            log(_log, "CACHE", f"{outcome.id} verified but not cached — no evidence Lean accepted this proof")
     return outcomes
 
 
