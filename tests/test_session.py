@@ -345,3 +345,56 @@ class TestRegistryUnderConcurrency:
         session = sessions.create([_spec()])
         assert sessions.drop(session.id)
         assert not sessions.drop(session.id)
+
+
+class TestAttribution:
+    """A verified id can be a proof the recovery chain found, not the one you sent.
+
+    The accepted proof is what gets cached, so it is the artefact of record. A caller
+    that cannot tell the two apart will report that its own tactic worked when it did
+    not, and cannot read what was actually stored under its name.
+    """
+
+    def _recovered(self, pid, lean="import Mathlib\ntheorem t : True := by decide"):
+        return Outcome(id=pid, status="verified", lean_code=lean, checked=True, recovered=True)
+
+    def test_a_recovered_proof_is_recorded_as_such(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[self._recovered("p1")]):
+            sessions.check(session, {"p1": "whatever I sent"})
+
+        assert session.recovered == ["p1"]
+        assert session.origin("p1") == "recovered"
+
+    def test_a_submitted_proof_is_not(self):
+        session = sessions.create([_spec()])
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(session, {"p1": "x"})
+
+        assert session.recovered == []
+        assert session.origin("p1") == "submitted"
+
+    def test_a_cache_hit_reports_its_own_origin(self):
+        spec = _spec()
+        first = sessions.create([spec])
+        with patch("formal.session.check_batch", return_value=[_verified("p1")]):
+            sessions.check(first, {"p1": "x"})
+
+        assert sessions.create([spec]).origin("p1") == "cache"
+
+    def test_the_accepted_proof_is_what_is_kept(self):
+        session = sessions.create([_spec()])
+        accepted = "import Mathlib\ntheorem t : True := by decide"
+        with patch("formal.session.check_batch", return_value=[self._recovered("p1", accepted)]):
+            sessions.check(session, {"p1": "not this one"})
+
+        assert session.verified["p1"] == accepted
+
+    def test_an_id_is_not_recorded_twice(self):
+        session = sessions.create([_spec("p1"), _spec("p2", "f is total")])
+        with patch("formal.session.check_batch", return_value=[self._recovered("p1")]):
+            sessions.check(session, {"p1": "x"})
+        with patch("formal.session.check_batch", return_value=[self._recovered("p1")]):
+            sessions.check(session, {"p1": "x"})
+
+        assert session.recovered == ["p1"]

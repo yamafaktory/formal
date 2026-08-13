@@ -126,3 +126,34 @@ class TestVersion:
         pyproject = (pathlib.Path(__file__).parent.parent / "pyproject.toml").read_text()
         declared = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
         assert api.app.version == declared
+
+
+class TestProofRetrieval:
+    def _session(self, client):
+        return client.post("/session", json=_props("p1")).json()["session_id"]
+
+    def test_a_recovered_proof_is_flagged_in_the_response(self, client):
+        sid = self._session(client)
+        outcome = Outcome(id="p1", status="verified", lean_code="accepted", checked=True, recovered=True)
+        with patch("formal.session.check_batch", return_value=[outcome]):
+            body = client.post(f"/session/{sid}/check", json={"proofs": {"p1": "sent"}}).json()
+
+        assert body["verified"] == ["p1"]
+        assert body["recovered"] == ["p1"]
+
+    def test_the_accepted_proof_is_retrievable(self, client):
+        sid = self._session(client)
+        outcome = Outcome(id="p1", status="verified", lean_code="the accepted proof", checked=True, recovered=True)
+        with patch("formal.session.check_batch", return_value=[outcome]):
+            client.post(f"/session/{sid}/check", json={"proofs": {"p1": "sent"}})
+
+        body = client.get(f"/session/{sid}/proof/p1").json()
+        assert body == {"id": "p1", "origin": "recovered", "lean_code": "the accepted proof"}
+
+    def test_nothing_accepted_yet_is_not_found(self, client):
+        sid = self._session(client)
+        assert client.get(f"/session/{sid}/proof/p1").status_code == 404
+
+    def test_an_unregistered_id_is_not_found(self, client):
+        sid = self._session(client)
+        assert client.get(f"/session/{sid}/proof/nope").status_code == 404

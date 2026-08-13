@@ -77,6 +77,15 @@ class Session:
     attempts: dict[str, int] = field(default_factory=dict)
     hits: dict[str, CacheHit] = field(default_factory=dict)
     stale: list[str] = field(default_factory=list)
+    # Ids whose accepted proof came from the recovery chain rather than the caller.
+    # Without this a caller cannot tell whether its own tactic worked, and the proof
+    # that gets cached is the accepted one, not the submitted one.
+    recovered: list[str] = field(default_factory=list)
+
+    def origin(self, property_id: str) -> str:
+        if property_id in self.hits:
+            return "cache"
+        return "recovered" if property_id in self.recovered else "submitted"
 
     @property
     def cached_ids(self) -> list[str]:
@@ -174,6 +183,8 @@ def check(session: Session, proofs: dict[str, str]) -> list[Outcome]:
         if not outcome.verified:
             continue
         session.verified[outcome.id] = outcome.lean_code
+        if outcome.recovered and outcome.id not in session.recovered:
+            session.recovered.append(outcome.id)
         if can_cache(outcome):
             _cache(session, outcome)
         else:

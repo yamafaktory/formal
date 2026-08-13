@@ -61,8 +61,10 @@ WHAT_VERIFIED_MEANS = (
     "A verified id means Lean accepted a proof of that theorem — not necessarily the proof you "
     "sent. Before reporting a failure, formal retries the goal with a fixed tactic chain and then "
     "searches Mathlib for a lemma that closes it, so a proof of yours that did not work may still "
-    "come back verified because something else did. The proof that was accepted is what gets "
-    "cached."
+    "come back verified because something else did. The check response lists those ids under "
+    "'recovered', and GET /session/{id}/proof/{property_id} returns the proof that was accepted "
+    "along with its origin: submitted, recovered, or cache. The accepted proof is the one that was "
+    "cached, so it is the artefact of record — read it before reporting that your proof worked."
 )
 
 STALE_ADVICE = (

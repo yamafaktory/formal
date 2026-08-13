@@ -53,6 +53,8 @@ class Outcome:
     col: int | None = None
     hint: str = ""
     checked: bool = False
+    # True when the recovery chain, not the caller, produced the accepted proof.
+    recovered: bool = False
 
     @property
     def verified(self) -> bool:
@@ -117,9 +119,9 @@ def fmt_elapsed(seconds: float) -> str:
     return f"{m}m {s}s"
 
 
-def _to_outcome(entry_id: str, lean_code: str, result: LeanResult) -> Outcome:
+def _to_outcome(entry_id: str, lean_code: str, result: LeanResult, recovered: bool = False) -> Outcome:
     if result.success:
-        return Outcome(id=entry_id, status="verified", lean_code=lean_code, checked=True)
+        return Outcome(id=entry_id, status="verified", lean_code=lean_code, checked=True, recovered=recovered)
 
     err = result.first_error
     if err is None:
@@ -195,11 +197,13 @@ def check_batch(submissions: list[Submission], timeout: int | None = None) -> li
     for sub in pending:
         started_at = time.monotonic()
         lean_code = sub.lean_code
+        was_recovered = False
         result = batched.get(sub.id) or verify(lean_code, timeout=timeout)
         if not result.success:
             recovered = recover_without_llm(sub.id, lean_code, started_at)
             if recovered is not None:
                 lean_code, result = recovered
-        outcomes[sub.id] = _to_outcome(sub.id, lean_code, result)
+                was_recovered = True
+        outcomes[sub.id] = _to_outcome(sub.id, lean_code, result, recovered=was_recovered)
 
     return [outcomes[sub.id] for sub in submissions]

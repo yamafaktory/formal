@@ -72,9 +72,18 @@ class FailureOut(BaseModel):
 
 class CheckResponse(BaseModel):
     verified: list[str]
+    # Verified ids whose accepted proof is not the one you sent — the recovery chain
+    # found another. Fetch it from /session/{id}/proof/{property_id}.
+    recovered: list[str] = Field(default_factory=list)
     failed: list[FailureOut]
     remaining: list[str]
     complete: bool
+
+
+class ProofOut(BaseModel):
+    id: str
+    origin: str  # "submitted" | "recovered" | "cache"
+    lean_code: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -149,12 +158,25 @@ def check_session(session_id: str, req: CheckRequest):
 
     return CheckResponse(
         verified=[o.id for o in outcomes if o.verified],
+        recovered=[o.id for o in outcomes if o.verified and o.recovered],
         failed=[
             FailureOut(id=o.id, error=o.error, line=o.line, col=o.col, hint=o.hint) for o in outcomes if not o.verified
         ],
         remaining=session.work_ids,
         complete=session.complete,
     )
+
+
+@app.get("/session/{session_id}/proof/{property_id}", response_model=ProofOut)
+def read_proof(session_id: str, property_id: str):
+    """The proof Lean actually accepted, which is also the one that was cached."""
+    session = _require(session_id)
+    if property_id not in session.specs:
+        raise HTTPException(status_code=404, detail=f"Not registered in this session: {property_id}")
+    lean_code = session.verified.get(property_id)
+    if lean_code is None:
+        raise HTTPException(status_code=404, detail=f"Nothing accepted yet for {property_id}")
+    return ProofOut(id=property_id, origin=session.origin(property_id), lean_code=lean_code)
 
 
 @app.delete("/session/{session_id}")
