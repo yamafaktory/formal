@@ -264,20 +264,28 @@ the rest — there is no field for an unverifiable property, and nothing downstr
 one. If leaving something out was a real decision, say so in your report to the user;
 the spec file records what you are checking, not what you considered.
 
-Each property needs a `kind`, which is one of:
-  bound          a value is constrained — non-negative, within a range, never empty
-  identity       two expressions are equal, or one rewrites to the other
-  monotonicity   ordering is preserved: larger input, no smaller output
-  commutativity  order of arguments or operations does not matter
-  idempotency    applying twice is the same as applying once
-  invariant      something is preserved or always holds — a count, a well-formedness
-  counterexample two concrete inputs that must differ and do not, or must agree and do
-                 not — a proven defect rather than a reassurance
+%%KINDS%%
 
 Pick the one that describes the shape of the statement. `kind` is part of the cache key,
 so use the same one for the same property across runs; when two fit, prefer the more
-specific. Aim for 2-5 properties per pure function, at most 10 in total, and prefer
-properties that would catch a real mistake over ones that restate the implementation.
+specific. The id is not in the key — renaming a property keeps its cached proof and only
+changes the diff a human reads.
+
+Aim for 2-5 properties per pure function. There is no total cap: a file with six pure
+functions warrants more than a file with one. Prefer a few properties that would catch a
+real mistake over many that restate the implementation, and prefer proving one strong
+property to stating three weak ones.
+
+Model a sequence as `List Char` when the source treats it as text — comparing, matching,
+concatenating, indexing to get a character. Model it as `List Nat` (or `List UInt8`) when
+the source treats the elements as numbers: arithmetic on them, range comparisons, bit
+operations. What decides it is what the code does with an element, not what the language
+calls the type.
+
+The `List Char` rule exists because Lean's `String` is unusable in proofs, not because
+every sequence is text. Forcing `Char` onto element arithmetic drags validity side
+conditions into a proof that has none. When you model elements as numbers, record the
+range you are assuming — the model does not enforce it.
 """
 
 PROPERTY_FORMALIZE_AND_PROVE_USER = """Formalize this property as a Lean 4 theorem AND provide a complete proof.

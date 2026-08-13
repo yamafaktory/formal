@@ -33,9 +33,30 @@ PLACEHOLDERS = {
     "current": "<the proof Lean rejected>",
 }
 
+KINDS = {
+    "bound": "a value is constrained — non-negative, within a range, never empty",
+    "identity": "two expressions are equal, or one rewrites to the other",
+    "monotonicity": "ordering is preserved: larger input, no smaller output",
+    "commutativity": "order of arguments or operations does not matter",
+    "idempotency": "applying twice is the same as applying once",
+    "invariant": "something is preserved or always holds — a count, a well-formedness",
+    "counterexample": "two concrete inputs that must differ and do not, or must agree "
+    "and do not — a proven defect rather than a reassurance",
+}
+
+
+def _kinds_block() -> str:
+    width = max(len(k) for k in KINDS)
+    lines = [f"  {k.ljust(width)}  {v}" for k, v in KINDS.items()]
+    return "Each property needs a `kind`, which is one of:\n" + "\n".join(lines)
+
+
 WORKFLOW = [
     "Read the source file you intend to check.",
-    "GET /guide/extract, follow it, and identify the pure functions and their properties.",
+    "GET /guide/extract, and GET /guide/formalize and /guide/tactics too before you commit "
+    "to anything: what is practically provable in Lean is what decides which properties "
+    "belong in the spec file, and the spec file is the thing you commit.",
+    "Identify the pure functions and the properties worth proving about them.",
     "Write those properties to a spec file (see spec_file below), adding source_file and "
     "function_code to each. Commit it: it is reviewable, and identical bytes each run are "
     "what let the proof cache work at all.",
@@ -66,8 +87,8 @@ WHAT_VERIFIED_MEANS = (
     "sent. Before reporting a failure, formal retries the goal with a fixed tactic chain and then "
     "searches Mathlib for a lemma that closes it, so a proof of yours that did not work may still "
     "come back verified because something else did. The check response lists those ids under "
-    "'recovered', and GET /session/{id}/proof/{property_id} returns the proof that was accepted "
-    "along with its origin: submitted, recovered, or cache. The accepted proof is the one that was "
+    "'recovered', and GET /session/{id}/proof/{property_id} returns it as the `lean_code` field, "
+    "with its origin: submitted, recovered, or cache. The accepted proof is the one that was "
     "cached, so it is the artefact of record — read it before reporting that your proof worked."
 )
 
@@ -83,9 +104,10 @@ SPEC_FILE = {
         "version": 1,
         "properties": [
             {
-                "id": "required — stable across runs, e.g. 'fmt_elapsed/monotonicity'",
+                "id": "required — how a human reads the diff, e.g. 'fmt_elapsed/monotonicity'. "
+                "Not part of the cache key: renaming keeps the cached proof.",
                 "function": "required — the function this is about",
-                "kind": "required — one of: bound, identity, monotonicity, commutativity, idempotency, invariant",
+                "kind": "required — one of: " + ", ".join(KINDS),
                 "formal": "required — the mathematical statement, e.g. 'forall x, f x <= x'",
                 "description": "optional — one line of prose for a human reviewer",
                 "preconditions": "optional — list of what must hold on inputs",
@@ -121,7 +143,7 @@ def _extract() -> str:
             _render(prompts.DECOMPOSE_USER),
             "## Step 2 — identify properties worth proving",
             prompts.PROPERTY_EXTRACTION_SYSTEM.strip(),
-            _render(prompts.PROPERTY_EXTRACTION_USER),
+            _render(prompts.PROPERTY_EXTRACTION_USER).replace("%%KINDS%%", _kinds_block()),
             "## Step 3 — write the spec file",
             "Write the properties you judged verifiable into the spec file described by GET /guide, "
             "one entry each, with source_file and function_code filled in. Choose ids you would "

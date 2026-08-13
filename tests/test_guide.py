@@ -267,3 +267,80 @@ class TestSecondRunGuidance:
     def test_a_counterexample_has_a_kind(self):
         """Two proven collisions had no honest kind; the caller filed them as identity."""
         assert "counterexample" in guide.topic("extract")
+
+
+class TestKindsHaveOneDefinition:
+    """kind was enumerated in two places and they disagreed after `counterexample` was
+    added to one of them. kind is in the cache key, so a caller guessing the wrong value
+    silently loses its hits."""
+
+    def test_the_schema_and_the_instructions_list_the_same_kinds(self):
+        listed = json.dumps(guide.index())
+        explained = guide.topic("extract")
+        for kind in guide.KINDS:
+            assert kind in listed, f"{kind} explained but not offered in the schema"
+            assert kind in explained, f"{kind} offered but never explained"
+
+    def test_no_kind_is_offered_without_being_explained(self):
+        for kind, meaning in guide.KINDS.items():
+            assert meaning.strip(), f"{kind} has no explanation"
+
+    def test_the_block_actually_renders(self):
+        assert "%%KINDS%%" not in guide.topic("extract")
+
+
+class TestGuidanceRunFourNeeded:
+    def test_the_property_budget_does_not_contradict_itself(self):
+        """ "2-5 per function, at most 10 total" is unsatisfiable past two functions."""
+        assert "at most 10" not in guide.topic("extract")
+
+    def test_element_arithmetic_is_not_forced_into_List_Char(self):
+        """The List Char rule exists because Lean's String is unusable, not because every
+        sequence is text — a caller doing byte arithmetic had to deviate silently."""
+        text = guide.topic("extract")
+        assert "List Nat" in text
+        assert "what the code does with an element" in text, "the rule must key on behaviour"
+
+    def test_the_id_is_not_claimed_to_matter_to_the_cache(self):
+        assert "renaming keeps the cached proof" in json.dumps(guide.index())
+
+    def test_the_proof_field_is_named(self):
+        assert "lean_code" in json.dumps(guide.index())
+
+    def test_the_workflow_says_to_read_ahead_before_committing(self):
+        """What is provable decides what belongs in the spec, and the spec is committed."""
+        assert "before you commit" in " ".join(guide.index()["workflow"])
+
+
+class TestTheGuideNamesNoLanguage:
+    """The guide is served to an agent working in whatever language the caller uses.
+
+    Java-specific examples were removed once; a byte-array rule naming three languages'
+    type spellings went in hours later. State rules by what the code does, not by what
+    one language calls the type.
+    """
+
+    SPELLINGS = [
+        "[]const u8",
+        "Vec<u8>",
+        "byte[]",
+        "[]byte",
+        "unsigned char",
+        "std::",
+        "JVM",
+        "getType",
+        "PLUS.",
+        "BigDecimal",
+        "__init__",
+        "nullptr",
+    ]
+
+    def test_no_topic_names_a_language_specific_type_or_idiom(self):
+        served = "".join(guide.topic(t) for t in guide.TOPICS)
+        found = [s for s in self.SPELLINGS if s in served]
+        assert found == [], f"language-specific spellings in the guide: {found}"
+
+    def test_the_index_names_none_either(self):
+        served = json.dumps(guide.index())
+        found = [s for s in self.SPELLINGS if s in served]
+        assert found == [], f"language-specific spellings in the index: {found}"
