@@ -132,6 +132,8 @@ def _tactics() -> str:
             _render(prompts.PROOF_GENERATION_USER),
             "## " + prompts.FINITE_CASE_ANALYSIS.split(chr(10))[0],
             prompts.FINITE_CASE_ANALYSIS.split(chr(10), 1)[1].strip(),
+            "## " + prompts.FILTER_AND_PARTITION.split(chr(10))[0],
+            prompts.FILTER_AND_PARTITION.split(chr(10), 1)[1].strip(),
             "## When Lean rejects a proof",
             _render(prompts.PROOF_RETRY_USER),
             "The check response gives you the first error, its position, and a hint chosen for "

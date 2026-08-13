@@ -382,6 +382,7 @@ uv run ruff check .          # lint
 uv run ruff check --fix .    # lint + auto-fix
 uv run ruff format .         # format
 uv run pytest --tb=short     # tests
+FORMAL_LEAN_TESTS=1 uv run pytest -k DocumentedLemmas   # check the guide's lemma names against Mathlib (~20s)
 ```
 
 Rule sets: `E`, `F`, `I`, `UP`. Line length 120.

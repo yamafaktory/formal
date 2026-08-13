@@ -50,14 +50,14 @@ Critical rules:
   · Backward direction (cond → f x = A): prefer `simp only [f, if_pos h]` in ONE step —
     do NOT `unfold f` then `rw [if_pos h]`; rw closes via rfl automatically and any tactic after will crash.
     Alternatively: `unfold f; split_ifs with hc; · rfl; · exact absurd h hc`
-- For properties that hold for a specific enum/constructor value (e.g. `h : op = PLUS`):
-  use `subst h` (if the variable appears alone) or `simp only [h]` to substitute the specific value
-  everywhere, then `simp [PLUS.someField, ...]` to reduce the multi-branch if/match.
+- For properties that hold for one constructor of a sum type (`h : mode = Fast`, `h : c = 'x'`,
+  `h : tag = Leaf`): use `subst h` (if the variable appears alone) or `simp only [h]` to substitute
+  that value everywhere, then `simp [theFunction]` to reduce the branch it selects.
   Do NOT use `decide` or `aesop` on open inductive types — they will not terminate.
   Pattern:
-    intro h          -- h : op = PLUS
-    subst h          -- replaces all `op` with `PLUS`
-    simp [PLUS.getPrecedence, PLUS.print, ...]   -- reduces branches
+    intro h          -- h : mode = Fast
+    subst h          -- replaces every `mode` with `Fast`
+    simp [rateFor, labelFor]   -- reduces the match to the Fast branch
 - In list-induction cons cases with `hweights : ∀ x ∈ hd :: tl, x = 0` (or similar), extract facts
   with `have h1 := hweights _ (by simp)` for the head and
   `have h2 : ∀ x ∈ tl, x = 0 := fun x hx => hweights x (by simp [hx])` for the tail,
@@ -82,8 +82,8 @@ Critical rules:
   still contains the field name, use `simp [h]` to rewrite first.
 - NEVER use square brackets for regular hypotheses in theorem signatures. Square brackets
   `[h : T]` are ONLY for typeclass arguments. For all other hypotheses use round brackets:
-  `(h : op = PLUS)`, `(hn : n > 0)`, etc.
-  Wrong: `theorem foo [h : op = PLUS]`  Right: `theorem foo (h : op = PLUS)`
+  `(h : mode = Fast)`, `(hn : n > 0)`, etc.
+  Wrong: `theorem foo [h : mode = Fast]`  Right: `theorem foo (h : mode = Fast)`
 - To unfold a local definition across both goal and hypotheses: `unfold f at *` or `simp only [f] at *`.
   If `simp [f]` makes no progress on a hypothesis `h`, try `unfold f at h` or `delta f at h`.
 - `split_ifs at h with hcond` branch ordering depends on the guard shape:
@@ -111,7 +111,7 @@ List:
   List.getLast?_cons_nil   : List.getLast? [a] = some a
   List.nodup_singleton     : List.Nodup [a]
   List.singleton_append    : [a] ++ l = a :: l
-  List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length  (or use: List.length_pos)
+  List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
   List.ne_nil_of_length_pos: 0 < l.length → l ≠ []
   List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
   List.find?_mem           : List.find? p l = some a → a ∈ l
@@ -213,12 +213,12 @@ Return a JSON object with:
 
 Rules:
 - Pure functions: no DB, no I/O, no HTTP, no global state, same input always gives same output
-- A function is STILL PURE if it takes interface or abstract class parameters and only READS from
-  them (calls their getter/query methods). Reading from an interface argument is not a side effect.
-  Example: `print(Expression left, Expression right)` that calls `left.getType()` and returns a
-  String is pure — it has no I/O and no global state mutation.
-- Private helper methods that compute strings, numbers, or booleans from their arguments are
-  almost always pure — classify them as pure unless they explicitly do I/O or mutate state.
+- A function is STILL PURE if its arguments are objects, structs, interfaces or closures and it only
+  READS from them — calling an accessor, projecting a field, applying a function it was handed.
+  Reading from an argument is not a side effect.
+- Non-exported or private helpers that compute strings, numbers, collections or booleans from their
+  arguments are almost always pure — classify them as pure unless they explicitly do I/O or mutate
+  state reachable from outside.
 - If a function mixes pure and impure, extract just the pure computation as a new helper
 - If nothing is pure, return empty pure_functions array
 - Preserve the original {language} syntax when extracting pure function code
@@ -248,7 +248,8 @@ A property is VERIFIABLE if:
     ordered collection     →  List T or Finset T
     map / dictionary       →  Finset (K × V) or a function K → Option V
 - The proof does not require axioms about runtime behaviour
-  (memory layout, JVM internals, hash codes, reference identity, etc.)
+  (memory layout, allocator or GC behaviour, hash codes, pointer or reference identity,
+  iteration order of an unordered collection, etc.)
 
 Modeling assumptions applied during verification:
 - Floating-point types are modeled as Rat (rationals) — NaN, Inf, IEEE 754 rounding do not exist.
@@ -518,3 +519,30 @@ Preferring `simp only`
   Bare `simp` rewrites with everything in scope, which is both slow and unpredictable
   — it can rewrite the goal into a shape none of your later tactics expect. Naming the
   lemmas (`simp only [List.mem_cons, if_pos]`) keeps the goal where you left it."""
+
+
+FILTER_AND_PARTITION = """Filtering and partitioning.
+
+Selecting, rejecting and splitting a collection is the commonest shape of pure logic
+there is, and the lemmas below are the ones that close those goals. Signatures are
+from Lean v4.29 with Mathlib, checked rather than recalled — if you need something not
+listed, reach for a tactic (`simp`, `induction`, `omega`) rather than guessing a name.
+
+  List.filter_append   : filter p (l₁ ++ l₂) = filter p l₁ ++ filter p l₂
+  List.filter_filter   : filter p (filter q l) = filter (fun a => p a && q a) l
+  List.filter_cons     : filter p (x :: xs) = if p x then x :: filter p xs else filter p xs
+  List.mem_filter      : x ∈ filter p as ↔ x ∈ as ∧ p x = true
+  List.length_filter_le : (filter p l).length ≤ l.length
+  List.filter_subset   : l₁ ⊆ l₂ → filter p l₁ ⊆ filter p l₂
+  List.filter_eq_self  : filter p l = l ↔ ∀ a ∈ l, p a = true
+
+  List.partition_eq_filter_filter : partition p l = (filter p l, filter (not ∘ p) l)
+
+`partition` is defined by an accumulator, so induction on it directly is painful.
+Rewrite with `List.partition_eq_filter_filter` first and prove the statement about the
+two filters instead — that is what makes conservation properties tractable:
+
+    rw [List.partition_eq_filter_filter]
+
+A count is a filtered length: `List.countP_eq_length_filter` moves between them when a
+property is easier to state one way and easier to prove the other."""

@@ -157,3 +157,54 @@ class TestTacticsCoversWhatActuallyFailed:
         text = guide.topic("tactics")
         assert "set_option" in text
         assert "moves the failure" in text
+
+
+# Names the guide mentions in order to warn that they do not exist. Kept out of the
+# existence check, and checked in the other direction by the test below.
+CITED_AS_ABSENT = {
+    "List.append_inj_iff",
+    "List.append_left_cancel",
+    "List.append_right_cancel",
+    "List.isPrefixOf_append_left",
+    "List.length_eq_one",
+}
+
+
+class TestDocumentedLemmasExist:
+    """The guide tells callers not to guess lemma names. It has to hold itself to that.
+
+    The filter family went in because a live agent needed it and found nothing; one
+    name it would have been natural to add, List.length_filter, does not exist in this
+    Mathlib at all. A Mathlib bump can invalidate any of these silently.
+
+    Opt-in: FORMAL_LEAN_TESTS=1 uv run pytest -k DocumentedLemmas  (runs Lean, ~5s)
+    """
+
+    def test_every_lemma_named_in_the_guide_elaborates(self):
+        import os
+
+        if os.getenv("FORMAL_LEAN_TESTS") != "1":
+            pytest.skip("set FORMAL_LEAN_TESTS=1 to check lemma names against Lean")
+
+        from formal.lean_verifier import verify
+
+        text = "".join(guide.topic(t) for t in guide.TOPICS)
+        names = set(re.findall(r"List\.[A-Za-z_][A-Za-z0-9_']*[?!]?", text)) - CITED_AS_ABSENT
+        assert names, "no lemma names found — the extraction regex has drifted"
+
+        result = verify("import Mathlib\n\n" + "\n".join(f"#check @{n}" for n in sorted(names)))
+        missing = [e.get("data", "").replace("\n", " ") for e in result.errors]
+        assert result.success, "guide recommends lemmas that do not exist: " + "; ".join(missing)
+
+    def test_the_names_cited_as_absent_are_still_absent(self):
+        """If Mathlib adds one, the guide's warning about it has become wrong."""
+        import os
+
+        if os.getenv("FORMAL_LEAN_TESTS") != "1":
+            pytest.skip("set FORMAL_LEAN_TESTS=1 to check lemma names against Lean")
+
+        from formal.lean_verifier import verify
+
+        for name in sorted(CITED_AS_ABSENT):
+            result = verify(f"import Mathlib\n\n#check @{name}")
+            assert not result.success, f"{name} now exists — the guide still warns against it"
