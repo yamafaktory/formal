@@ -156,8 +156,13 @@ def drop(session_id: str) -> bool:
         return _SESSIONS.pop(session_id, None) is not None
 
 
-class UnknownProperty(KeyError):
-    """A proof was submitted for an id the session never registered."""
+class UnknownProperty(ValueError):
+    """A proof was submitted for an id the session never registered.
+
+    Not a KeyError: the API turns this into a 400 detail with `str(e)`, and
+    KeyError's `__str__` is a repr, so the caller was reading a message wrapped
+    in literal quotes.
+    """
 
 
 def check(session: Session, proofs: dict[str, str]) -> list[Outcome]:
@@ -169,7 +174,7 @@ def check(session: Session, proofs: dict[str, str]) -> list[Outcome]:
     """
     unknown = sorted(set(proofs) - set(session.specs))
     if unknown:
-        raise UnknownProperty(f"not registered in this session: {', '.join(unknown)}")
+        raise UnknownProperty(f"Not registered in this session: {', '.join(unknown)}")
 
     submissions = [Submission(id=pid, lean_code=lean) for pid, lean in proofs.items() if pid not in session.verified]
     for sub in submissions:
