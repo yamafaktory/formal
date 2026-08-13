@@ -30,9 +30,18 @@ When adding new code, add tests for anything that is pure or can be tested
 with a mocked LLM (`unittest.mock.patch`). Good candidates:
 
 - Pure logic (string transformations, hash functions, data parsing)
-- Error hint branches in `lean_verifier.py` — add a test case for every new branch
-- JSON parsing in `feature_extractor.py` — cover normal, missing fields, and parse error
 - Cache behaviour in `proof_cache.py` — key determinism, save/load, TTL
+- Spec loading and staleness in `specs.py`
 
-Do not test LLM output quality or Lean proof correctness — those require the
-full runtime and are covered by integration use.
+Do not test Lean proof correctness — that requires the full runtime and is
+covered by integration use.
+
+## Hints
+
+The advice returned for a failing proof lives in `src/formal/guidance/hints.toml`,
+not in Python. `hints.py` is only the matcher. When adding a rule:
+
+- Order is the semantics — a general rule placed above a specific one swallows it.
+- Add a sample to `tests/fixtures/hint_corpus.json` that reaches it. A rule with
+  no sample fails `TestNoRuleIsUnreachable`, which is the only thing standing
+  between the table and a rule nobody can ever trigger.

@@ -190,5 +190,9 @@
  "app_mismatch_option_same_inner": {
   "error": "application type mismatch\nhas type\n  Option Nat\nbut is expected to have type\n  Option Nat",
   "hint": "The argument has the wrong type. Common causes: (1) An induction hypothesis is still a function (has `→` in its type) — you must apply it to a proof of its precondition before using it as a value. (2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). Read the expected type in the error and find or derive a proof of exactly that type."
+ },
+ "function_expected_field_word": {
+  "error": "Function expected\nunexpected Field access after a space",
+  "hint": "Lean parsed a space before `.field` as function application. Write field access without a space: `x.id` not `x .id`. Also avoid `head!` — use `List.head?` or case on the list instead."
  }
 }

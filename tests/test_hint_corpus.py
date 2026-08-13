@@ -1,11 +1,15 @@
-"""Every hint branch pinned to its current text, before the chain becomes data.
+"""Every hint pinned to its text, and every rule in the table reached by a sample.
 
-`hint_for_error` is 434 lines of `if ... in data` — 16% of the codebase and the
+The hints were a 434-line `if ... in data` chain — 16% of the codebase and the
 single largest thing a rewrite has to reproduce. Unit tests covered the branches
 someone thought to write one for; this covers all of them. The fixture was built
 by walking the chain until line and branch coverage of the function were complete,
-so a refactor that drops, reorders or subtly rewords a branch fails here rather
-than in front of an agent trying to fix a proof.
+so a refactor that drops, reorders or subtly rewords a rule fails here rather than
+in front of an agent trying to fix a proof.
+
+Now that the rules are data, the corpus does a second job: data rots in a way code
+does not, because a rule that can never match is not dead code anyone will notice.
+Every rule must be reached.
 
 The hints are recorded as-is, not as assertions about what they ought to say. The
 question this answers is only "does it still say the same thing".
@@ -16,6 +20,7 @@ import pathlib
 
 import pytest
 
+from formal import hints
 from formal.lean_verifier import LeanResult
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "hint_corpus.json"
@@ -34,7 +39,7 @@ def _hint(error: str | None) -> str:
 
 class TestFrozenHints:
     def test_the_corpus_is_the_size_it_was_measured_at(self, corpus):
-        assert len(corpus) == 48
+        assert len(corpus) == 49
 
     def test_every_recorded_error_still_produces_its_recorded_hint(self, corpus):
         changed = {
@@ -65,6 +70,7 @@ class TestTheCorpusStillDiscriminates:
     EXPECTED_GROUPS = [
         ["app_mismatch_bare", "app_mismatch_option_same_inner"],
         ["forward_pattern", "free_vars_string", "prefix_not_defeq", "prefix_unsolved_append"],
+        ["function_expected_field", "function_expected_field_word"],
         ["guessed_lemma", "unknown_identifier_unquoted"],
     ]
 
@@ -74,3 +80,36 @@ class TestTheCorpusStillDiscriminates:
             by_hint.setdefault(case["hint"], []).append(name)
         shared = sorted(sorted(names) for names in by_hint.values() if len(names) > 1)
         assert shared == self.EXPECTED_GROUPS
+
+
+class TestNoRuleIsUnreachable:
+    """A rule the corpus cannot reach is either dead or shadowed by an earlier one.
+
+    Both are silent: the table still loads, and the only symptom is advice nobody
+    ever gets. Finding one means either writing the sample that reaches it or
+    deleting the rule.
+    """
+
+    def _rule_ids(self, rules) -> set[str]:
+        found: set[str] = set()
+        for rule in rules:
+            found.add(rule["id"])
+            found |= self._rule_ids(rule.get("sub", []))
+        return found
+
+    def test_every_rule_answers_at_least_one_sample(self, corpus, monkeypatch):
+        fired: set[str] = set()
+        matches = hints._matches
+
+        def record(rule, data):
+            if matches(rule, data):
+                fired.add(rule["id"])
+                return True
+            return False
+
+        monkeypatch.setattr(hints, "_matches", record)
+        for case in corpus.values():
+            if case["error"] is not None:
+                hints.hint_for(case["error"])
+
+        assert self._rule_ids(hints.table()["rule"]) - fired == set()
