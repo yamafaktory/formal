@@ -101,14 +101,18 @@ GET  /guide                      the workflow and the spec-file schema (~650 tok
 GET  /guide/extract              how to find pure functions and properties
      → write formal.properties.json, commit it
 POST /session {"spec_file": …}   → {cached, work, stale}
-GET  /guide/formalize            Lean 4 conventions
+GET  /guide/formalize            Lean 4 conventions for stating a property
+GET  /guide/tactics              rules that prevent the common proof failures
 POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
      → {verified, failed: [{id, error, line, col, hint}], remaining, complete}
      fix the failures, resubmit only those ids, repeat
 ```
 
 The guide is served in stages rather than as one document, so an agent pays for the Lean
-conventions only once it is actually writing Lean.
+conventions only once it is actually writing Lean. `tactics` is the accumulated list of
+what goes wrong — never adding a tactic after `simp`, `decide` rather than `omega` for
+string-literal lengths, how to close an `Except.ok = Except.error` branch. Most
+first-attempt failures are on it.
 
 Three things keep the loop cheap. Properties are registered once, so a retry carries only
 the corrected Lean and not the metadata again. Every proof in a request is checked in a
@@ -204,7 +208,7 @@ property needs rewriting.
 | Endpoint | Purpose |
 |---|---|
 | `GET /guide` | Workflow, spec-file schema, topic list |
-| `GET /guide/{extract\|formalize}` | Instructions for one phase |
+| `GET /guide/{extract\|formalize\|tactics}` | Instructions for one phase |
 | `POST /session` | `{"spec_file": path, "root"?: path}` or `{"properties": [...]}` |
 | `GET /session/{id}` | Current state |
 | `POST /session/{id}/check` | `{"proofs": {id: lean}}` |

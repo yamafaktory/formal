@@ -26,6 +26,11 @@ PLACEHOLDERS = {
     "kind": "<the property's kind field>",
     "preconditions": "<the property's preconditions, one per line>",
     "assumptions": "<the property's assumptions, one per line>",
+    "error": "<the error field from the failed check>",
+    "line": "<the line field>",
+    "col": "<the col field>",
+    "hint": "<the hint field>",
+    "current": "<the proof Lean rejected>",
 }
 
 WORKFLOW = [
@@ -36,7 +41,8 @@ WORKFLOW = [
     "what let the proof cache work at all.",
     "POST /session with {'spec_file': '<path>'}. The reply says which properties are already "
     "cached, which need proving, and which are stale.",
-    "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work'.",
+    "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work'. "
+    "GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
     "POST /session/{session_id}/check with {'proofs': {'<id>': '<lean>'}}.",
     "For each failure, read its error and hint, fix that proof, and resubmit only the ids "
     "that failed. Repeat until 'complete' is true.",
@@ -101,6 +107,21 @@ def _extract() -> str:
     )
 
 
+def _tactics() -> str:
+    return "\n\n".join(
+        [
+            "## Rules that prevent the common failures",
+            prompts.PROOF_GENERATION_SYSTEM.strip(),
+            _render(prompts.PROOF_GENERATION_USER),
+            "## When Lean rejects a proof",
+            _render(prompts.PROOF_RETRY_USER),
+            "The check response gives you the first error, its position, and a hint chosen for "
+            "that specific error. Fix that one and resubmit only the ids that failed — a proof "
+            "already accepted is never re-checked.",
+        ]
+    )
+
+
 def _formalize() -> str:
     return "\n\n".join(
         [
@@ -118,6 +139,7 @@ def _formalize() -> str:
 TOPICS = {
     "extract": ("how to identify pure functions and the properties worth proving", _extract),
     "formalize": ("Lean 4 conventions for stating and proving a property", _formalize),
+    "tactics": ("tactic rules that prevent the common failures, and what to do when Lean rejects a proof", _tactics),
 }
 
 

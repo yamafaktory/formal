@@ -1,30 +1,10 @@
-CODE_GENERATION_SYSTEM = """You are a Python expert. Output ONLY a clean Python function.
-Include a docstring. No explanations outside the code block."""
+"""The instructions formal serves to whoever is writing the properties and the Lean.
 
-CODE_GENERATION_USER = """Write a Python function for: {task}
-
-Output format:
-```python
-def function_name(...) -> ...:
-    \"\"\"...\"\"\"
-    ...
-```"""
-
-
-SPEC_EXTRACTION_SYSTEM = """You extract formal behavioral specifications from Python code.
-Be precise and mathematical. No code blocks."""
-
-SPEC_EXTRACTION_USER = """Extract a formal specification from this Python function.
-
-Include:
-- Function signature and types
-- Preconditions (what must hold on inputs)
-- Postconditions (what the output guarantees)
-- Key invariants or properties (e.g. monotonicity, termination argument)
-
-Code:
-{code}"""
-
+Rendered by guide.py and reachable at GET /guide/{topic}. Nothing here is called:
+formal does not run a model. These are the accumulated rules for making the three
+judgements it cannot make for you, and they are the reason it is worth asking rather
+than improvising.
+"""
 
 AUTOFORMALIZE_SYSTEM = """You are a Lean 4 expert. Output ONLY valid Lean 4 code in a lean4 code block.
 Use Lean 4 syntax — not Lean 3. All types must be from Lean 4 / Mathlib.
@@ -38,34 +18,6 @@ not provable in practice. The same properties over `List Char` close with `simp`
 So write `def f (s : List Char) : List Char := ...` rather than taking a `String`, and
 state the theorem over `List Char`. Use string literals only where the value is concrete
 and never destructured."""
-
-AUTOFORMALIZE_USER = """Translate this specification into a Lean 4 theorem statement.
-
-Rules:
-- Start with `import Mathlib` or specific Mathlib imports
-- Use Lean 4 types: Nat, Int, List, Array, Bool, etc.
-- Write 1–3 theorem/lemma statements that capture the core properties
-- End each theorem with `:= by sorry` (proof placeholder)
-- Do NOT include a proof yet
-
-Specification:
-{spec}
-
-Output ONLY a lean4 code block."""
-
-
-AUTOFORMALIZE_RETRY_USER = """Your previous Lean 4 output had this error:
-
-{error}
-
-Fix it and output the corrected Lean 4 theorem statement.
-Remember: use Lean 4 syntax, end with `:= by sorry`.
-
-Previous attempt:
-{previous}
-
-Output ONLY a lean4 code block."""
-
 
 PROOF_GENERATION_SYSTEM = """You are a Lean 4 tactic proof expert.
 Output ONLY valid Lean 4 code in a lean4 code block."""
@@ -241,9 +193,6 @@ Theorem to prove:
 
 Output ONLY a lean4 code block with the proof filled in."""
 
-
-# ── Feature-level prompts ─────────────────────────────────────────────────────
-
 DECOMPOSE_SYSTEM = """You are an expert at separating pure logic from side-effectful code.
 Respond ONLY with valid JSON. No markdown, no explanation."""
 
@@ -276,7 +225,6 @@ Rules:
 
 Feature code:
 {code}"""
-
 
 PROPERTY_EXTRACTION_SYSTEM = """You are an expert in formal verification and Lean 4.
 Respond ONLY with valid JSON. No markdown, no explanation."""
@@ -348,98 +296,6 @@ Focus on properties that are mathematically precise and meaningful for correctne
 Aim for 2-5 properties per pure function. Max 10 total.
 Set verifiable=false and explain in unverifiable_reason only for properties that genuinely cannot
 be modelled in Lean 4 under the assumptions above."""
-
-
-# ── Property formalization ────────────────────────────────────────────────────
-
-PROPERTY_FORMALIZE_USER = """Translate this property into a Lean 4 theorem.
-
-Source language: {language}
-Function code:
-{function_code}
-
-Property:
-- Description: {description}
-- Formal statement: {formal}
-- Kind: {kind}
-- Preconditions: {preconditions}
-- Assumptions: {assumptions}
-
-The preconditions must appear as explicit hypotheses in the theorem signature (e.g. `(h : n > 0)`).
-The assumptions must appear as comments above the theorem so they are auditable.
-
-Modeling rules (apply to any source language):
-- Translate SEMANTICS, not syntax. Re-implement the logic in Lean 4 from scratch.
-- NEVER leave a type opaque. Every value must have a concrete Lean 4 type:
-    numbers          →  Nat, Int, or Rat (never an abstract "Number")
-    equality checks  →  = (Lean's structural equality — never model .equals() as a function)
-    strings          →  String (has DecidableEq; use = for any string comparison)
-    lists / arrays   →  List T
-    sets             →  Finset T (use ∈ for membership, ⊆ for subset)
-    maps             →  Finset (K × V) or K → Option V
-    optional / null  →  Option T
-    booleans         →  Bool or decidable Prop
-- If membership monotonicity is involved (x ∈ s → x ∈ s') model s' as a Finset
-  superset and use Finset.mem_of_mem_of_subset or set inclusion directly.
-- For functions that THROW on invalid input (guards, precondition checks):
-    model the function as returning `Option T` (none = threw) or add a
-    precondition hypothesis (h : l.length = 1) and prove the postcondition.
-    Do NOT model exceptions as ⊥ or use Classical.choice.
-- Import Mathlib at the top.
-- Re-implement the function in Lean 4, then state the theorem.
-- End with `:= by sorry`.
-- Keep it to one self-contained Lean 4 file.
-
-Mathlib API — use EXACTLY these names when dealing with List/Option:
-  List.length_singleton    : [a].length = 1
-  List.mem_singleton       : a ∈ [b] ↔ a = b
-  List.mem_cons            : a ∈ b :: l ↔ a = b ∨ a ∈ l
-  List.mem_cons_self       : a ∈ a :: l   (implicit args only — use `simp` or `exact List.mem_cons_self`)
-  List.head?_cons          : List.head? (a :: l) = some a
-  List.head?_nil           : List.head? ([] : List α) = none
-  List.length_pos_of_ne_nil: l ≠ [] → 0 < l.length
-  List.countP_append       : List.countP p (l ++ m) = List.countP p l + List.countP p m
-  Option.some_injective    : some a = some b → a = b
-
-  List.mem_of_mem_filter   : a ∈ l.filter p → a ∈ l
-  List.find?_mem           : List.find? p l = some a → a ∈ l
-
-String length:
-  String.length_append     : (s ++ t).length = s.length + t.length
-  -- For literal lengths: use `show "foo".length = 3 from rfl` inline in simp only, then omega.
-  --   simp only [String.length_append, show "PREFIX".length = N from rfl, ...]
-  --   omega
-  -- Do NOT use `simp [String.length]` — it recurses infinitely. `String.length_mk` does not exist.
-  -- NEVER use `omega` on goals involving un-reduced String.length literals
-
-Modeling notes:
-- NEVER model a simple collection wrapper as a Lean struct with a `.data` field. Represent it
-  directly as `List T` — struct wrappers cause `++` to differ from `List.append`, breaking lemmas.
-- For string injectivity proofs: reduce to `List Char` via `String.ext_iff` / `String.toList_append`,
-  then use `List.append_inj h rfl` (for prefix stripping) and `List.append_inj h hlen` (for suffix).
-  NOTE: `List.append_left_cancel` and `List.append_right_cancel` do NOT exist in Mathlib.
-- Do NOT use `decide` on goals containing free variables — `decide` only works on closed, fully
-  concrete propositions. For `p.isPrefixOf (p ++ rest)` goals:
-  `simp only [String.isPrefixOf, String.toList_append]; rfl`
-
-Proof templates for membership goals:
-
-(A) Singleton-guarded function result ∈ list:
-    cases l with
-    | nil => simp at h
-    | cons a t =>
-      cases t with
-      | nil =>
-        simp at h; subst h
-        simp       -- closes a ∈ [a] — use simp ONLY, NEVER List.mem_cons_self with args
-      | cons b t => simp [List.length_cons] at h  -- or: omega
-
-(B) List.find? result on a filtered list ∈ original list:
-    have hmem_filter := List.find?_mem h
-    exact ⟨_, List.mem_of_mem_filter hmem_filter, rfl⟩
-
-Output ONLY a lean4 code block."""
-
 
 PROPERTY_FORMALIZE_AND_PROVE_USER = """Formalize this property as a Lean 4 theorem AND provide a complete proof.
 No sorry.
@@ -603,22 +459,6 @@ Proof templates for common goals:
 
 Output ONLY a lean4 code block with the complete theorem and proof."""
 
-
-PROPERTY_RETRY_USER = """The Lean proof failed with this error:
-
-{error}
-Line: {line}, Col: {col}
-Hint: {hint}
-
-Fix the proof for this property:
-- Description: {description}
-
-Current code:
-{current}
-
-Output ONLY a corrected lean4 code block."""
-
-
 PROOF_RETRY_USER = """The Lean REPL rejected your proof with this error:
 
 {error}
@@ -635,40 +475,3 @@ Current code:
 {current}
 
 Output ONLY a corrected lean4 code block."""
-
-
-# ── Fidelity check ────────────────────────────────────────────────────────────
-# A verified property only means Lean accepted the theorem it was given. Reading
-# the theorem back without sight of the original description is the one way to
-# notice that the theorem proved something other than what was asked.
-
-BACK_TRANSLATE_SYSTEM = """You are a Lean 4 expert. State in one or two plain English sentences exactly what the
-theorem asserts: its hypotheses, its conclusion, and any definition it depends on.
-
-Describe only what is written. Do not speculate about what the author intended, do not mention any
-program the theorem might be modelling, and do not judge whether it is useful. Output only the
-sentences, with no preamble."""
-
-BACK_TRANSLATE_USER = """```lean4
-{lean_code}
-```"""
-
-FIDELITY_JUDGE_SYSTEM = """You decide whether two statements describe the same property. Answer with JSON only."""
-
-FIDELITY_JUDGE_USER = """Property as originally described:
-{description}
-
-What the Lean theorem actually asserts:
-{back_translation}
-
-Do these state the same property?
-
-Ignore differences of wording, notation, and modelling — floats represented as rationals, text as
-List Char, collections as List — these are expected and are not divergences.
-
-Answer "false" only if the theorem could hold while the described property fails, or the theorem is
-about something materially different: a weaker claim, a special case, an extra hypothesis that gives
-the result away, or a different function altogether.
-
-Return JSON:
-{{"agrees": true, "reason": "one sentence"}}"""

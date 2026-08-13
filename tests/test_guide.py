@@ -6,6 +6,7 @@ when that stops being true, or when a template placeholder reaches an agent
 unsubstituted and it tries to prove something about `{function_code}`.
 """
 
+import pathlib
 import re
 
 import pytest
@@ -26,11 +27,11 @@ class TestIndex:
         index = guide.index()
         assert index["workflow"]
         assert index["spec_file"]["schema"]["version"] == 1
-        assert set(index["topics"]) == {"extract", "formalize"}
+        assert set(index["topics"]) == {"extract", "formalize", "tactics"}
 
     def test_the_workflow_names_the_endpoints_it_depends_on(self):
         steps = " ".join(guide.index()["workflow"])
-        for endpoint in ("/guide/extract", "/guide/formalize", "/session", "/check"):
+        for endpoint in ("/guide/extract", "/guide/formalize", "/guide/tactics", "/session", "/check"):
             assert endpoint in steps
 
     def test_the_schema_lists_every_field_the_loader_requires(self):
@@ -47,17 +48,17 @@ class TestIndex:
 
 
 class TestTopics:
-    @pytest.mark.parametrize("name", ["extract", "formalize"])
+    @pytest.mark.parametrize("name", ["extract", "formalize", "tactics"])
     def test_a_topic_renders(self, name):
         assert len(guide.topic(name)) > 500
 
-    @pytest.mark.parametrize("name", ["extract", "formalize"])
+    @pytest.mark.parametrize("name", ["extract", "formalize", "tactics"])
     def test_no_placeholder_survives_rendering(self, name):
         """An unsubstituted {function_code} is something an agent will try to reason about."""
         leftover = PLACEHOLDER.findall(guide.topic(name))
         assert leftover == []
 
-    @pytest.mark.parametrize("name", ["extract", "formalize"])
+    @pytest.mark.parametrize("name", ["extract", "formalize", "tactics"])
     def test_doubled_braces_are_resolved(self, name):
         """The templates escape their JSON examples; a reader should see real JSON."""
         assert "{{" not in guide.topic(name)
@@ -78,6 +79,13 @@ class TestItStaysTiedToThePrompts:
 
     def test_formalize_is_built_from_the_formalisation_prompts(self):
         assert prompts.AUTOFORMALIZE_SYSTEM.strip() in guide.topic("formalize")
+
+    def test_tactics_carries_the_rules_that_have_no_other_home(self):
+        """These outlived the pipeline that called them; serving them is why they survive."""
+        text = guide.topic("tactics")
+        assert "no goals" in text
+        assert "Except" in text
+        assert prompts.PROOF_GENERATION_SYSTEM.strip() in text
 
     def test_editing_a_prompt_changes_the_guide(self, monkeypatch):
         before = guide.topic("formalize")
@@ -100,3 +108,16 @@ class TestEndpoints:
         response = client.get("/guide/nope")
         assert response.status_code == 404
         assert "extract" in response.json()["detail"]
+
+
+class TestEveryPromptIsReachable:
+    def test_no_prompt_is_orphaned(self):
+        """formal calls none of these, so a prompt no topic renders is unreachable text.
+
+        Twelve of them were orphaned when the pipeline that called them was removed.
+        The ones worth keeping were re-homed into a topic; this stops the rest coming
+        back, and stops a future topic edit stranding one silently.
+        """
+        defined = set(re.findall(r"^([A-Z_]+) = ", pathlib.Path(prompts.__file__).read_text(), re.M))
+        rendered = set(re.findall(r"prompts\.([A-Z_]+)", pathlib.Path(guide.__file__).read_text()))
+        assert defined - rendered == set(), f"unreachable prompts: {sorted(defined - rendered)}"
