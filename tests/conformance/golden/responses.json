@@ -1,0 +1,243 @@
+{
+ "check_on_unknown_session": {
+  "body": {
+   "detail": "No such session: 0000000000000000"
+  },
+  "status": 404
+ },
+ "check_relative_proof_file": {
+  "body": {
+   "detail": "proof file for reverse/involutive path must be absolute, got proof.lean — it is resolved by the server, whose working directory is not the caller's, so a relative path may find a different file or none at all"
+  },
+  "status": 400
+ },
+ "check_unknown_property": {
+  "body": {
+   "detail": "Not registered in this session: not/registered"
+  },
+  "status": 400
+ },
+ "check_with_both": {
+  "body": {
+   "detail": "Provide either 'proofs' or 'proof_files', not both"
+  },
+  "status": 400
+ },
+ "check_with_neither": {
+  "body": {
+   "detail": "Provide either 'proofs' or 'proof_files', not both"
+  },
+  "status": 400
+ },
+ "guide_extract": {
+  "body": {
+   "instructions": {
+    "chars": 6981,
+    "sha256": "481007c38d75dc8ac55395f2bd6a229bfc83422165e25612391f2e72133a5150"
+   },
+   "topic": "extract"
+  },
+  "status": 200
+ },
+ "guide_formalize": {
+  "body": {
+   "instructions": {
+    "chars": 10772,
+    "sha256": "9fad3c91a028782d4aa8b9a5bd85e4d0a0ad3d9e3c7e50dd8a9ab35d1267cb0a"
+   },
+   "topic": "formalize"
+  },
+  "status": 200
+ },
+ "guide_index": {
+  "body": {
+   "openapi": "GET /openapi.json is the full schema of every endpoint and response, including field types. Read it rather than guessing at a shape.",
+   "sessions": "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by default), and it is lost if the server restarts. Once it is gone, POST /session again with the same spec file: anything already proved comes straight back as a cache hit, so you never reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on.",
+   "spec_file": {
+    "filename": "formal.properties.json (conventional; any path works)",
+    "notes": [
+     "id, function, kind and formal identify the property. The cache key is derived from the function source, the kind and the formal statement, so those three must stay stable across runs for a proof to be reused; prose may change freely.",
+     "Prose is not in the key, so a cache hit reports the description and assumptions recorded when the proof was accepted. Read them — if that modelling is not yours, the hit is not the property you meant."
+    ],
+    "schema": {
+     "properties": [
+      {
+       "assumptions": "optional — list of modelling choices made",
+       "description": "optional — one line of prose for a human reviewer",
+       "formal": "required — the mathematical statement, e.g. 'forall x, f x <= x'",
+       "function": "required — the function this is about",
+       "function_code": "optional but recommended — the function's source, so formal can tell you when it has changed underneath the property",
+       "id": "required — how a human reads the diff, e.g. 'fmt_elapsed/monotonicity'. Not part of the cache key: renaming keeps the cached proof.",
+       "kind": "required — one of: bound, identity, monotonicity, commutativity, idempotency, invariant, counterexample",
+       "preconditions": "optional — list of what must hold on inputs",
+       "source_file": "optional but recommended — path, relative to the spec file, that function_code came from"
+      }
+     ],
+     "version": 1
+    }
+   },
+   "stale": "A stale id means the function changed since the property was written against it, so the property may no longer describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. Stale properties are never proved.",
+   "topics": {
+    "extract": "how to identify pure functions and the properties worth proving",
+    "formalize": "Lean 4 conventions for stating and proving a property",
+    "tactics": "tactic rules that prevent the common failures, and what to do when Lean rejects a proof"
+   },
+   "verified": {
+    "chars": 634,
+    "sha256": "dd41ec870247418e635383b114bb7594381c056e06064db0b8a8e95af288135a"
+   },
+   "workflow": [
+    "Read the source file you intend to check.",
+    "GET /guide/extract, and GET /guide/formalize and /guide/tactics too before you commit to anything: what is practically provable in Lean is what decides which properties belong in the spec file, and the spec file is the thing you commit.",
+    "Identify the pure functions and the properties worth proving about them.",
+    "Write those properties to a spec file (see spec_file below), adding source_file and function_code to each. Commit it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
+    "If a spec file already exists, use it as it stands rather than regenerating it — its ids and wordings are what the cached proofs are keyed on, and rewriting them throws every hit away. Add to it; do not replace it.",
+    "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are already cached, which need proving, and which are stale. The path must be absolute: the server resolves it, and its working directory is not yours.",
+    "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work' — that field is a list of bare id strings, while 'cached' is a list of objects. GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
+    "POST /session/{session_id}/check with {'proof_files': {'<id>': '<absolute path to .lean>'}} — the server reads them, so you do not have to load and escape each file into JSON. {'proofs': {'<id>': '<lean>'}} still works when the proof is not on the server's disk.",
+    "For each failure, read its error and hint, fix that proof, and resubmit only the ids that failed — the first submission carries everything, a retry carries only what broke. Repeat until 'complete' is true."
+   ]
+  },
+  "status": 200
+ },
+ "guide_tactics": {
+  "body": {
+   "instructions": {
+    "chars": 14249,
+    "sha256": "35a85d02689bef3c51c1f12ee7628bd5fe6c5f17d5ba50953439c225a4185423"
+   },
+   "topic": "tactics"
+  },
+  "status": 200
+ },
+ "guide_unknown_topic": {
+  "body": {
+   "detail": "No such topic: no-such-topic. Try: extract, formalize, tactics"
+  },
+  "status": 404
+ },
+ "health": {
+  "body": {
+   "status": "ok"
+  },
+  "status": 200
+ },
+ "proof_not_yet_accepted": {
+  "body": {
+   "detail": "Nothing accepted yet for reverse/involutive"
+  },
+  "status": 404
+ },
+ "proof_on_unknown_session": {
+  "body": {
+   "detail": "No such session: 0000000000000000"
+  },
+  "status": 404
+ },
+ "proof_unregistered": {
+  "body": {
+   "detail": "Not registered in this session: not/registered"
+  },
+  "status": 404
+ },
+ "session_close": {
+  "body": {
+   "status": "closed"
+  },
+  "status": 200
+ },
+ "session_close_again": {
+  "body": {
+   "detail": "No such session: <session>"
+  },
+  "status": 404
+ },
+ "session_close_spec_session": {
+  "body": {
+   "status": "closed"
+  },
+  "status": 200
+ },
+ "session_open": {
+  "body": {
+   "cached": [],
+   "complete": false,
+   "session_id": "<session>",
+   "stale": [],
+   "work": [
+    "reverse/involutive",
+    "reverse/length"
+   ]
+  },
+  "status": 200
+ },
+ "session_open_absent_spec": {
+  "body": {
+   "detail": "no spec file at <workspace>/absent.properties.json"
+  },
+  "status": 400
+ },
+ "session_open_duplicate_ids": {
+  "body": {
+   "detail": "Duplicate property ids: reverse/involutive"
+  },
+  "status": 400
+ },
+ "session_open_from_spec": {
+  "body": {
+   "cached": [],
+   "complete": false,
+   "session_id": "<spec-session>",
+   "stale": [
+    "gone/stale"
+   ],
+   "work": [
+    "identity/fixed"
+   ]
+  },
+  "status": 200
+ },
+ "session_open_relative_spec": {
+  "body": {
+   "detail": "spec file path must be absolute, got relative.properties.json — it is resolved by the server, whose working directory is not the caller's, so a relative path may find a different file or none at all"
+  },
+  "status": 400
+ },
+ "session_open_with_both": {
+  "body": {
+   "detail": "Provide either 'properties' or 'spec_file', not both"
+  },
+  "status": 400
+ },
+ "session_open_with_neither": {
+  "body": {
+   "detail": "Provide either 'properties' or 'spec_file', not both"
+  },
+  "status": 400
+ },
+ "session_read": {
+  "body": {
+   "cached": [],
+   "complete": false,
+   "session_id": "<session>",
+   "stale": [],
+   "work": [
+    "reverse/involutive",
+    "reverse/length"
+   ]
+  },
+  "status": 200
+ },
+ "session_read_after_close": {
+  "body": {
+   "detail": "No such session: <session>"
+  },
+  "status": 404
+ },
+ "session_read_unknown": {
+  "body": {
+   "detail": "No such session: 0000000000000000"
+  },
+  "status": 404
+ }
+}

@@ -36,6 +36,26 @@ with a mocked LLM (`unittest.mock.patch`). Good candidates:
 Do not test Lean proof correctness — that requires the full runtime and is
 covered by integration use.
 
+## Conformance
+
+`tests/conformance/` states the HTTP surface without reference to Python, and
+`tests/conformance/golden/responses.json` says what each request must answer.
+It runs as part of `pytest`, and against any server:
+
+```sh
+PROOF_CACHE_DIR=$(mktemp -d) uv run --group dev python -m uvicorn formal.api:app --port 8000
+uv run --group dev python -m tests.conformance.run --base-url http://127.0.0.1:8000
+```
+
+Add `--update` to re-record after a deliberate change, and read the diff — that
+file is the contract, so a line moving in it is a decision, not a detail. The
+server under test needs an empty `PROOF_CACHE_DIR`, or properties the suite
+expects to be unproved come back cached.
+
+Two other golden files exist for the same reason: `tests/fixtures/cache_keys.json`
+(the exact digests — get these wrong and every cached proof is silently
+unreachable) and `tests/fixtures/hint_corpus.json`.
+
 ## Hints
 
 The advice returned for a failing proof lives in `src/formal/guidance/hints.toml`,
