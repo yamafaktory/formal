@@ -164,6 +164,14 @@ It also makes the claim reviewable. A verification tool whose properties are re-
 on every run cannot tell you what it checked last week, and cannot show you a diff when
 the answer changes.
 
+### formal's own properties
+
+`formal.properties.json` in this repository is formal's own spec, with the proofs in
+`proofs/`. Three properties so far, two of them guarding collisions that were real: that
+a word-spelled operator is only an operator on a word boundary, and that no field of the
+cache payload can imitate the boundary between two others. Both were found by pointing
+formal at its own key derivation.
+
 ### Staleness
 
 The risk a committed spec introduces is outliving its code. Each property records the

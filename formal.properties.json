@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "properties": [
+    {
+      "id": "normalise_code/length_non_increasing",
+      "function": "normalise_code",
+      "kind": "bound",
+      "formal": "forall s, length (normalise_code s) <= length s",
+      "description": "normalising code only ever removes characters",
+      "assumptions": [
+        "text modelled as List Char",
+        "splitlines modelled as splitting on '\\n'"
+      ],
+      "source_file": "src/formal/proof_cache.py",
+      "function_code": "def normalise_code(function_code: str) -> str:\n    \"\"\"Indentation is meaning in Python, so only trailing and surrounding space goes.\"\"\"\n    return \"\\n\".join(line.rstrip() for line in function_code.strip().splitlines())"
+    },
+    {
+      "id": "framed/shifting_a_boundary_changes_the_payload",
+      "function": "_framed",
+      "kind": "invariant",
+      "formal": "framed ['X\\na', 'b', 'c'] <> framed ['X', 'a\\nb', 'c']",
+      "description": "a field cannot imitate the boundary between two others — the newline-joined payload could, and two distinct properties shared a cache key",
+      "assumptions": [
+        "text modelled as List Char",
+        "stated on the witness that collided under the old joining"
+      ],
+      "source_file": "src/formal/proof_cache.py",
+      "function_code": "def _framed(*parts: str) -> str:\n    \"\"\"Join fields so that no field can imitate the boundary between two others.\n\n    Joining on a newline was ambiguous: normalised code and the kind may both contain\n    one, so (\"X\\na\", \"b\", \"c\") and (\"X\", \"a\\nb\", \"c\") produced the same payload and\n    therefore the same key — two distinct properties sharing one cached proof.\n    Length-prefixing each field removes the ambiguity whatever the field contains.\n    \"\"\"\n    return \"\".join(f\"{len(part)}:{part}\" for part in parts)"
+    },
+    {
+      "id": "normalise_formal/word_operators_respect_boundaries",
+      "function": "normalise_formal",
+      "kind": "invariant",
+      "formal": "normalise_formal 'a in b' = normalise_formal 'a∈b' /\\ normalise_formal 'ainb' <> normalise_formal 'a∈b'",
+      "description": "the membership word is an operator only on a word boundary — 'ainb' is an identifier, and merging it with 'a∈b' put two properties under one key",
+      "assumptions": [
+        "text modelled as List Char",
+        "stated on the witness that collided before word boundaries were respected"
+      ],
+      "source_file": "src/formal/proof_cache.py",
+      "function_code": "_WORD_OPERATORS = {\"forall\": \"∀\", \"exists\": \"∃\", \"not\": \"¬\", \"in\": \"∈\"}\n\n_WORD_PATTERN = re.compile(r\"\\b(\" + \"|\".join(_WORD_OPERATORS) + r\")\\b\")\n\n\ndef normalise_formal(formal: str) -> str:\n    \"\"\"Reduce a formal statement to the form two writers of it should agree on.\n\n    Operator spelling and spacing are free choices — `∀ x, p x → q x` and\n    `forall x, p x -> q x` are one statement — and an agent picks differently from\n    run to run where a fixed prompt at temperature 0 did not.\n\n    Word-spelled operators are matched on word boundaries, and only before the\n    whitespace goes. Replacing them afterwards, or by substring, merges statements\n    that merely contain the letters: `a∈b` and the unrelated `ainb` both reduced to\n    `ainb` under the previous version.\n    \"\"\"\n    for ascii_form, symbol in _ASCII_OPERATORS:\n        formal = formal.replace(ascii_form, symbol)\n    formal = _WORD_PATTERN.sub(lambda m: _WORD_OPERATORS[m.group(1)], formal)\n    return re.sub(r\"\\s+\", \"\", formal)"
+    }
+  ]
+}
