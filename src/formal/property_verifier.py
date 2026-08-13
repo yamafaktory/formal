@@ -3,16 +3,12 @@ import time
 from dataclasses import dataclass, field
 
 from . import prompts, proof_cache
+from .checker import fmt_elapsed, recover_without_llm
 from .feature_extractor import Property, PureFunction
 from .lean_verifier import (
     AUTO_TACTIC_TIMEOUT,
-    PREMISE_SEARCH_TIMEOUT,
     LeanResult,
-    as_auto_tactic_attempt,
-    as_premise_search,
     check_syntax,
-    replace_proof,
-    suggested_tactic,
     verify,
     with_auto_tactics,
 )
@@ -20,13 +16,6 @@ from .llm_client import call_llm, extract_code_block
 from .logger import get_logger, log
 
 _log = get_logger(__name__)
-
-
-def _fmt_elapsed(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    m, s = divmod(int(seconds), 60)
-    return f"{m}m {s}s"
 
 
 @dataclass
@@ -122,7 +111,7 @@ def formalize(
     )
     cached = proof_cache.load(key)
     if cached is not None:
-        elapsed = _fmt_elapsed(time.monotonic() - _t0)
+        elapsed = fmt_elapsed(time.monotonic() - _t0)
         log(_log, "CACHE", f"{prop.id} [{prop.kind}] cache hit — skipping proof ({elapsed})")
         cached.property_id = prop.id
         cached.cached = True
@@ -169,7 +158,7 @@ def formalize(
         log(_log, "VERIFY", f"{prop.id} trying auto-tactics (timeout {AUTO_TACTIC_TIMEOUT}s)...")
         auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
         if auto_result.success:
-            log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - _t0)})")
+            log(_log, "OK", f"{prop.id} ✓ auto-proved ({fmt_elapsed(time.monotonic() - _t0)})")
             result = PropertyResult(
                 property_id=prop.id,
                 description=prop.description,
@@ -187,41 +176,6 @@ def formalize(
             return result
 
     return Formalization(prop=prop, key=key, proof_code=proof_code, started_at=_t0)
-
-
-def _recover_without_llm(prop: Property, proof_code: str, started_at: float) -> tuple[str, LeanResult] | None:
-    """Try the tactic chain, then Mathlib premise search, before paying for a retry."""
-    auto_code = as_auto_tactic_attempt(proof_code)
-    if auto_code is not None:
-        log(_log, "VERIFY", f"{prop.id} trying auto-tactics before an LLM retry...")
-        auto_result = verify(auto_code, timeout=AUTO_TACTIC_TIMEOUT)
-        if auto_result.success:
-            log(_log, "OK", f"{prop.id} ✓ auto-proved ({_fmt_elapsed(time.monotonic() - started_at)})")
-            return auto_code, auto_result
-
-    search_code = as_premise_search(proof_code)
-    if search_code is None:
-        return None
-
-    log(_log, "VERIFY", f"{prop.id} searching Mathlib for a closing lemma...")
-    search_result = verify(search_code, timeout=PREMISE_SEARCH_TIMEOUT)
-    tactic = suggested_tactic(search_result.output)
-    if tactic is None:
-        return None
-
-    # Store the concrete term rather than the search tactic: exact? is slow to
-    # re-check and its answer can move with Mathlib.
-    log(_log, "LEAN", f"{prop.id} Mathlib suggests: {tactic}")
-    final_code = replace_proof(proof_code, tactic)
-    if final_code is None:
-        return None
-    final_result = verify(final_code)
-    if final_result.success:
-        log(_log, "OK", f"{prop.id} ✓ proved by premise search ({_fmt_elapsed(time.monotonic() - started_at)})")
-        return final_code, final_result
-    if search_result.success:
-        return search_code, search_result
-    return None
 
 
 def prove(
@@ -245,12 +199,12 @@ def prove(
 
     lean_result = first_result if first_result is not None else verify(proof_code)
     if lean_result.success:
-        log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
+        log(_log, "OK", f"{prop.id} ✓ verified ({fmt_elapsed(time.monotonic() - _t0)})")
     else:
         # Two Lean runs are still cheaper than one LLM round-trip. The chain guesses
         # from a fixed list; exact? searches Mathlib, which is the failure that
         # dominates — not a wrong tactic, but not knowing which lemma exists.
-        recovered = _recover_without_llm(prop, proof_code, _t0)
+        recovered = recover_without_llm(prop.id, proof_code, _t0)
         if recovered is not None:
             proof_code, lean_result = recovered
 
@@ -285,7 +239,7 @@ def prove(
         log(_log, "LEAN", f"{prop.id} proof:\n{proof_code}")
         lean_result = verify(proof_code)
         if lean_result.success:
-            log(_log, "OK", f"{prop.id} ✓ verified ({_fmt_elapsed(time.monotonic() - _t0)})")
+            log(_log, "OK", f"{prop.id} ✓ verified ({fmt_elapsed(time.monotonic() - _t0)})")
             break
         else:
             err = (lean_result.first_error or {}).get("data", "unknown")
@@ -293,7 +247,7 @@ def prove(
 
     verified = lean_result.success if lean_result else False
     output = lean_result.output if lean_result else "No result"
-    elapsed = _fmt_elapsed(time.monotonic() - _t0)
+    elapsed = fmt_elapsed(time.monotonic() - _t0)
     if not verified:
         log(_log, "FAIL", f"{prop.id} ✗ exhausted {max_retries} attempts ({elapsed})")
 
