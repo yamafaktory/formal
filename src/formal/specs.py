@@ -105,6 +105,12 @@ def _is_stale(entry: dict, root: Path) -> bool:
 def load(path: str | Path, root: str | Path | None = None) -> SpecFile:
     """Read a spec file, separating properties still describing their source from those that are not."""
     path = Path(path).expanduser()
+    if not path.is_absolute():
+        raise SpecError(
+            f"spec file path must be absolute, got {path} — it is resolved by the server, "
+            "whose working directory is not the caller's, so a relative path may find "
+            "a different file or none at all"
+        )
     root = Path(root) if root is not None else path.parent
     entries = _read(path)
     _validate(entries, path)

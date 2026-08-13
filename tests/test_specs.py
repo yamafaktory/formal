@@ -48,6 +48,11 @@ class TestLoading:
         assert spec.formal == "forall x, 0 <= x -> fmt_elapsed x != []"
         assert spec.assumptions == ["strings modelled as List Char"]
 
+    def test_a_relative_path_is_refused(self, tmp_path):
+        """The server resolves it, and its working directory is not the caller's."""
+        with pytest.raises(specs.SpecError, match="absolute"):
+            specs.load("formal.properties.json")
+
     def test_a_missing_file_is_reported(self, tmp_path):
         with pytest.raises(specs.SpecError, match="no spec file"):
             specs.load(tmp_path / "absent.json")

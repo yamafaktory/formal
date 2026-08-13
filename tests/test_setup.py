@@ -349,3 +349,28 @@ class TestUnknownEnvKeys:
             "LLM_API_KEY",
         }
         assert written <= setup.KNOWN_ENV_KEYS
+
+
+class TestDocumentedEnvKeys:
+    """The README's configuration table and KNOWN_ENV_KEYS must agree.
+
+    They drifted once already: LLM_FAILURE_STREAK was documented and read, but
+    absent from KNOWN_ENV_KEYS, so setting it made `formal status` report it as a
+    key nothing reads. A wrong warning about your own configuration is worse than
+    no warning.
+    """
+
+    def _documented(self):
+        import pathlib
+        import re
+
+        readme = pathlib.Path(__file__).parent.parent / "README.md"
+        return set(re.findall(r"^\| `([A-Z_]+)`", readme.read_text(), re.M))
+
+    def test_every_documented_key_is_recognised(self):
+        undeclared = sorted(self._documented() - setup.KNOWN_ENV_KEYS)
+        assert undeclared == [], f"documented but would be reported as unused: {undeclared}"
+
+    def test_every_recognised_key_is_documented(self):
+        undocumented = sorted(setup.KNOWN_ENV_KEYS - self._documented())
+        assert undocumented == [], f"read by formal but absent from the README table: {undocumented}"

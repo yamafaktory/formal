@@ -2,62 +2,60 @@
 
 [![Checks](https://github.com/yamafaktory/formal/actions/workflows/checks.yml/badge.svg)](https://github.com/yamafaktory/formal/actions/workflows/checks.yml)
 
-An LLM-driven property checker for code, backed by Lean 4 as a proof engine.
+A property checker for code, backed by Lean 4 as a proof engine.
 
-Point it at a file, and it will: identify pure functions, generate properties those
-functions should satisfy, translate them into Lean 4 theorems, and attempt to prove
-them with Mathlib. Properties that Lean accepts are mechanically verified — but only
-within the limits described below.
+Properties are stated about your pure functions, translated into Lean 4 theorems, and
+checked against Mathlib. What Lean accepts is mechanically verified — but only within
+the limits described below.
 
-Works with any LLM backend — Claude, GPT-4, Gemini, Llama, Mistral, or any OpenAI-compatible endpoint.
+There are two ways to run it, and they differ in who does the thinking:
+
+| | Who writes the properties and proofs | Cost | Use when |
+|---|---|---|---|
+| **Agent-driven** | The agent already driving your session | Its own tokens, nothing extra | An agent is working on the code (the common case) |
+| **Autonomous** | formal, via a configured LLM backend | One backend call per property, plus retries | CI, a plain shell, no agent in the loop |
+
+Both paths share the same Lean checking, the same recovery chain, and the same proof
+cache. Agent-driven is the cheaper one by a wide margin, because it does not start a
+second model to do work the first one can already do.
 
 ## What this actually is
 
-The pipeline has three LLM steps before Lean ever runs:
+Three steps happen before Lean ever runs:
 
-1. **Decomposition** — the LLM reads your code and identifies which parts are pure functions
-2. **Property extraction** — the LLM generates properties it believes those functions satisfy, along with explicit preconditions and modeling assumptions
-3. **Formalization** — the LLM translates each property into a Lean 4 theorem
+1. **Decomposition** — reading the code and identifying which parts are pure functions
+2. **Property extraction** — deciding what those functions should satisfy, with explicit
+   preconditions and modelling assumptions
+3. **Formalization** — translating each property into a Lean 4 theorem
 
-Only then does Lean check the proof. Lean is mechanically sound — it cannot be fooled — but it only checks what it is given. If the LLM misunderstood your function, or generated a property that is technically true but misses the point, Lean will happily prove the wrong thing.
+Only then does Lean check the proof. Lean is mechanically sound — it cannot be fooled —
+but it only checks what it is given. If those three steps misread your function, or
+produced a property that is technically true but misses the point, Lean will happily
+prove the wrong thing.
 
-**What "verified" means here:** Lean accepted a proof of a theorem that the LLM derived from your code. This is a meaningful signal — LLMs make logical errors and Lean catches them — but it is not equivalent to a certified compiler or a formal proof that your source code is correct.
+**What "verified" means here:** Lean accepted a proof of a theorem derived from your
+code. That is a meaningful signal — LLMs make logical errors and Lean catches them —
+but it is not equivalent to a certified compiler or a formal proof that your source is
+correct.
 
-**What this is useful for:**
-- Catching logical errors in AI-generated code that tests might miss
-- Surfacing the assumptions an LLM makes about your code (now shown explicitly)
-- Increasing confidence in pure domain logic: calculations, transformations, validations
-- Getting a structured, machine-checked view of what properties hold under stated assumptions
+**Useful for:**
+- Catching logical errors in generated code that tests might miss
+- Surfacing the assumptions made about your code, stated explicitly
+- Confidence in pure domain logic: calculations, transformations, validations
+- A machine-checked, reviewable record of what holds under which assumptions
 
-**What this does not give you:**
-- A guarantee that your source code is correct — only that a Lean model of it satisfies generated properties
-- Complete coverage — the LLM picks which properties to check and may miss important ones
-- Traditional formal verification — that requires a certified translation from source to proof, which this does not have
+**Does not give you:**
+- A guarantee your source is correct — only that a Lean model of it satisfies the stated properties
+- Complete coverage — whoever writes the properties chooses them, and may miss important ones
+- Traditional formal verification — that needs a certified translation from source to proof, which this does not have
 
-## How it works
-
-```
-Your code (any language)
-  → LLM: extract pure functions, identify side effects
-  → LLM: generate properties with explicit preconditions and assumptions
-  → LLM: translate each property into a Lean 4 theorem + proof
-  → Lean 4 + Mathlib: accept or reject each proof
-  → on failure: fast tactics, then Mathlib premise search, then LLM retries
-  → Results: verified / failed / unverifiable / error
-```
-
-Side effects (DB calls, HTTP, I/O) are excluded — only pure, deterministic logic is
-checked. Properties that depend on reference equality, reflection, or runtime behaviour
-are classified as `unverifiable` (not a bug, not a failure — a modeling limit).
-
-Every property now carries explicit **preconditions** (what must hold on inputs) and
-**assumptions** (modeling choices made during translation). These are shown in the
-output so you can judge whether the LLM's interpretation matches your intent.
+Side effects (DB calls, HTTP, I/O) are excluded by design. Properties that depend on
+reference equality, reflection or runtime behaviour are classified `unverifiable` — a
+modelling limit, not a bug and not a failure.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/). Install the
-command, then let it install everything else:
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```sh
 uv tool install git+https://github.com/yamafaktory/formal
@@ -67,27 +65,36 @@ formal setup
 No clone needed — the Lean project is bundled in the wheel and created under
 `~/.local/share/formal` on first run, which is also where Mathlib's oleans land.
 
-Working on formal itself? Clone it and run `./formal setup` instead; a checkout
-keeps its Lean project and results inside the repo.
+Working on formal itself? Clone it and run `./formal setup` instead; a checkout keeps
+its Lean project and results inside the repo.
 
-`formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned
-Lean toolchain, downloads prebuilt Mathlib oleans, and then asks which LLM backend
-to use. Re-running it is safe: steps that are already done are skipped. Use
-`--lean-only` or `--backend-only` to run just one half.
+`formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
+toolchain, downloads prebuilt Mathlib oleans, and asks which LLM backend to configure.
+Re-running is safe: completed steps are skipped. `--lean-only` and `--backend-only` run
+one half.
 
-Any elan already on your system is used as-is, however you installed it — so if
-your package manager carries it, use that and `formal setup` will pick it up and
-install the pinned Lean version into it. Otherwise it offers elan's official
-installer. See [lean-lang.org/install](https://lean-lang.org/install/).
+Any elan already on your system is used as-is. Nothing is added to your shell
+configuration — formal locates the toolchain under `ELAN_HOME` (default `~/.elan`)
+itself. See [lean-lang.org/install](https://lean-lang.org/install/).
 
-Nothing is added to your shell configuration — `formal` locates the Lean
-toolchain under `ELAN_HOME` (default `~/.elan`) by itself.
+Then check it:
 
-Two backends:
+```sh
+formal status
+```
 
-**1 — Claude Code CLI** (uses your local `claude` binary and Pro/Max plan, no API key needed)
+### LLM backend
 
-**2 — OpenAI-compatible API** (any provider with an OpenAI-compatible endpoint):
+**Only the autonomous path needs one.** If an agent drives formal, it supplies the
+proofs and no backend is configured or called.
+
+**1 — Claude Code CLI** — uses your local `claude` binary and Pro/Max plan, no API key.
+Convenient, but be aware of what it costs: each call starts a full Claude Code process,
+which pays for its own system prompt, tool definitions and `CLAUDE.md` before it sees
+your prompt. That overhead is per call and is not cached between them. Fine for a file;
+expensive for a repository.
+
+**2 — OpenAI-compatible API** — any provider with an OpenAI-compatible endpoint:
 
 | Provider | Base URL |
 |---|---|
@@ -96,85 +103,144 @@ Two backends:
 | Groq | `https://api.groq.com/openai/v1` |
 | Ollama (local) | `http://localhost:11434/v1` |
 | LM Studio | `http://localhost:1234/v1` |
-| Any other | Any OpenAI-compatible endpoint |
 
-Settings are written to `.env`. Available models are fetched from `/v1/models`; if
-unsupported, enter the model name manually.
+Settings are written to `.env`. Models are fetched from `/v1/models`; enter the name
+manually if the provider does not support that.
 
-Then check the installation:
+## Driving formal from an agent
+
+formal exposes an HTTP API. The agent reads your code, states the properties, writes the
+Lean, and formal checks it. Nothing else is started.
+
+Start the server once — the command is safe to run before every request, since it
+returns immediately when one is already up:
 
 ```sh
-./formal status
+formal serve --background     # detaches, returns when /health answers
+formal status                 # …  server  http://127.0.0.1:1337 (running)
+formal stop
 ```
 
-Optionally put `formal` on your `PATH` for use from any directory:
+### The loop
 
-```sh
-uv tool install .
+```
+GET  /guide                      the workflow and the spec-file schema (~650 tokens)
+GET  /guide/extract              how to find pure functions and properties
+     → write formal.properties.json, commit it
+POST /session {"spec_file": …}   → {cached, work, stale}
+GET  /guide/formalize            Lean 4 conventions
+POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
+     → {verified, failed: [{id, error, line, col, hint}], remaining, complete}
+     fix the failures, resubmit only those ids, repeat
 ```
 
-### Add this to your project's AI agent instructions
+The guide is served in stages rather than as one document, so an agent pays for the Lean
+conventions only once it is actually writing Lean.
 
-For Claude Code, add to your `CLAUDE.md`. For Cursor, Copilot, or other agents, add
-to the equivalent instructions file.
+Three things keep the loop cheap. Properties are registered once, so a retry carries only
+the corrected Lean and not the metadata again. Every proof in a request is checked in a
+single Lean invocation, so a batch pays one `import Mathlib` rather than one per proof.
+And a failure comes back as its first error plus a targeted hint — never the full Lean
+output, which for a Mathlib failure runs to thousands of tokens of noise.
+
+Before a failure is reported at all, formal tries to close it without a model: the
+auto-tactic chain first, then a Mathlib premise search for a lemma that discharges the
+goal. Proofs recovered that way never reach the agent.
+
+### The spec file
+
+Properties live in a JSON file you commit alongside the code:
+
+```json
+{
+  "version": 1,
+  "properties": [
+    {
+      "id": "split_imports/conservation",
+      "function": "_split_imports",
+      "kind": "invariant",
+      "formal": "forall ls, length (fst (partition ls)) + length (snd (partition ls)) = length ls",
+      "description": "splitting preserves the number of lines",
+      "preconditions": [],
+      "assumptions": ["text modelled as List String, one element per line"],
+      "source_file": "src/formal/lean_verifier.py",
+      "function_code": "def _split_imports(lean_code):\n    ..."
+    }
+  ]
+}
+```
+
+`id`, `function`, `kind` and `formal` are required. `source_file` is resolved relative to
+the spec file unless you pass `root`. The `spec_file` path itself must be absolute: the
+server resolves it, and its working directory is not the caller's.
+
+**Commit it.** That is not a filing preference — it is what makes the cache work. Two
+independent extraction runs over one small function produced six and seven properties,
+agreed on the wording of none of them, and stated one of them in opposite directions.
+Nothing re-derived each run can hit a cache. A committed file is the same bytes every
+time, so a proof is written once and reused forever.
+
+It also makes the claim reviewable. A verification tool whose properties are re-invented
+on every run cannot tell you what it checked last week, and cannot show you a diff when
+the answer changes.
+
+### Staleness
+
+The risk a committed spec introduces is outliving its code. Each property records the
+function source it was written against; if that source has since changed, the property is
+reported as `stale` and never proved:
+
+```json
+{ "work": [], "cached": [], "stale": ["split_imports/conservation"], "complete": false }
+```
+
+Proving a property against code it no longer describes yields a true theorem about
+nothing, so formal declines to. Re-read the function, update the property and its
+`function_code`, and the session goes green again. `complete` is false while anything is
+stale.
+
+Comparison is normalised text rather than a parse, so it works for every language formal
+accepts, and reindentation is not a change. A property with no `source_file` cannot go
+stale — there is nothing recorded to compare against.
+
+### Add this to your agent's instructions
+
+For Claude Code, add to `CLAUDE.md`; for other agents, the equivalent file.
 
 ````markdown
-## Formal Verification
+## Formal verification
 
-After implementing any feature that contains non-trivial pure logic (calculations,
-transformations, validations, business rules), verify it:
+After writing or changing non-trivial pure logic — calculations, transformations,
+validations, business rules — verify it with formal:
 
-```sh
-~/dev/formal/formal verify path/to/file.java
-```
+1. `formal serve --background` (safe to run every time; no-op if already up)
+2. `curl -s localhost:1337/guide` and follow the workflow it returns
 
-**When to verify:** after writing or modifying pure domain logic — pricing
-calculations, volume computations, data transformations, validation functions.
+Skip it for I/O, controller wiring, configuration and tests.
 
-**When to skip:** pure I/O code, controller wiring, configuration, tests.
-
-Results:
-- `full` — all properties proved under stated assumptions
-- `partial` / `failed` — investigate unverified properties; may indicate a logic bug
-- `unverifiable` — modeling limitation (reference equality, reflection, etc.), not a bug
-- `error` — the checker itself failed; no verdict was reached, so re-run rather than changing code
-
-Review the preconditions and assumptions in the output. If they do not match your
-intent, the proof result may not reflect real behaviour.
+Properties live in `formal.properties.json` and are committed. Read the preconditions
+and assumptions before trusting a result: if they do not match what you intended, the
+proof is not evidence about your code. A `stale` id means the function changed and its
+property needs rewriting.
 ````
 
-## CLI
+Do **not** point an agent at `formal verify` for this. That runs the autonomous pipeline,
+which starts a separate model to do the work the agent is already able to do.
 
-The `formal` script is the primary interface — it runs the pipeline in-process,
-no daemon involved.
+## Running it autonomously
+
+`formal verify` runs the whole pipeline in-process using the configured backend. No agent
+and no server involved.
 
 ```sh
-# Verify a file (language auto-detected from extension)
-./formal verify path/to/Feature.java
-
-# Verify inline code
-./formal verify --code 'def f(x): return max(0, x)' --lang Python
-
-# Full JSON result
-./formal verify path/to/Feature.java --json
-
-# Verify properties one at a time instead of in parallel
-./formal verify path/to/Feature.java --no-parallel
-
-# Also check that each proved theorem says what the property said
-./formal verify path/to/Feature.java --check-fidelity
-
-# Show resolved paths, toolchain state and LLM backend
-./formal status
-
-# Re-run installation and backend configuration
-./formal setup
-
-# Serve the HTTP API on 127.0.0.1:1337
-./formal serve
+formal verify path/to/Feature.java          # language from the extension
+formal verify --code 'def f(x): return max(0, x)' --lang Python
+formal verify path/to/Feature.java --json
+formal verify path/to/Feature.java --no-parallel
+formal verify path/to/Feature.java --check-fidelity
 ```
 
-`verify` exit codes, so it can gate a commit hook or CI step:
+Exit codes, so it can gate a commit hook or a CI step:
 
 | Code | Meaning |
 |---|---|
@@ -183,107 +249,35 @@ no daemon involved.
 | `2` | formal itself failed; no verdict was reached |
 | `3` | No pure logic found, so nothing was checked |
 
-`3` is distinct from `0` deliberately: a file that was never checked should not
-look like a file that passed. Decomposition is an LLM step and can miss functions
-it found on a previous run, so treat `3` on a file you expect to have pure logic
-as a signal to re-run rather than as a pass.
+`3` is deliberately distinct from `0`: a file that was never checked should not look like
+a file that passed. Decomposition is an LLM step and can miss functions it found last
+run, so treat `3` on a file you expect to have pure logic as a reason to re-run.
 
-### Progress output
-
-Progress streams to stderr while the run happens, so the result on stdout stays
-pipeable:
+Progress streams to stderr so the result on stdout stays pipeable:
 
 ```
 [PIPELINE] Decomposing feature [Java]: SomeService.java
 [PIPELINE] Pure functions: ['computePrice', 'applyDiscount']
-[PIPELINE] Extracted 5 properties
 [SCREEN  ] ✓ prop_1: VERIFIABLE — discount is always between 0 and 1
-[SCREEN  ] ~ prop_3: UNVERIFIABLE — depends on reference equality
 [CACHE   ] prop_1 [bound] cache hit — skipping proof
-[VERIFY  ] prop_2 [monotonicity] Formalizing: higher discount yields lower price
-[LEAN    ] prop_2 theorem: import Mathlib ...
-[VERIFY  ] prop_2 generating proof (attempt 1/3)...
-[FAIL    ] prop_2 ✗ attempt 1 failed: type mismatch
-[VERIFY  ] prop_2 generating proof (attempt 2/3)...
+[VERIFY  ] prop_2 trying auto-tactics before an LLM retry...
 [OK      ] prop_2 ✓ verified
 [PIPELINE] Done — verified: 4, failed: 0, unverifiable: 1
 ```
 
-### Verify output
-
 ```
 ─────────────────────────────────────────
 File:    path/to/Feature.java
-Summary: Applies discount and computes final price
 Score:   full  (4/5 verified, 1 unverifiable)
 Pure functions: computePrice, applyDiscount
-Impure parts: 2 side effects (not verifiable)
 ─────────────────────────────────────────
   ✓ [bound] discount is always between 0 and 1
       Preconditions: discount is a float
       Assumptions:   floats modeled as rationals, no NaN or Inf
-  ✓ [monotonicity] higher discount yields lower price
-      Preconditions: price > 0, 0 <= discount <= 1
-      Assumptions:   floats modeled as rationals
   ~ [invariant] bundleId reference matches stored entity
       → depends on JVM reference equality, not structural equality
 ─────────────────────────────────────────
 ```
-
-Preconditions and assumptions are shown for every property so you can verify that
-the LLM's interpretation of your code matches what you intended.
-
-## API reference
-
-The HTTP API is optional — start it with `./formal serve` (127.0.0.1:1337 by
-default). It exists for clients that cannot shell out, such as an agent running in
-a sandbox without Lean installed.
-
-### `POST /verify-feature`
-
-```sh
-# From a file (language auto-detected)
-curl -X POST http://localhost:1337/verify-feature \
-  -H 'Content-Type: application/json' \
-  -d '{"file": "/absolute/path/to/Feature.java"}'
-
-# Inline code
-curl -X POST http://localhost:1337/verify-feature \
-  -H 'Content-Type: application/json' \
-  -d '{"code": "...", "language": "TypeScript"}'
-```
-
-Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#, C++, Ruby.
-
-**Response:**
-
-```json
-{
-  "overall_score": "full | partial | failed | no_pure_logic",
-  "properties_found": 5,
-  "properties_verified": 4,
-  "properties_unverifiable": 1,
-  "pure_functions": ["computePrice", "applyDiscount"],
-  "impure_parts": ["saves to DB", "sends email"],
-  "results": [
-    {
-      "property_id": "prop_1",
-      "description": "discount is always between 0 and 1",
-      "kind": "bound",
-      "status": "verified",
-      "verified": true,
-      "preconditions": ["discount is a float"],
-      "assumptions": ["floats modeled as rationals", "no NaN or Inf"],
-      "lean_code": "...",
-      "lean_output": "...",
-      "retries": 0,
-      "reason": ""
-    }
-  ]
-}
-```
-
-**Scores** (computed over verifiable properties only, unverifiable excluded):
 
 | Score | Meaning |
 |---|---|
@@ -293,105 +287,153 @@ Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#,
 | `no_pure_logic` | No pure functions found |
 | `error` | Nothing could be checked — formal itself failed, no verdict was reached |
 
-**Property status:**
-
 | Status | Meaning |
 |---|---|
-| `verified` | Lean 4 accepted the proof under stated preconditions and assumptions |
-| `failed` | Proof could not be found — may indicate a logic bug or a bad translation |
-| `unverifiable` | Property cannot be modelled in Lean 4 (not a bug) |
-| `error` | formal failed while checking this property — a tool failure, not a verdict about your code |
+| `verified` | Lean accepted the proof under the stated preconditions and assumptions |
+| `failed` | No proof found — may be a logic bug or a bad translation |
+| `unverifiable` | Cannot be modelled in Lean (not a bug) |
+| `error` | formal failed while checking this property — a tool failure, not a verdict |
 
-### `POST /verify`
+## API reference
 
-Generates Python code for a natural language task and verifies it end-to-end.
+`formal serve` binds `127.0.0.1:1337` by default (`FORMAL_HOST`, `FORMAL_PORT`).
+
+### Agent-driven
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /guide` | Workflow, spec-file schema, topic list |
+| `GET /guide/{extract\|formalize}` | Instructions for one phase |
+| `POST /session` | `{"spec_file": path, "root"?: path}` or `{"properties": [...]}` |
+| `GET /session/{id}` | Current state |
+| `POST /session/{id}/check` | `{"proofs": {id: lean}}` |
+| `DELETE /session/{id}` | Close early |
 
 ```sh
-curl -X POST http://localhost:1337/verify \
-  -H 'Content-Type: application/json' \
-  -d '{"task": "a function that computes compound interest"}'
+curl -X POST localhost:1337/session -H 'content-type: application/json' \
+  -d '{"spec_file": "/abs/path/to/formal.properties.json"}'
 ```
 
-### `GET /health`
+```json
+{
+  "session_id": "7577b934…",
+  "cached": [{"id": "…", "description": "…", "kind": "…", "assumptions": ["…"]}],
+  "work": ["split_imports/conservation"],
+  "stale": [],
+  "complete": false
+}
+```
+
+A cache hit reports what was actually proved, not what you asked for — see
+[Proof cache](#proof-cache) for why that distinction matters.
 
 ```sh
-curl http://localhost:1337/health
+curl -X POST localhost:1337/session/$SID/check -H 'content-type: application/json' \
+  -d '{"proofs": {"split_imports/conservation": "import Mathlib\ntheorem …"}}'
 ```
+
+```json
+{
+  "verified": ["split_imports/conservation"],
+  "failed": [{"id": "…", "error": "unknown identifier 'foo'", "line": 4, "col": 2, "hint": "…"}],
+  "remaining": [],
+  "complete": true
+}
+```
+
+Sessions expire after `SESSION_TTL_MINUTES` (default 60). Passing `properties` inline
+instead of `spec_file` works for ad-hoc use, but nothing is reusable across runs.
+
+### Autonomous
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /verify-feature` | `{"file": path}` or `{"code": …, "language": …}` — runs the full pipeline |
+| `POST /verify` | `{"task": "…"}` — generates Python for a description, then verifies it |
+| `GET /health` | Liveness |
+
+Supported languages: Python, Java, Kotlin, TypeScript, JavaScript, Go, Rust, C#, C++, C, Ruby, Zig.
 
 ## Configuration
 
-Set in `.env` (created by `formal setup`), overridable via environment variables:
+Set in `.env` (created by `formal setup`), overridable by environment variable.
+`formal status` prints the resolved values and flags any key nothing reads.
 
 | Variable | Description |
 |---|---|
-| `LLM_BACKEND` | `claude-cli` or `openai` (set by `formal setup`) |
-| `CLAUDE_CONFIG_DIR` | Claude config directory (default: `~/.claude`). Use this to select a different account, e.g. `~/.claude-work`. |
-| `LLM_BASE_URL` | Base URL of any OpenAI-compatible endpoint |
-| `LLM_API_KEY` | API key (leave empty for local models) |
-| `LLM_MODEL` | Model name as accepted by the provider |
-| `LLM_TEMPERATURE` | Sampling temperature for the OpenAI backend (default: `0`, for repeatable decomposition). Leave blank to omit the parameter for models that reject it. |
-| `MAX_PROOF_RETRIES` | Retry attempts per property on Lean errors (default: `3`) |
-| `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default: `4`) |
-| `LEAN_TIMEOUT` | Seconds before a Lean check times out (default: `120`) |
-| `LLM_TIMEOUT` | Seconds before an LLM call times out (default: `480`). Large files need more, especially when verifying several in parallel. |
-| `LLM_FAILURE_STREAK` | Identical consecutive backend failures before the run is abandoned (default: `3`) |
-| `FORMAL_SANDBOX` | `auto` (default, sandbox if bubblewrap is installed), `bwrap` (require it), or `off` |
-| `ELAN_HOME` | Lean toolchain install (default: `~/.elan`). `formal` finds `lake` and `lean` here itself — no shell PATH setup needed. |
+| `LLM_BACKEND` | `claude-cli` or `openai`. Autonomous path only. |
+| `LLM_BASE_URL` | Base URL of an OpenAI-compatible endpoint |
+| `LLM_API_KEY` | API key (empty for local models) |
+| `LLM_MODEL` | Model name as the provider accepts it |
+| `LLM_CLI_CMD` | Binary for the `claude-cli` backend (default: `claude`) |
+| `CLAUDE_CONFIG_DIR` | Claude config directory — selects which account the CLI backend bills |
+| `LLM_TEMPERATURE` | Sampling temperature, OpenAI backend (default `0`, for repeatable decomposition) |
+| `LLM_TIMEOUT` | Seconds before an LLM call times out (default `480`) |
+| `LLM_FAILURE_STREAK` | Identical consecutive backend failures before the run is abandoned (default `3`) |
+| `MAX_PROOF_RETRIES` | Retry attempts per property (default `3`) |
+| `MAX_PARALLEL_PROPERTIES` | Concurrent property verifications (default `4`) |
+| `FORMAL_HOST` | Server bind address (default `127.0.0.1`) |
+| `FORMAL_PORT` | Server port (default `1337`) |
+| `SESSION_TTL_MINUTES` | Idle lifetime of a proof session (default `60`) |
+| `LEAN_TIMEOUT` | Seconds before a Lean check times out (default `120`) |
+| `FORMAL_SANDBOX` | `auto` (default), `bwrap` (require it), or `off` |
+| `ELAN_HOME` | Lean toolchain install (default `~/.elan`) |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |
-| `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib (default: `$FORMAL_HOME/lean_project`) |
-| `FORMAL_RESULTS_DIR` | Directory for saved results (default: `$FORMAL_HOME/results`) |
-| `PROOF_CACHE_DIR` | Directory for cached proof results (default: `$FORMAL_RESULTS_DIR/cache`) |
-| `PROOF_CACHE_TTL_DAYS` | Cache entries older than this are deleted on the next save (default: `7`) |
+| `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib |
+| `FORMAL_RESULTS_DIR` | Directory for saved results |
+| `PROOF_CACHE_DIR` | Cached proofs (default `$FORMAL_RESULTS_DIR/cache`) |
+| `PROOF_CACHE_TTL_DAYS` | Entries older than this are deleted on the next save (default `7`, `0` disables) |
+| `XDG_DATA_HOME` | Honoured when resolving the default `FORMAL_HOME` outside a checkout |
+| `NO_COLOR` | Honoured — suppresses colour in progress output |
 
-`./formal status` prints the resolved values.
+`CLAUDE_CONFIG_DIR` is inherited by the `claude` subprocess, so whichever account it
+names is the one billed. If formal is launched from a shell that already sets it, that
+value wins — the `.env` entry only applies when nothing else set it.
 
-## Development
+## Proof cache
 
-### Linting and formatting
+A proof Lean accepted is written to disk and reused. Both paths share one cache: a proof
+an agent wrote is a hit for a later autonomous run, and the reverse.
 
-[Ruff](https://docs.astral.sh/ruff/) handles both linting and formatting. Config is in `pyproject.toml`.
+**The key is what is being proved** — the function source, the property kind, and the
+formal statement, with operator spelling and spacing normalised so `∀ x, p x → q x` and
+`forall x, p x -> q x` are one statement.
 
-```sh
-uv run ruff check .          # lint
-uv run ruff check --fix .    # lint + auto-fix
-uv run ruff format .         # format
+**The prose is deliberately not in the key.** Descriptions, preconditions and assumptions
+are English, and English varies between writers and between runs; keying on it meant
+every rephrasing was a fresh key and a re-proof of something already proved. Across the
+148 properties from a real run, the function, kind and formal statement separate all of
+them.
+
+The cost of that choice is that two callers can agree on a statement while modelling it
+differently. So a cache hit reports the description and assumptions recorded when the
+proof was accepted:
+
+```json
+{"id": "…", "description": "splitting preserves the line count",
+ "assumptions": ["text modelled as List String"]}
 ```
 
-Enabled rule sets: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgrade). Line length: 120.
+Read them. If that modelling is not yours, the hit is not the property you meant, and you
+should change the formal statement so it says so.
 
-### Tests
+Only proofs Lean actually accepted are cached — a verdict with no Lean run behind it, a
+proof still containing `sorry`, or text that does not parse as Lean is refused and
+logged. Failures are never cached; they always go through the full retry loop.
 
-```sh
-uv run pytest --tb=short
-```
-
-### Updating Lean dependencies
-
-`lean_project/lake-manifest.json` pins the exact commit of Mathlib and everything
-it pulls in — `lakefile.toml` only names a revision for Mathlib itself, so
-inherited packages are unpinned without it. `formal setup` therefore skips
-`lake update` whenever the manifest exists, and installs from the pinned set.
-
-To move to a newer Mathlib, bump `rev` in `lakefile.toml` and the version in
-`lean-toolchain`, then regenerate and commit the result:
-
-```sh
-cd lean_project
-lake update && lake exe cache get && lake build Warmup
-```
-
-Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on
-lemma names or `simp` behaviour that changed.
+One JSON file per entry under `PROOF_CACHE_DIR`. Entries older than
+`PROOF_CACHE_TTL_DAYS` are deleted on the next save. The cache is strictly an
+optimisation: if it cannot be written, the failure is logged and the result is unaffected.
 
 ## Checking the formalization
 
-Lean guarantees that the theorem it was given is true. It cannot tell you whether
-that theorem is the property you wanted — if formalization misread your code, Lean
-proves the wrong thing and reports success. That is the failure this tool is least
-able to notice, because it looks exactly like a pass.
+Lean guarantees the theorem it was given is true. It cannot tell you whether that theorem
+is the property you wanted — if formalization misread your code, Lean proves the wrong
+thing and reports success. That is the failure this tool is least able to notice, because
+it looks exactly like a pass.
 
-`--check-fidelity` reads each proved theorem back into English *without showing the
-model the original description*, then compares the two:
+`formal verify --check-fidelity` reads each proved theorem back into English *without
+showing the model the original description*, then compares the two:
 
 ```
   ✓ [bound] discount is always between 0 and 1
@@ -400,69 +442,75 @@ model the original description*, then compares the two:
         Lean theorem states: for any rational d, if 0 ≤ d ≤ 1 then 0 ≤ d ≤ 1
 ```
 
-It runs only on properties Lean accepted, since a failed property already announces
-itself, and each verdict is cached like a proof. Costs two extra LLM calls per
-verified property, which is why it is opt-in.
+It runs only on properties Lean accepted, and each verdict is cached like a proof. Two
+extra LLM calls per verified property, which is why it is opt-in.
 
-Treat a flag as a prompt to read the theorem, not a verdict: the model that
-mistranslated is also the one judging the translation. A clean result is weaker
-evidence than a flagged one.
+Treat a flag as a prompt to read the theorem, not a verdict: the model that mistranslated
+is also the one judging the translation. A clean result is weaker evidence than a flagged
+one. On the agent-driven path this is the agent's job — read the theorem you wrote and
+ask whether it says what the property says.
 
 ## Sandboxing
 
-Lean is not a passive checker: elaboration can execute arbitrary code through
-`#eval`, macros and `initialize` blocks. Since the code being elaborated was
-written by an LLM, proofs are checked inside
-[bubblewrap](https://github.com/containers/bubblewrap):
+Lean is not a passive checker: elaboration can execute arbitrary code through `#eval`,
+macros and `initialize` blocks. Since the code being elaborated was written by a model,
+proofs are checked inside [bubblewrap](https://github.com/containers/bubblewrap):
 
 - No network — `--unshare-net`, so a proof cannot exfiltrate anything it reads
-- No home directory — masked by a tmpfs, so `~/.claude`, `~/.ssh` and `~/.aws`
-  are not visible
+- No home directory — masked by a tmpfs, so `~/.claude`, `~/.ssh` and `~/.aws` are invisible
 - Read-only root, with the Lean toolchain bound read-only
 - Nothing writable except `lean_project/`
 
-Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to enable
-it. Without it, Lean runs unsandboxed and a warning is printed once per run; set
-`FORMAL_SANDBOX=bwrap` to make its absence a hard error instead, or
-`FORMAL_SANDBOX=off` to opt out silently. `./formal status` shows which applies.
+Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to enable it.
+Without it Lean runs unsandboxed and warns once per run; `FORMAL_SANDBOX=bwrap` makes its
+absence a hard error, `off` opts out silently. `formal status` shows which applies.
 
-The LLM call itself is not sandboxed — it needs the network and, for the
-`claude-cli` backend, your credentials.
+Measured cost of sandboxing: none — 3.19s sandboxed against 3.31s unsandboxed for a proof
+importing Mathlib.
 
-## Proof cache
-
-Successfully verified proofs are cached to disk. The same property on the same
-function is never re-proved — on subsequent runs a `[CACHE]` hit is logged and
-the stored result is returned immediately.
-
-The cache key is a SHA-256 hash of the function source code, property description,
-kind, formal spec, preconditions, and assumptions. Any change to these inputs
-produces a new key; the old entry becomes an orphan and will be cleaned up by
-the TTL eviction.
-
-Only successful proofs are cached; failed attempts always go through the full
-LLM + retry loop.
-
-Cache files are written to `results/cache/` in the checkout (one JSON file per entry). Entries
-older than `PROOF_CACHE_TTL_DAYS` (default: 7) are deleted automatically on the
-next save. Set to `0` to disable the TTL. Override the directory with `PROOF_CACHE_DIR`.
-
-The cache is strictly an optimisation. If it cannot be written — wrong
-permissions, full disk — the failure is logged under `[CACHE]` and the
-verification result is unaffected.
+The server binds to localhost and `POST /session/{id}/check` runs caller-supplied Lean.
+Do not expose it beyond the loopback interface.
 
 ## Limitations
 
-- **LLM-driven semantics.** Property extraction, formalization, and proof generation
-  all go through an LLM. The LLM can misread code, miss properties, or generate
-  theorems that are true but irrelevant. Lean only checks what it is given.
-- **Preconditions and assumptions may be wrong.** Review them in the output. A proof
-  built on a wrong assumption is not evidence that your code is correct.
-- **Pure logic only.** Side effects (DB, HTTP, I/O) are excluded by design.
-- **Modeling limits.** Floats are modelled as rationals; strings use structural
-  equality. IEEE 754 precision and reference semantics cannot be modelled.
+- **Whoever states the properties decides what is checked.** Extraction can misread code,
+  miss properties, or produce theorems that are true but irrelevant. Lean only checks what
+  it is given.
+- **Preconditions and assumptions may be wrong.** A proof built on a wrong assumption is
+  not evidence your code is correct.
+- **Pure logic only.** Side effects are excluded by design.
+- **Modelling limits.** Floats are modelled as rationals; strings use structural equality.
+  IEEE 754 precision and reference semantics cannot be modelled.
 - **Not a test replacement.** This checks properties for all inputs under stated
   assumptions; it does not replace integration or end-to-end tests.
-- **Lean timeout.** Complex proofs may time out — increase `LEAN_TIMEOUT` if needed.
-- **First install is large.** Mathlib's prebuilt oleans are several GB and take a
-  few minutes to download. This happens once, in `./formal setup`.
+- **Lean timeouts.** Complex proofs may time out — raise `LEAN_TIMEOUT`.
+- **First install is large.** Mathlib's prebuilt oleans are several GB and take a few
+  minutes, once, during `formal setup`.
+
+## Development
+
+```sh
+uv run ruff check .          # lint
+uv run ruff check --fix .    # lint + auto-fix
+uv run ruff format .         # format
+uv run pytest --tb=short     # tests
+```
+
+Rule sets: `E`, `F`, `I`, `UP`. Line length 120.
+
+### Updating Lean dependencies
+
+`lean_project/lake-manifest.json` pins the exact commit of Mathlib and everything it pulls
+in — `lakefile.toml` only names a revision for Mathlib itself, so inherited packages are
+unpinned without it. `formal setup` skips `lake update` whenever the manifest exists.
+
+To move to a newer Mathlib, bump `rev` in `lakefile.toml` and the version in
+`lean-toolchain`, then regenerate and commit:
+
+```sh
+cd lean_project
+lake update && lake exe cache get && lake build Warmup
+```
+
+Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on lemma names
+or `simp` behaviour that changed.

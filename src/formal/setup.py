@@ -29,6 +29,7 @@ KNOWN_ENV_KEYS = frozenset(
         "LLM_BACKEND",
         "LLM_BASE_URL",
         "LLM_CLI_CMD",
+        "LLM_FAILURE_STREAK",
         "LLM_MODEL",
         "LLM_TEMPERATURE",
         "LLM_TIMEOUT",
