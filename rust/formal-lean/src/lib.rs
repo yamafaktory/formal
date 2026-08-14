@@ -7,6 +7,7 @@
 pub mod env;
 pub mod logger;
 pub mod paths;
+pub mod process;
 pub mod run;
 pub mod sandbox;
 pub mod toolchain;

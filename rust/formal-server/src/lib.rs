@@ -168,6 +168,35 @@ impl IntoResponse for ApiError {
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
+/// Listen on `host:port` and answer until interrupted.
+///
+/// SIGHUP is declined rather than fatal, so a server started in the background
+/// outlives the shell that started it. Python got that from setsid; this gets it
+/// without reaching for unsafe.
+///
+/// # Errors
+///
+/// Failing to bind the address, or failing while serving.
+pub async fn serve(state: Arc<AppState>, host: &str, port: u16) -> std::io::Result<()> {
+    let listener = tokio::net::TcpListener::bind((host, port)).await?;
+    axum::serve(listener, router(state))
+        .with_graceful_shutdown(shutdown())
+        .await
+}
+
+async fn shutdown() {
+    let mut hangup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()).ok();
+    let mut terminate =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => return,
+            _ = async { terminate.as_mut().expect("a handler").recv().await }, if terminate.is_some() => return,
+            _ = async { hangup.as_mut().expect("a handler").recv().await }, if hangup.is_some() => (),
+        }
+    }
+}
+
 /// Every route formal serves.
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()

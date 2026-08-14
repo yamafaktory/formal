@@ -57,10 +57,16 @@ pub(crate) fn home_dir() -> PathBuf {
 
 fn checkout_root() -> Option<PathBuf> {
     let candidate = Path::new(CHECKOUT_ROOT);
-    candidate
-        .join("lean_project/lakefile.toml")
-        .is_file()
-        .then(|| candidate.to_path_buf())
+    if !candidate.join("lean_project/lakefile.toml").is_file() {
+        return None;
+    }
+    // Python's Path.resolve() flattened the walk up out of the package directory,
+    // and every one of these paths gets printed by `formal status`.
+    Some(
+        candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.to_path_buf()),
+    )
 }
 
 fn default_home(env: &Env) -> PathBuf {
