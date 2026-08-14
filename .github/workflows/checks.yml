@@ -10,28 +10,46 @@ defaults:
     working-directory: rust
 
 jobs:
+  # rustfmt.toml uses group_imports, imports_granularity and imports_layout, which
+  # are nightly-only rustfmt options. Nothing else here needs nightly, so nothing
+  # else uses it: a new nightly lint should not be able to fail a build.
   fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # rustfmt.toml uses group_imports and imports_granularity, which are
-      # nightly-only options. Formatting is checked on nightly; nothing else is.
-      - run: rustup toolchain install nightly --component rustfmt
+      - run: rustup toolchain install nightly --profile minimal --component rustfmt
       - run: cargo +nightly fmt --all --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install nightly --component clippy
-      - run: cargo +nightly clippy --all-targets
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo +stable clippy --all-targets --locked
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: rustup toolchain install nightly
-      # The tests that need Lean do nothing when there is none, so this runs the
-      # rest: the frozen cache keys, the hint corpus, the guide digests, and the
-      # HTTP surface against tests/conformance/golden/responses.json.
-      - run: cargo +nightly test --workspace
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # The tests that need Lean do nothing when there is none, so this is the rest:
+      # the frozen cache keys, the hint corpus, the guide digests, and the HTTP
+      # surface against tests/conformance/golden/responses.json. Installing Mathlib
+      # here would cost several GB and minutes per run for four tests.
+      - run: cargo +stable test --workspace --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.95 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo +1.95 check --workspace --all-targets --locked
