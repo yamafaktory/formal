@@ -12,6 +12,7 @@ use std::{
         Read,
         Write,
     },
+    os::unix::process::CommandExt,
     path::{
         Path,
         PathBuf,
@@ -109,6 +110,9 @@ pub fn run_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Its own process group, so a deadline can reach what it starts as well as
+        // the process itself. See `kill_group`.
+        .process_group(0)
         .spawn()?;
 
     let missing = || std::io::Error::other("a pipe the child was given did not exist");
@@ -135,6 +139,7 @@ pub fn run_command(
                 Ok(None) => {}
             }
             if started.elapsed() >= timeout {
+                kill_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 timed_out = true;
@@ -157,6 +162,22 @@ pub fn run_command(
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
         timed_out,
     })
+}
+
+/// Kill a process and everything it started.
+///
+/// The child leads its own process group, so signalling the negated pid reaches
+/// its descendants too. Killing only the child is not enough: a grandchild
+/// inherits the pipe this side is still reading, holds it open, and the deadline
+/// then bounds nothing at all — the call returns `timed_out` after waiting for the
+/// grandchild to finish on its own. `lake env lean` is exactly that shape.
+fn kill_group(pid: u32) {
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{pid}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Read what `lean --json` printed into a verdict.
@@ -482,6 +503,27 @@ mod tests {
             .expect("the shell runs");
             assert!(captured.timed_out);
             assert!(captured.code.is_none());
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "{:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn a_deadline_reaches_what_the_process_started_as_well() {
+            // `sh -c 'sleep 30 & wait'` keeps a grandchild holding the pipe. Killing
+            // only the shell leaves this side reading until the grandchild finishes,
+            // which is the whole of the deadline's job undone.
+            let started = Instant::now();
+            let captured = run_command(
+                &sh("sleep 30 & wait"),
+                Path::new("/"),
+                &env(),
+                Duration::from_millis(200),
+            )
+            .expect("the shell runs");
+            assert!(captured.timed_out);
             assert!(
                 started.elapsed() < Duration::from_secs(5),
                 "{:?}",
