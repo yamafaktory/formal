@@ -49,7 +49,8 @@ const EXPECTED_GROUPS: [&[&str]; 4] = [
 
 #[derive(Deserialize)]
 struct Case {
-    /// The diagnostic, or nothing at all when Lean reported no error.
+    /// The diagnostic, absent when Lean reported no error at all.
+    #[serde(default)]
     error: Option<String>,
     /// What the advice said when this was recorded.
     hint: String,
@@ -57,9 +58,9 @@ struct Case {
 
 fn corpus() -> BTreeMap<String, Case> {
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/hint_corpus.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/hint_corpus.toml");
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} — {e}", path.display()));
-    serde_json::from_str(&text).expect("the corpus is the shape the recorder wrote")
+    toml::from_str(&text).expect("the corpus is the shape the recorder wrote")
 }
 
 fn table() -> &'static Table {

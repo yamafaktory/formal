@@ -400,8 +400,8 @@ guide names still exists in Mathlib.
 
 What decides whether a change may land is data, not code:
 `tests/conformance/golden/responses.json` for the HTTP surface,
-`tests/fixtures/cache_keys.json` for the digests every cached proof is filed
-under, and `tests/fixtures/hint_corpus.json` for the advice. See CLAUDE.md.
+`tests/fixtures/cache_keys.toml` for the digests every cached proof is filed
+under, and `tests/fixtures/hint_corpus.toml` for the advice. See CLAUDE.md.
 
 ### Updating Lean dependencies
 

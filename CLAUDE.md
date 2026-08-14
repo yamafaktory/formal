@@ -47,11 +47,11 @@ data, and none of them mention an implementation.
   Re-record only deliberately, and read the diff — a line moving in that file is
   a decision, not a detail.
 
-- `tests/fixtures/cache_keys.json` — the exact digests. Get these wrong and every
+- `tests/fixtures/cache_keys.toml` — the exact digests. Get these wrong and every
   cached proof is silently unreachable: the answers stay correct, they just cost
   a Lean run each, forever.
 
-- `tests/fixtures/hint_corpus.json` — every hint pinned to its text, and every
+- `tests/fixtures/hint_corpus.toml` — every hint pinned to its text, and every
   rule in the table reached by a sample.
 
 - `rust/formal-core/guidance/` — the text formal serves. Its three topic bodies
@@ -64,7 +64,7 @@ The advice for a failing proof lives in `rust/formal-core/guidance/hints.toml`,
 not in Rust. `hints.rs` is only the matcher. When adding a rule:
 
 - Order is the semantics — a general rule placed above a specific one swallows it.
-- Add a sample to `tests/fixtures/hint_corpus.json` that reaches it. A rule with
+- Add a sample to `tests/fixtures/hint_corpus.toml` that reaches it. A rule with
   no sample fails `every_rule_answers_at_least_one_sample`, which is the only
   thing standing between the table and a rule nobody can ever trigger.
 

@@ -1,6 +1,6 @@
 //! The Rust key held to the digests Python recorded.
 //!
-//! `tests/fixtures/cache_keys.json` is the port oracle: 148 keys from properties
+//! `tests/fixtures/cache_keys.toml` is the port oracle: 148 keys from properties
 //! formal produced while checking its own source, plus 17 crafted inputs for
 //! rules the corpus does not reach. Everything else about the cache says the key
 //! discriminates. This says what the key *is* — a port that gets the framing,
@@ -13,7 +13,10 @@ use std::{
     path::PathBuf,
 };
 
-use formal_core::proof_cache::cache_key;
+use formal_core::proof_cache::{
+    cache_key,
+    normalise_formal,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -42,9 +45,9 @@ impl Entry {
 
 fn golden() -> Golden {
     let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/cache_keys.json");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/cache_keys.toml");
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{} — {e}", path.display()));
-    serde_json::from_str(&text).expect("the golden file is the shape the recorder wrote")
+    toml::from_str(&text).expect("the golden file is the shape the recorder wrote")
 }
 
 fn moved(entries: &[Entry]) -> Vec<String> {
@@ -68,6 +71,94 @@ fn the_crafted_keys_have_not_moved() {
 #[test]
 fn the_corpus_is_the_size_it_was_measured_at() {
     assert_eq!(golden().corpus.len(), 148);
+}
+
+/// The 148 triples the corpus was measured on.
+fn corpus() -> Vec<[String; 3]> {
+    golden()
+        .corpus
+        .into_iter()
+        .map(|entry| entry.inputs)
+        .collect()
+}
+
+#[test]
+fn normalising_a_statement_twice_changes_nothing() {
+    for [_, _, formal] in corpus() {
+        let once = normalise_formal(&formal);
+        assert_eq!(normalise_formal(&once), once, "{formal}");
+    }
+}
+
+#[test]
+fn normalisation_never_empties_a_statement() {
+    for [_, _, formal] in corpus() {
+        assert!(!normalise_formal(&formal).is_empty(), "{formal}");
+    }
+}
+
+#[test]
+fn unicode_and_ascii_spellings_agree_across_the_corpus() {
+    // Longest first, or "->" mangles "<->" into "<→" before it can be matched.
+    let swaps = [
+        ("<->", "↔"),
+        ("->", "→"),
+        ("/\\", "∧"),
+        ("\\/", "∨"),
+        ("forall", "∀"),
+        ("exists", "∃"),
+    ];
+    for [function, kind, formal] in corpus() {
+        let mut rewritten = formal.clone();
+        for (ascii_form, symbol) in swaps {
+            rewritten = rewritten.replace(ascii_form, symbol);
+        }
+        assert_eq!(
+            cache_key(&function, &kind, &rewritten),
+            cache_key(&function, &kind, &formal),
+            "rewriting {formal} the way another writer might moved its key"
+        );
+    }
+}
+
+#[test]
+fn reindenting_a_statement_does_not_move_its_key() {
+    for [function, kind, formal] in corpus() {
+        let spaced = formal.replace(',', " ,  ").replace('(', " ( ");
+        assert_eq!(
+            cache_key(&function, &kind, &spaced),
+            cache_key(&function, &kind, &formal),
+            "{formal}"
+        );
+    }
+}
+
+#[test]
+fn the_function_and_the_kind_alone_would_collide() {
+    let mut coarse: Vec<(String, String)> = corpus()
+        .into_iter()
+        .map(|[function, kind, _]| (function, kind))
+        .collect();
+    coarse.sort();
+    coarse.dedup();
+    assert!(
+        coarse.len() < 148,
+        "which is why the formal statement cannot be dropped as well"
+    );
+}
+
+#[test]
+fn no_property_in_the_corpus_has_an_empty_formal_statement() {
+    let empty: Vec<String> = corpus()
+        .into_iter()
+        .filter(|[_, _, formal]| formal.trim().is_empty())
+        .map(|[function, _, _]| function)
+        .collect();
+    assert_eq!(
+        empty,
+        Vec::<String>::new(),
+        "one would key on function and kind alone"
+    );
 }
 
 #[test]

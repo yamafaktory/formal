@@ -1,7 +1,7 @@
 //! Python string semantics the cache key depends on.
 //!
 //! The key is a digest of text that Python produced for months, and the golden
-//! digests in `tests/fixtures/cache_keys.json` were recorded from it. Where
+//! digests in `tests/fixtures/cache_keys.toml` were recorded from it. Where
 //! Python and Rust disagree about what a character or a line is, Python is the
 //! specification: a divergence here does not produce a wrong answer, it produces
 //! a key nobody ever hits again.
