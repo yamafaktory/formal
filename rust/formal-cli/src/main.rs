@@ -22,9 +22,12 @@ use formal_lean::{
         Endpoint,
         Server,
     },
+    sandbox::Sandbox,
+    toolchain::Toolchain,
 };
 use formal_server::AppState;
 
+mod setup;
 mod status;
 
 use status::Status;
@@ -54,6 +57,9 @@ enum Action {
         #[arg(long)]
         background: bool,
     },
+
+    /// Install the Lean toolchain and Mathlib.
+    Setup,
 
     /// Stop a server started with --background.
     Stop {
@@ -147,6 +153,17 @@ fn cmd_serve(env: &Env, host: Option<String>, port: Option<u16>, background: boo
     }
 }
 
+fn cmd_setup(env: &Env) -> ExitCode {
+    let paths = Paths::resolve(env);
+    let toolchain = Toolchain::resolve(env);
+    let sandbox = Sandbox::resolve(env, &paths, &toolchain);
+    if setup::install(&paths, &toolchain, &sandbox, &setup::Console) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(FAILED)
+    }
+}
+
 fn cmd_stop(env: &Env, host: Option<String>, port: Option<u16>) -> ExitCode {
     let endpoint = endpoint(env, host, port);
     let server = Server::new(endpoint.clone(), &Paths::resolve(env));
@@ -179,6 +196,7 @@ fn main() -> ExitCode {
             port,
             background,
         } => cmd_serve(&env, host, port, background),
+        Action::Setup => cmd_setup(&env),
         Action::Stop { host, port } => cmd_stop(&env, host, port),
     }
 }
