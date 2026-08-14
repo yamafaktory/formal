@@ -15,6 +15,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
+    env::Env,
     paths::{
         Paths,
         home_dir,
@@ -59,7 +60,13 @@ impl Mode {
     /// The mode this process was started in.
     #[must_use]
     pub fn from_env() -> Self {
-        Self::parse(std::env::var("FORMAL_SANDBOX").ok().as_deref())
+        Self::resolve(&Env::process())
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(env: &Env) -> Self {
+        Self::parse(env.get("FORMAL_SANDBOX"))
     }
 }
 
@@ -89,7 +96,13 @@ impl Sandbox {
     /// The sandbox this process would use.
     #[must_use]
     pub fn from_env(paths: &Paths, toolchain: &Toolchain) -> Self {
-        Self::new(Mode::from_env(), which_bwrap(), paths, toolchain)
+        Self::resolve(&Env::process(), paths, toolchain)
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(env: &Env, paths: &Paths, toolchain: &Toolchain) -> Self {
+        Self::new(Mode::resolve(env), which_bwrap(), paths, toolchain)
     }
 
     /// The same, for a stated mode and a stated bubblewrap.

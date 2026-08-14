@@ -495,6 +495,30 @@ mod lifetime {
     }
 }
 
+mod configuration {
+    use formal_lean::env::Env;
+
+    use super::*;
+
+    #[test]
+    fn a_stated_lifetime_is_what_a_session_gets() {
+        let sessions = Sessions::resolve(&Env::from_pairs([("SESSION_TTL_MINUTES", "5")]));
+        assert_eq!(sessions.ttl(), Duration::from_mins(5));
+    }
+
+    #[test]
+    fn a_lifetime_below_the_floor_is_raised_to_it() {
+        let sessions = Sessions::resolve(&Env::from_pairs([("SESSION_TTL_MINUTES", "0")]));
+        assert_eq!(sessions.ttl(), Duration::from_mins(1));
+    }
+
+    #[test]
+    fn a_lifetime_that_is_not_a_number_leaves_the_default() {
+        let sessions = Sessions::resolve(&Env::from_pairs([("SESSION_TTL_MINUTES", "soon")]));
+        assert_eq!(sessions.ttl(), Duration::from_hours(1));
+    }
+}
+
 mod origins {
     use super::*;
 

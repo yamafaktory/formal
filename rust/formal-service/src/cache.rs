@@ -21,6 +21,7 @@ use std::{
 
 use formal_core::property::PropertyResult;
 use formal_lean::{
+    env::Env,
     logger::{
         Tag,
         log,
@@ -48,9 +49,14 @@ impl ProofCache {
     /// The cache this process would use, `PROOF_CACHE_TTL_DAYS` included.
     #[must_use]
     pub fn from_env(paths: &Paths) -> Self {
-        let ttl = std::env::var("PROOF_CACHE_TTL_DAYS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
+        Self::resolve(&Env::process(), paths)
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(env: &Env, paths: &Paths) -> Self {
+        let ttl = env
+            .number::<u64>("PROOF_CACHE_TTL_DAYS")
             .map_or(DEFAULT_TTL, |days| Duration::from_hours(days * 24));
         Self::new(paths.proof_cache_dir.clone(), ttl)
     }
@@ -292,6 +298,24 @@ mod tests {
 
         cache.save("abc", &result("p1"));
         assert_eq!(cache.load("abc"), None);
+    }
+
+    #[test]
+    fn a_stated_lifetime_is_read_in_days() {
+        let paths = formal_lean::paths::Paths::under(PathBuf::from("/srv/formal"));
+        let cache = ProofCache::resolve(&Env::from_pairs([("PROOF_CACHE_TTL_DAYS", "3")]), &paths);
+        assert_eq!(cache.ttl, Duration::from_hours(3 * 24));
+        assert_eq!(cache.dir, Path::new("/srv/formal/results/cache"));
+    }
+
+    #[test]
+    fn a_lifetime_that_is_not_a_number_leaves_the_default() {
+        let paths = formal_lean::paths::Paths::under(PathBuf::from("/srv/formal"));
+        let cache = ProofCache::resolve(
+            &Env::from_pairs([("PROOF_CACHE_TTL_DAYS", "a while")]),
+            &paths,
+        );
+        assert_eq!(cache.ttl, DEFAULT_TTL);
     }
 
     #[test]

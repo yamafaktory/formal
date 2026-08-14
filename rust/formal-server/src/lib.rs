@@ -30,6 +30,7 @@ use formal_core::{
     specs,
 };
 use formal_lean::{
+    env::Env,
     paths::Paths,
     run::Runner,
 };
@@ -99,11 +100,20 @@ impl AppState {
     /// The shipped hint table failing to parse, which is a build-time mistake
     /// rather than anything a caller did.
     pub fn from_env() -> Result<Self, formal_core::hints::HintTableError> {
-        let paths = Paths::from_env();
+        Self::resolve(&Env::process())
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    ///
+    /// # Errors
+    ///
+    /// The shipped hint table failing to parse.
+    pub fn resolve(env: &Env) -> Result<Self, formal_core::hints::HintTableError> {
+        let paths = Paths::resolve(env);
         Ok(Self {
-            sessions: Sessions::from_env(),
-            cache: ProofCache::from_env(&paths),
-            runner: Runner::from_env(),
+            sessions: Sessions::resolve(env),
+            cache: ProofCache::resolve(env, &paths),
+            runner: Runner::resolve(env),
             table: Table::shipped()?,
         })
     }

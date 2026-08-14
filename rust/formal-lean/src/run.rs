@@ -39,6 +39,7 @@ use tempfile::Builder;
 use thiserror::Error;
 
 use crate::{
+    env::Env,
     paths::Paths,
     sandbox::{
         NotInstalled,
@@ -263,15 +264,20 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// A runner configured from the environment.
+    /// A runner configured from the process environment.
     #[must_use]
     pub fn from_env() -> Self {
-        let paths = Paths::from_env();
-        let toolchain = Toolchain::from_env();
-        let sandbox = Sandbox::from_env(&paths, &toolchain);
-        let timeout = std::env::var("LEAN_TIMEOUT")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
+        Self::resolve(&Env::process())
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(env: &Env) -> Self {
+        let paths = Paths::resolve(env);
+        let toolchain = Toolchain::resolve(env);
+        let sandbox = Sandbox::resolve(env, &paths, &toolchain);
+        let timeout = env
+            .number("LEAN_TIMEOUT")
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
         Self::new(paths, toolchain, sandbox, timeout)
     }
@@ -618,6 +624,36 @@ mod tests {
                 timed_out: false,
             });
             assert_eq!(result.output, "one\ntwo");
+        }
+    }
+
+    mod configuration {
+        use super::*;
+        use crate::env::Env;
+
+        #[test]
+        fn a_stated_timeout_is_what_lean_gets() {
+            let runner = Runner::resolve(&Env::from_pairs([
+                ("LEAN_TIMEOUT", "7"),
+                ("FORMAL_HOME", "/srv/formal"),
+            ]));
+            assert_eq!(runner.timeout, Duration::from_secs(7));
+            assert_eq!(
+                runner.paths().lean_project_dir,
+                Path::new("/srv/formal/lean_project")
+            );
+        }
+
+        #[test]
+        fn a_timeout_that_is_not_a_number_leaves_the_default() {
+            let runner = Runner::resolve(&Env::from_pairs([("LEAN_TIMEOUT", "soon")]));
+            assert_eq!(runner.timeout, DEFAULT_TIMEOUT);
+        }
+
+        #[test]
+        fn sandboxing_is_off_when_the_configuration_says_so() {
+            let runner = Runner::resolve(&Env::from_pairs([("FORMAL_SANDBOX", "off")]));
+            assert_eq!(runner.sandbox().describe(), "off (FORMAL_SANDBOX)");
         }
     }
 

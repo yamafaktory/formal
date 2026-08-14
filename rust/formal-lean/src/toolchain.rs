@@ -11,9 +11,12 @@ use std::{
     },
 };
 
-use crate::paths::{
-    expanduser,
-    home_dir,
+use crate::{
+    env::Env,
+    paths::{
+        expanduser,
+        home_dir,
+    },
 };
 
 /// Where elan keeps the Lean toolchains, and the PATH that finds them.
@@ -25,12 +28,9 @@ pub struct Toolchain {
     pub search_path: OsString,
 }
 
-fn elan_home_from_env() -> PathBuf {
-    env::var("ELAN_HOME")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .map_or_else(|| home_dir().join(".elan"), |value| expanduser(&value))
+fn elan_home(env: &Env) -> PathBuf {
+    env.get("ELAN_HOME")
+        .map_or_else(|| home_dir().join(".elan"), expanduser)
 }
 
 /// Put elan's `bin` in front of `base`, unless it is absent or already there.
@@ -47,11 +47,19 @@ fn search_path(elan_home: &Path, base: &OsString) -> OsString {
 }
 
 impl Toolchain {
-    /// Resolve elan and the search path from the environment, once.
+    /// Resolve elan and the search path from the process environment, once.
     #[must_use]
     pub fn from_env() -> Self {
-        let elan_home = elan_home_from_env();
-        let base = env::var_os("PATH").unwrap_or_default();
+        Self::resolve(&Env::process())
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(config: &Env) -> Self {
+        let elan_home = elan_home(config);
+        let base = config
+            .get("PATH")
+            .map_or_else(OsString::new, OsString::from);
         Self {
             search_path: search_path(&elan_home, &base),
             elan_home,

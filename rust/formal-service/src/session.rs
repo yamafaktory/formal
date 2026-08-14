@@ -25,9 +25,12 @@ use formal_core::property::{
     PropertyResult,
     PropertySpec,
 };
-use formal_lean::logger::{
-    Tag,
-    log,
+use formal_lean::{
+    env::Env,
+    logger::{
+        Tag,
+        log,
+    },
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -292,11 +295,16 @@ impl Sessions {
     /// The registry this process would use, `SESSION_TTL_MINUTES` included.
     #[must_use]
     pub fn from_env() -> Self {
-        let ttl = std::env::var("SESSION_TTL_MINUTES")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .map_or(DEFAULT_TTL, Duration::from_mins);
-        Self::new(ttl)
+        Self::resolve(&Env::process())
+    }
+
+    /// The same, from configuration that was collected rather than read.
+    #[must_use]
+    pub fn resolve(env: &Env) -> Self {
+        Self::new(
+            env.number("SESSION_TTL_MINUTES")
+                .map_or(DEFAULT_TTL, Duration::from_mins),
+        )
     }
 
     /// How long an idle session lasts.

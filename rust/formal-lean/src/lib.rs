@@ -4,6 +4,7 @@
 //! it can be held to is the shape of the command it builds, which is the part
 //! that decides whether caller-authored Lean is confined at all.
 
+pub mod env;
 pub mod logger;
 pub mod paths;
 pub mod run;
