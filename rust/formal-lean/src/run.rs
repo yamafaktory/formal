@@ -12,7 +12,10 @@ use std::{
         Read,
         Write,
     },
-    path::Path,
+    path::{
+        Path,
+        PathBuf,
+    },
     process::{
         Command,
         Stdio,
@@ -33,10 +36,14 @@ use std::{
 
 use formal_core::pystr;
 use tempfile::Builder;
+use thiserror::Error;
 
 use crate::{
     paths::Paths,
-    sandbox::Sandbox,
+    sandbox::{
+        NotInstalled,
+        Sandbox,
+    },
     toolchain::Toolchain,
     verifier::{
         BatchEntry,
@@ -193,6 +200,44 @@ pub fn parse_output(captured: &Captured) -> LeanResult {
     }
 }
 
+/// Lean was never asked, so there is no verdict on the proof.
+///
+/// Distinct from a proof Lean rejected, which is a [`LeanResult`] that did not
+/// succeed. Every one of these becomes such a result carrying no diagnostics,
+/// which is what tells a batch it cannot attribute anything and a caller that
+/// nothing was established either way.
+#[derive(Debug, Error)]
+pub enum RunError {
+    /// The directory scratch files go in could not be made.
+    #[error("Could not prepare {dir}: {source}")]
+    Unprepared {
+        /// The directory in question.
+        dir: PathBuf,
+        /// What the filesystem said.
+        source: std::io::Error,
+    },
+
+    /// The proof could not be written down for Lean to read.
+    #[error("Could not write a scratch file in {dir}: {source}")]
+    Unwritable {
+        /// The directory in question.
+        dir: PathBuf,
+        /// What the filesystem said.
+        source: std::io::Error,
+    },
+
+    /// Confinement was asked for by name and is not available.
+    ///
+    /// Running anyway would elaborate caller-authored Lean unconfined, which is
+    /// the one thing the mode exists to refuse.
+    #[error(transparent)]
+    Unconfined(#[from] NotInstalled),
+
+    /// Lean itself could not be started.
+    #[error("Could not run Lean: {0}")]
+    Unstartable(#[from] std::io::Error),
+}
+
 fn failed(output: impl Into<String>) -> LeanResult {
     LeanResult {
         success: false,
@@ -310,44 +355,48 @@ impl Runner {
     /// no diagnostics, which is what tells a batch it cannot attribute anything
     /// and a caller that Lean never gave a verdict.
     pub fn verify(&self, lean_code: &str, timeout: Option<Duration>) -> LeanResult {
+        self.try_verify(lean_code, timeout)
+            .unwrap_or_else(|e| failed(e.to_string()))
+    }
+
+    /// The same, with the reasons Lean could not be run left typed.
+    ///
+    /// # Errors
+    ///
+    /// [`RunError`] for anything that stopped Lean being asked. A proof Lean
+    /// rejected is not one of them — that is a [`LeanResult`] that did not succeed.
+    pub fn try_verify(
+        &self,
+        lean_code: &str,
+        timeout: Option<Duration>,
+    ) -> Result<LeanResult, RunError> {
         if lean_code.trim().is_empty() {
-            return failed("Empty Lean code");
+            return Ok(failed("Empty Lean code"));
         }
 
-        let verify_dir = self.paths.verify_dir();
-        if let Err(e) = std::fs::create_dir_all(&verify_dir) {
-            return failed(format!("Could not prepare {}: {e}", verify_dir.display()));
-        }
-        sweep_stale_temps(&verify_dir);
+        let dir = self.paths.verify_dir();
+        std::fs::create_dir_all(&dir).map_err(|source| RunError::Unprepared {
+            dir: dir.clone(),
+            source,
+        })?;
+        sweep_stale_temps(&dir);
 
-        let mut scratch = match Builder::new()
+        let unwritable = |source| RunError::Unwritable {
+            dir: dir.clone(),
+            source,
+        };
+        let mut scratch = Builder::new()
             .prefix("tmp_")
             .suffix(".lean")
-            .tempfile_in(&verify_dir)
-        {
-            Ok(file) => file,
-            Err(e) => {
-                return failed(format!(
-                    "Could not write a scratch file in {}: {e}",
-                    verify_dir.display()
-                ));
-            }
-        };
-        if let Err(e) = scratch
+            .tempfile_in(&dir)
+            .map_err(unwritable)?;
+        scratch
             .write_all(lean_code.as_bytes())
             .and_then(|()| scratch.flush())
-        {
-            return failed(format!(
-                "Could not write a scratch file in {}: {e}",
-                verify_dir.display()
-            ));
-        }
+            .map_err(unwritable)?;
 
         let (cmd, env) = self.lean_command(scratch.path());
-        let wrapped = match self.sandbox.wrap(&cmd) {
-            Ok(wrapped) => wrapped,
-            Err(e) => return failed(e.to_string()),
-        };
+        let wrapped = self.sandbox.wrap(&cmd)?;
         if let Some(warning) = wrapped.warning
             && !self.warned.swap(true, Ordering::Relaxed)
         {
@@ -355,9 +404,9 @@ impl Runner {
         }
 
         let effective = timeout.unwrap_or(self.timeout);
-        match run_command(&wrapped.argv, &self.paths.lean_project_dir, &env, effective) {
-            Err(e) => failed(format!("Could not run Lean: {e}")),
-            Ok(captured) if captured.timed_out => LeanResult {
+        let captured = run_command(&wrapped.argv, &self.paths.lean_project_dir, &env, effective)?;
+        if captured.timed_out {
+            return Ok(LeanResult {
                 success: false,
                 output: format!("Lean verification timed out after {}s", effective.as_secs()),
                 errors: vec![LeanError {
@@ -367,9 +416,9 @@ impl Runner {
                     col: Some(0),
                     pos: None,
                 }],
-            },
-            Ok(captured) => parse_output(&captured),
+            });
         }
+        Ok(parse_output(&captured))
     }
 
     /// Check several proofs in one invocation, paying one Mathlib import.
@@ -620,6 +669,40 @@ mod tests {
                 .expect("the directory was made")
                 .count();
             assert_eq!(left, 0);
+        }
+
+        #[test]
+        fn the_reason_lean_was_never_asked_is_typed() {
+            let dir = TempDir::new().expect("a temporary directory");
+            let error = runner(dir.path())
+                .try_verify("theorem t : True := trivial", None)
+                .expect_err("there is no toolchain to find");
+            assert!(matches!(error, RunError::Unstartable(_)), "{error:?}");
+        }
+
+        #[test]
+        fn a_project_directory_that_cannot_be_made_is_reported_as_such() {
+            let dir = TempDir::new().expect("a temporary directory");
+            let blocked = dir.path().join("blocked");
+            std::fs::write(&blocked, "not a directory").expect("the file is writable");
+            let error = runner(&blocked)
+                .try_verify("theorem t : True := trivial", None)
+                .expect_err("nothing can be made under a file");
+            assert!(matches!(error, RunError::Unprepared { .. }), "{error:?}");
+            assert!(
+                error.to_string().starts_with("Could not prepare "),
+                "{error}"
+            );
+        }
+
+        #[test]
+        fn a_rejected_proof_is_a_verdict_and_not_a_run_error() {
+            let dir = TempDir::new().expect("a temporary directory");
+            let result = runner(dir.path())
+                .try_verify("  \n ", None)
+                .expect("nothing went wrong, there was just nothing to check");
+            assert!(!result.success);
+            assert_eq!(result.output, "Empty Lean code");
         }
 
         #[test]
