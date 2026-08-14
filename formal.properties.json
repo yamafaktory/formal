@@ -11,12 +11,12 @@
         "text modelled as List Char",
         "splitlines modelled as splitting on '\\n'"
       ],
-      "source_file": "src/formal/proof_cache.py",
-      "function_code": "def normalise_code(function_code: str) -> str:\n    \"\"\"Indentation is meaning in Python, so only trailing and surrounding space goes.\"\"\"\n    return \"\\n\".join(line.rstrip() for line in function_code.strip().splitlines())"
+      "source_file": "rust/formal-core/src/proof_cache.rs",
+      "function_code": "/// Indentation is meaning in Python, so only trailing and surrounding space goes.\n#[must_use]\npub fn normalise_code(function_code: &str) -> String {\n    pystr::splitlines(pystr::strip(function_code))\n        .into_iter()\n        .map(pystr::rstrip)\n        .collect::<Vec<_>>()\n        .join(\"\\n\")\n}"
     },
     {
       "id": "framed/shifting_a_boundary_changes_the_payload",
-      "function": "_framed",
+      "function": "framed",
       "kind": "invariant",
       "formal": "framed ['X\\na', 'b', 'c'] <> framed ['X', 'a\\nb', 'c']",
       "description": "a field cannot imitate the boundary between two others — the newline-joined payload could, and two distinct properties shared a cache key",
@@ -24,8 +24,8 @@
         "text modelled as List Char",
         "stated on the witness that collided under the old joining"
       ],
-      "source_file": "src/formal/proof_cache.py",
-      "function_code": "def _framed(*parts: str) -> str:\n    \"\"\"Join fields so that no field can imitate the boundary between two others.\n\n    Joining on a newline was ambiguous: normalised code and the kind may both contain\n    one, so (\"X\\na\", \"b\", \"c\") and (\"X\", \"a\\nb\", \"c\") produced the same payload and\n    therefore the same key — two distinct properties sharing one cached proof.\n    Length-prefixing each field removes the ambiguity whatever the field contains.\n    \"\"\"\n    return \"\".join(f\"{len(part)}:{part}\" for part in parts)"
+      "source_file": "rust/formal-core/src/proof_cache.rs",
+      "function_code": "/// Join fields so that no field can imitate the boundary between two others.\n///\n/// Joining on a newline was ambiguous: normalised code and the kind may both\n/// contain one, so `(\"X\\na\", \"b\", \"c\")` and `(\"X\", \"a\\nb\", \"c\")` produced the\n/// same payload and therefore the same key — two distinct properties sharing\n/// one cached proof. Length-prefixing each field removes the ambiguity whatever\n/// the field contains.\n///\n/// The length is a count of characters, not of bytes. Normalisation puts\n/// multi-byte operators into the statement, so the two differ for most real\n/// inputs and a byte count moves every key.\nfn framed(parts: &[&str]) -> String {\n    let mut payload = String::new();\n    for part in parts {\n        payload.push_str(&part.chars().count().to_string());\n        payload.push(':');\n        payload.push_str(part);\n    }\n    payload\n}"
     },
     {
       "id": "normalise_formal/word_operators_respect_boundaries",
@@ -37,8 +37,8 @@
         "text modelled as List Char",
         "stated on the witness that collided before word boundaries were respected"
       ],
-      "source_file": "src/formal/proof_cache.py",
-      "function_code": "_WORD_OPERATORS = {\"forall\": \"∀\", \"exists\": \"∃\", \"not\": \"¬\", \"in\": \"∈\"}\n\n_WORD_PATTERN = re.compile(r\"\\b(\" + \"|\".join(_WORD_OPERATORS) + r\")\\b\")\n\n\ndef normalise_formal(formal: str) -> str:\n    \"\"\"Reduce a formal statement to the form two writers of it should agree on.\n\n    Operator spelling and spacing are free choices — `∀ x, p x → q x` and\n    `forall x, p x -> q x` are one statement — and an agent picks differently from\n    run to run where a fixed prompt at temperature 0 did not.\n\n    Word-spelled operators are matched on word boundaries, and only before the\n    whitespace goes. Replacing them afterwards, or by substring, merges statements\n    that merely contain the letters: `a∈b` and the unrelated `ainb` both reduced to\n    `ainb` under the previous version.\n    \"\"\"\n    for ascii_form, symbol in _ASCII_OPERATORS:\n        formal = formal.replace(ascii_form, symbol)\n    formal = _WORD_PATTERN.sub(lambda m: _WORD_OPERATORS[m.group(1)], formal)\n    return re.sub(r\"\\s+\", \"\", formal)"
+      "source_file": "rust/formal-core/src/proof_cache.rs",
+      "function_code": "/// Spelled as words, so they only count on a word boundary: `in` inside `ainb`\n/// is not the membership operator, and treating it as one merged unrelated\n/// statements.\nconst WORD_OPERATORS: &[(&str, &str)] =\n    &[(\"forall\", \"∀\"), (\"exists\", \"∃\"), (\"not\", \"¬\"), (\"in\", \"∈\")];\n\nfn word_pattern() -> &'static Regex {\n    static PATTERN: OnceLock<Regex> = OnceLock::new();\n    PATTERN.get_or_init(|| {\n        let alternation = WORD_OPERATORS\n            .iter()\n            .map(|&(word, _)| word)\n            .collect::<Vec<_>>()\n            .join(\"|\");\n        Regex::new(&format!(r\"\\b({alternation})\\b\")).expect(\"the operator words are literals\")\n    })\n}"
     }
   ]
 }

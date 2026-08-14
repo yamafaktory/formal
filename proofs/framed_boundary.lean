@@ -1,7 +1,8 @@
 import Mathlib
 
 -- Assumptions: text modelled as List Char; the decimal length prefix is Nat.repr,
--- matching Python's f"{len(part)}:{part}".
+-- matching the count-colon-field framing. The count is of characters, not bytes,
+-- which is what the model says and what the implementation must keep saying.
 
 def framedOne (p : List Char) : List Char :=
   (Nat.repr p.length).toList ++ [':'] ++ p
