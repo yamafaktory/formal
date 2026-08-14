@@ -4,7 +4,9 @@
 //! that can be held to a fixture, and the fixtures it is held to were recorded
 //! from the Python implementation this replaces.
 
+pub mod guide;
 pub mod hints;
+pub mod prompts;
 pub mod proof_cache;
 pub mod property;
 pub mod pystr;
