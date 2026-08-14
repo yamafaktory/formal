@@ -4,4 +4,6 @@
 //! batched, what gets retried without asking anyone, and what has earned a place
 //! in a cache that outlives the run.
 
+pub mod cache;
 pub mod checker;
+pub mod session;

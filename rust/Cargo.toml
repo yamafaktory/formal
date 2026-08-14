@@ -17,6 +17,7 @@ sha2 = "0.10.9"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
 toml = "0.9.8"
+uuid = { version = "1.19.0", features = ["v4"] }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

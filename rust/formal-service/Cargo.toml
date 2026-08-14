@@ -11,9 +11,12 @@ version.workspace = true
 formal-core = { path = "../formal-core" }
 formal-lean = { path = "../formal-lean" }
 serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
