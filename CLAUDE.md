@@ -9,6 +9,27 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+## Rust
+
+The port lives in `rust/`, a workspace beside the Python it replaces. Both run at
+every commit: Python keeps serving until the Rust binary answers the conformance
+suite, and the two are compared through the golden files rather than by reading
+each other. After every Rust change, run:
+
+```sh
+cargo fmt --all
+cargo clippy --all-targets
+cargo test
+```
+
+Edition 2024, `clippy::pedantic` denied, the lint table in the workspace manifest.
+`formal-core` is the part that can be held to a fixture — no files, no Lean, no
+requests.
+
+`pystr` exists because the golden digests were recorded from Python, so Python's
+idea of whitespace and of a line boundary is the specification here. Reaching for
+`str::lines` or `char::is_whitespace` instead is how the keys move.
+
 ## Shell
 
 After every shell file change, run:

@@ -1,0 +1,19 @@
+[package]
+authors.workspace = true
+description = "The pure logic of formal: what a property is, and what identifies it."
+edition.workspace = true
+license.workspace = true
+name = "formal-core"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+regex = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
