@@ -5,6 +5,7 @@
 //! that decides whether caller-authored Lean is confined at all.
 
 pub mod paths;
+pub mod run;
 pub mod sandbox;
 pub mod toolchain;
 pub mod verifier;
