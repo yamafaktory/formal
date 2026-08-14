@@ -97,6 +97,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "formal-lean"
+version = "1.0.0"
+dependencies = [
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

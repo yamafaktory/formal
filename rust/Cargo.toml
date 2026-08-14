@@ -1,5 +1,5 @@
 [workspace]
-members = ["formal-core"]
+members = ["formal-core", "formal-lean"]
 resolver = "3"
 
 [workspace.package]

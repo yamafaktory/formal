@@ -1,0 +1,17 @@
+[package]
+authors.workspace = true
+description = "Where Lean lives, how it is confined, and how it is run."
+edition.workspace = true
+license.workspace = true
+name = "formal-lean"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
