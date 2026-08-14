@@ -16,6 +16,7 @@ serde_json = "1.0.150"
 sha2 = "0.10.9"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
+toml = "0.9.8"
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
