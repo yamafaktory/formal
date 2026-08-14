@@ -109,6 +109,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "formal-service"
+version = "1.0.0"
+dependencies = [
+ "formal-core",
+ "formal-lean",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
