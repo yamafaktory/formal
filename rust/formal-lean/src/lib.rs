@@ -7,3 +7,4 @@
 pub mod paths;
 pub mod sandbox;
 pub mod toolchain;
+pub mod verifier;
