@@ -5,43 +5,33 @@ on:
   pull_request:
   workflow_call:
 
+defaults:
+  run:
+    working-directory: rust
+
 jobs:
-  ruff:
+  fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.0
-        with:
-          enable-cache: true
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      # rustfmt.toml uses group_imports and imports_granularity, which are
+      # nightly-only options. Formatting is checked on nightly; nothing else is.
+      - run: rustup toolchain install nightly --component rustfmt
+      - run: cargo +nightly fmt --all --check
 
-  shfmt:
+  clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Pinned, not "latest": resolving the tag needs an unauthenticated call to
-      # api.github.com, and when that is rate-limited the version comes back empty,
-      # the download 404s into the binary, and the job fails with nothing to do
-      # with the shell script.
-      - run: |
-          SHFMT_VERSION=v3.13.1
-          curl -fsSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
-          chmod +x /usr/local/bin/shfmt
-          shfmt --version
-          shfmt -d formal
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ludeeus/action-shellcheck@2.0.0
+      - run: rustup toolchain install nightly --component clippy
+      - run: cargo +nightly clippy --all-targets
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.0
-        with:
-          enable-cache: true
-      - run: uv run pytest --tb=short
+      - run: rustup toolchain install nightly
+      # The tests that need Lean do nothing when there is none, so this runs the
+      # rest: the frozen cache keys, the hint corpus, the guide digests, and the
+      # HTTP surface against tests/conformance/golden/responses.json.
+      - run: cargo +nightly test --workspace

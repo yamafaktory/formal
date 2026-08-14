@@ -13,7 +13,7 @@ macro_rules! guidance {
     ($($name:literal),* $(,)?) => {
         /// Every piece of guidance, by name, in the order the directory lists them.
         const GUIDANCE: &[(&str, &str)] = &[
-            $(($name, include_str!(concat!("../../../src/formal/guidance/", $name, ".md"))),)*
+            $(($name, include_str!(concat!("../guidance/", $name, ".md"))),)*
         ];
     };
 }

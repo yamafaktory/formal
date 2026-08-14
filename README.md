@@ -56,18 +56,18 @@ modelling limit, not a bug and not a failure.
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Requires a Rust toolchain.
 
 ```sh
-uv tool install git+https://github.com/yamafaktory/formal
+cargo install --git https://github.com/yamafaktory/formal formal-cli
 formal setup
 ```
 
-No clone needed — the Lean project is bundled in the wheel and created under
+No clone needed — the Lean project is bundled in the binary and created under
 `~/.local/share/formal` on first run, which is also where Mathlib's oleans land.
 
-Working on formal itself? Clone it and run `./formal setup` instead; a checkout keeps
-its Lean project and results inside the repo.
+Working on formal itself? Clone it, and a binary built from the checkout keeps its
+Lean project and results inside the repo.
 
 `formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
 toolchain, then downloads prebuilt Mathlib oleans. That is all it does — there is no
@@ -137,14 +137,14 @@ Properties live in a JSON file you commit alongside the code:
   "properties": [
     {
       "id": "split_imports/conservation",
-      "function": "_split_imports",
+      "function": "split_imports",
       "kind": "invariant",
       "formal": "forall ls, length (fst (partition ls)) + length (snd (partition ls)) = length ls",
       "description": "splitting preserves the number of lines",
       "preconditions": [],
       "assumptions": ["text modelled as List String, one element per line"],
-      "source_file": "src/formal/lean_verifier.py",
-      "function_code": "def _split_imports(lean_code):\n    ..."
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "fn split_imports(lean_code: &str) -> ..."
     }
   ]
 }
@@ -385,15 +385,23 @@ Do not expose it beyond the loopback interface.
 
 ## Development
 
+From `rust/`:
+
 ```sh
-uv run ruff check .          # lint
-uv run ruff check --fix .    # lint + auto-fix
-uv run ruff format .         # format
-uv run pytest --tb=short     # tests
-FORMAL_LEAN_TESTS=1 uv run pytest -k DocumentedLemmas   # check the guide's lemma names against Mathlib (~20s)
+cargo fmt --all           # format (needs a nightly rustfmt)
+cargo clippy --all-targets  # lint
+cargo test                # tests
 ```
 
-Rule sets: `E`, `F`, `I`, `UP`. Line length 120.
+Edition 2024, `clippy::pedantic` denied. The tests that need Lean do nothing when
+there is none, so `cargo test` is quick without a toolchain and thorough with one —
+`--test lean` checks proofs, `--test guide_lemmas` checks that every lemma this
+guide names still exists in Mathlib.
+
+What decides whether a change may land is data, not code:
+`tests/conformance/golden/responses.json` for the HTTP surface,
+`tests/fixtures/cache_keys.json` for the digests every cached proof is filed
+under, and `tests/fixtures/hint_corpus.json` for the advice. See CLAUDE.md.
 
 ### Updating Lean dependencies
 

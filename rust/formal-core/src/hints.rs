@@ -29,12 +29,11 @@ use thiserror::Error;
 ///
 /// The text is a data file under version control, which is the point of it not
 /// being Rust; a binary that has to find that file at runtime is a worse way to
-/// get there than embedding it. While the Python still serves, both read these
-/// same bytes, so the table cannot drift between the two.
-const DATA: &str = include_str!("../../../src/formal/guidance/hints.toml");
+/// get there than embedding it.
+const DATA: &str = include_str!("../guidance/hints.toml");
 
 /// Where the shipped table lives, for messages about it.
-const ORIGIN: &str = "src/formal/guidance/hints.toml";
+const ORIGIN: &str = "formal-core/guidance/hints.toml";
 
 /// The table format this formal understands.
 const SCHEMA_VERSION: u64 = 1;

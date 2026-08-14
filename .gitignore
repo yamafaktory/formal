@@ -2,11 +2,7 @@
 results/
 server.log
 server.pid
-.ruff_cache/
-.pytest_cache/
-__pycache__/
 
-.venv/
 rust/target/
 lean_project/.lake/
 lean_project/Verify/*.lean
