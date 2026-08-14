@@ -42,6 +42,10 @@ use formal_service::{
     },
 };
 use serde::Serialize;
+use utoipa::{
+    OpenApi,
+    ToSchema,
+};
 
 mod wire;
 
@@ -112,9 +116,11 @@ pub struct ApiError {
     detail: String,
 }
 
-#[derive(Serialize)]
-struct Detail {
-    detail: String,
+/// Why a request was refused. Every refusal formal makes has this shape.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Detail {
+    /// What was wrong, in words meant for whoever has to fix it.
+    pub detail: String,
 }
 
 impl ApiError {
@@ -155,6 +161,7 @@ type ApiResult<T> = Result<Json<T>, ApiError>;
 /// Every route formal serves.
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/openapi.json", get(openapi))
         .route("/health", get(health))
         .route("/guide", get(read_guide))
         .route("/guide/{topic}", get(read_guide_topic))
@@ -171,25 +178,66 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-#[derive(Serialize)]
-struct Status {
-    status: &'static str,
+/// The full schema of every endpoint and response.
+///
+/// The guide tells an agent to read this rather than guess at a shape, so it is
+/// derived from the types that are actually served rather than maintained beside
+/// them.
+#[derive(Debug, OpenApi)]
+#[openapi(
+    info(title = "formal", version = env!("CARGO_PKG_VERSION")),
+    paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, read_proof, close_session),
+    components(schemas(
+        CacheHitOut, CheckRequest, CheckResponse, Detail, FailureOut,
+        ProofOut, PropertySpecIn, SessionRequest, SessionResponse, Status, TopicOut,
+    )),
+)]
+pub struct ApiDoc;
+
+async fn openapi() -> Json<serde_json::Value> {
+    Json(serde_json::to_value(ApiDoc::openapi()).unwrap_or_default())
 }
 
+/// A one-word answer: `ok` from /health, `closed` from a delete.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Status {
+    /// The word.
+    pub status: &'static str,
+}
+
+#[utoipa::path(
+    get, path = "/health",
+    responses((status = 200, description = "The server is up", body = Status)),
+)]
 async fn health() -> Json<Status> {
     Json(Status { status: "ok" })
 }
 
+#[utoipa::path(
+    get, path = "/guide",
+    responses((status = 200, description = "The workflow, the spec schema, and what else can be asked for")),
+)]
 async fn read_guide() -> Json<serde_json::Value> {
     Json(guide::index())
 }
 
-#[derive(Serialize)]
-struct TopicOut {
-    topic: String,
-    instructions: String,
+/// The instructions for one phase of the workflow.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TopicOut {
+    /// Which phase.
+    pub topic: String,
+    /// What to do in it.
+    pub instructions: String,
 }
 
+#[utoipa::path(
+    get, path = "/guide/{topic}",
+    params(("topic" = String, Path, description = "extract, formalize or tactics")),
+    responses(
+        (status = 200, description = "The instructions for that phase", body = TopicOut),
+        (status = 404, description = "No such topic", body = Detail),
+    ),
+)]
 async fn read_guide_topic(Path(topic): Path<String>) -> ApiResult<TopicOut> {
     let Some(instructions) = guide::topic(&topic) else {
         return Err(ApiError::not_found(format!(
@@ -227,6 +275,14 @@ fn describe(session: &Session) -> SessionResponse {
     }
 }
 
+#[utoipa::path(
+    post, path = "/session",
+    request_body = SessionRequest,
+    responses(
+        (status = 200, description = "The session, and what it already knows", body = SessionResponse),
+        (status = 400, description = "Neither or both sources given, a duplicate id, or an unreadable spec file", body = Detail),
+    ),
+)]
 async fn open_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SessionRequest>,
@@ -278,6 +334,14 @@ async fn open_session(
     Ok(Json(describe(&session)))
 }
 
+#[utoipa::path(
+    get, path = "/session/{session_id}",
+    params(("session_id" = String, Path, description = "The id /session handed back")),
+    responses(
+        (status = 200, description = "Where the session stands", body = SessionResponse),
+        (status = 404, description = "No such session, or it expired", body = Detail),
+    ),
+)]
 async fn read_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -290,6 +354,16 @@ async fn read_session(
     Ok(Json(describe(&session)))
 }
 
+#[utoipa::path(
+    post, path = "/session/{session_id}/check",
+    params(("session_id" = String, Path, description = "The id /session handed back")),
+    request_body = CheckRequest,
+    responses(
+        (status = 200, description = "What Lean made of each proof", body = CheckResponse),
+        (status = 400, description = "Neither or both sources given, an unregistered id, or an unreadable proof file", body = Detail),
+        (status = 404, description = "No such session, or it expired", body = Detail),
+    ),
+)]
 async fn check_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
@@ -327,6 +401,17 @@ async fn check_session(
     .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
+#[utoipa::path(
+    get, path = "/session/{session_id}/proof/{property_id}",
+    params(
+        ("session_id" = String, Path, description = "The id /session handed back"),
+        ("property_id" = String, Path, description = "The property id, which may contain slashes"),
+    ),
+    responses(
+        (status = 200, description = "The proof Lean accepted, which is the one that was cached", body = ProofOut),
+        (status = 404, description = "No such session, an unregistered id, or nothing accepted yet", body = Detail),
+    ),
+)]
 async fn read_proof(
     State(state): State<Arc<AppState>>,
     Path((session_id, property_id)): Path<(String, String)>,
@@ -354,6 +439,14 @@ async fn read_proof(
     }))
 }
 
+#[utoipa::path(
+    delete, path = "/session/{session_id}",
+    params(("session_id" = String, Path, description = "The id /session handed back")),
+    responses(
+        (status = 200, description = "It is closed", body = Status),
+        (status = 404, description = "There was nothing to close", body = Detail),
+    ),
+)]
 async fn close_session(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,

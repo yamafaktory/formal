@@ -182,6 +182,71 @@ mod unauthenticated_reads {
     }
 }
 
+mod schema {
+    use super::*;
+
+    #[tokio::test]
+    async fn openapi_documents_every_route_the_router_serves() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let (status, doc) = call(&app(&dir), "GET", "/openapi.json", None).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let paths = doc["paths"].as_object().expect("an object");
+        for (path, method) in [
+            ("/health", "get"),
+            ("/guide", "get"),
+            ("/guide/{topic}", "get"),
+            ("/session", "post"),
+            ("/session/{session_id}", "get"),
+            ("/session/{session_id}", "delete"),
+            ("/session/{session_id}/check", "post"),
+            ("/session/{session_id}/proof/{property_id}", "get"),
+        ] {
+            assert!(paths[path][method].is_object(), "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_shape_of_a_refusal_is_documented_too() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let (_, doc) = call(&app(&dir), "GET", "/openapi.json", None).await;
+        assert!(doc["components"]["schemas"]["Detail"].is_object(), "{doc}");
+        assert_eq!(
+            doc["paths"]["/session"]["post"]["responses"]["400"]["content"]["application/json"]["schema"]
+                ["$ref"],
+            "#/components/schemas/Detail"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_wire_type_is_in_the_schema() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let (_, doc) = call(&app(&dir), "GET", "/openapi.json", None).await;
+        let schemas = doc["components"]["schemas"].as_object().expect("an object");
+        for name in [
+            "CacheHitOut",
+            "CheckRequest",
+            "CheckResponse",
+            "Detail",
+            "FailureOut",
+            "ProofOut",
+            "PropertySpecIn",
+            "SessionRequest",
+            "SessionResponse",
+        ] {
+            assert!(schemas.contains_key(name), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_version_is_the_one_the_crate_was_built_with() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let (_, doc) = call(&app(&dir), "GET", "/openapi.json", None).await;
+        assert_eq!(doc["info"]["title"], "formal");
+        assert_eq!(doc["info"]["version"], env!("CARGO_PKG_VERSION"));
+    }
+}
+
 mod opening_a_session {
     use super::*;
 

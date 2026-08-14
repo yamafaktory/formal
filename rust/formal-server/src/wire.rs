@@ -14,9 +14,10 @@ use serde::{
     Deserialize,
     Serialize,
 };
+use utoipa::ToSchema;
 
 /// One property, as a caller states it inline.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, ToSchema)]
 pub struct PropertySpecIn {
     /// How a human reads the diff.
     pub id: String,
@@ -60,7 +61,7 @@ impl PropertySpecIn {
 }
 
 /// What to open a session over: properties inline, or a spec file on disk.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
 pub struct SessionRequest {
     /// The properties, stated inline.
     #[serde(default)]
@@ -75,7 +76,7 @@ pub struct SessionRequest {
 }
 
 /// What a cached proof established, so a caller can reject a mismatch.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct CacheHitOut {
     /// The property it settles.
     pub id: String,
@@ -88,7 +89,7 @@ pub struct CacheHitOut {
 }
 
 /// Where a session stands.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct SessionResponse {
     /// What to name it in later requests.
     pub session_id: String,
@@ -106,7 +107,7 @@ pub struct SessionResponse {
 ///
 /// The maps keep the order they arrived in, so the first unreadable path is the
 /// one reported rather than whichever sorted first.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
 pub struct CheckRequest {
     /// Lean, by property id.
     #[serde(default)]
@@ -120,7 +121,7 @@ pub struct CheckRequest {
 }
 
 /// One rejected proof, and what to do about it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct FailureOut {
     /// The property it was for.
     pub id: String,
@@ -135,7 +136,7 @@ pub struct FailureOut {
 }
 
 /// What came of a check.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct CheckResponse {
     /// The ids Lean accepted a proof of.
     pub verified: Vec<String>,
@@ -189,7 +190,7 @@ impl CheckResponse {
 }
 
 /// The proof Lean actually accepted, which is also the one that was cached.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ProofOut {
     /// The property it proves.
     pub id: String,
