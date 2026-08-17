@@ -455,6 +455,137 @@
       ],
       "source_file": "rust/formal-lean/src/verifier.rs",
       "function_code": "/// Check several proofs in a single Lean invocation, paying one Mathlib import.\n///\n/// Returns per-key results, or nothing when the batch itself could not be run —\n/// the caller then falls back to verifying each proof on its own.\n///\n/// `run` is what actually invokes Lean, which is what lets this be tested without\n/// one; in the service it is the runner.\npub fn verify_batch<F>(entries: &mut [BatchEntry], run: F) -> Option<Vec<(String, LeanResult)>>\nwhere\n    F: FnOnce(&str) -> LeanResult,\n{\n    if entries.is_empty() {\n        return Some(Vec::new());\n    }\n\n    let result = run(&build_batch(entries));\n\n    // An error outside every namespace (a bad hoisted import, say) invalidates the\n    // whole batch rather than any one proof.\n    for error in &result.errors {\n        let line = error.position().0.unwrap_or(0);\n        if !entries.iter().any(|entry| entry.covers(line)) {\n            return None;\n        }\n    }\n    if !result.success && result.errors.is_empty() {\n        return None;\n    }\n\n    Some(\n        entries\n            .iter()\n            .map(|entry| {\n                let errors: Vec<LeanError> = result\n                    .errors\n                    .iter()\n                    .filter(|error| entry.covers(error.position().0.unwrap_or(0)))\n                    .map(|error| rebase(error, entry))\n                    .collect();\n                let result = LeanResult {\n                    success: errors.is_empty(),\n                    output: if errors.is_empty() {\n                        String::new()\n                    } else {\n                        result.output.clone()\n                    },\n                    errors,\n                };\n                (entry.key.clone(), result)\n            })\n            .collect(),\n    )\n}"
+    },
+    {
+      "id": "check_syntax/a_verdict_always_carries_its_reason",
+      "function": "check_syntax",
+      "kind": "invariant",
+      "formal": "forall s, accepted (check_syntax s) <-> reason (check_syntax s) = []",
+      "description": "the pre-check accepts silently and never rejects without saying why — a caller can read the verdict off the reason alone",
+      "assumptions": [
+        "text modelled as List Char",
+        "blankness modelled over spaces and newlines, which is what the witnesses hold"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Fast pre-check before invoking the full Lean verifier.\n#[must_use]\npub fn check_syntax(lean_code: &str) -> (bool, String) {\n    if lean_code.trim().is_empty() {\n        return (false, \"Empty Lean code\".to_string());\n    }\n    if !REQUIRED_KEYWORDS\n        .iter()\n        .any(|keyword| lean_code.contains(keyword))\n    {\n        return (\n            false,\n            \"Code must contain at least one of: import, theorem, lemma, def, example\".to_string(),\n        );\n    }\n    (true, String::new())\n}"
+    },
+    {
+      "id": "check_syntax/a_word_that_merely_contains_a_keyword_is_accepted",
+      "function": "check_syntax",
+      "kind": "counterexample",
+      "formal": "accepted (check_syntax '-- important note') = true",
+      "description": "the pre-check tests for a substring and not a word, so a comment mentioning 'important' satisfies the requirement for 'import' — permissive is the safe direction for a pre-check, but check_syntax also gates can_cache",
+      "assumptions": [
+        "text modelled as List Char",
+        "Rust's substring contains modelled as an infix search over the suffixes",
+        "stated on a witness, as the other word-boundary properties are"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Fast pre-check before invoking the full Lean verifier.\n#[must_use]\npub fn check_syntax(lean_code: &str) -> (bool, String) {\n    if lean_code.trim().is_empty() {\n        return (false, \"Empty Lean code\".to_string());\n    }\n    if !REQUIRED_KEYWORDS\n        .iter()\n        .any(|keyword| lean_code.contains(keyword))\n    {\n        return (\n            false,\n            \"Code must contain at least one of: import, theorem, lemma, def, example\".to_string(),\n        );\n    }\n    (true, String::new())\n}"
+    },
+    {
+      "id": "replace_proof/the_statement_is_never_rewritten",
+      "function": "replace_proof",
+      "kind": "invariant",
+      "formal": "forall marker tactic head, head is a prefix of (rewrite marker tactic head)",
+      "description": "everything before the proof survives the rewrite verbatim, so swapping in a tactic can never end up proving a different statement",
+      "assumptions": [
+        "text modelled as List Char",
+        "the successful rewrite modelled on the split the Rust performs at ':= by'"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Swap a caller-written proof for `tactic`, or nothing if that would mean guessing.\n///\n/// Only a single proof is rewritten, and only when nothing follows it — anything\n/// else would require knowing where one declaration ends and the next begins.\n#[must_use]\npub fn replace_proof(lean_code: &str, tactic: &str) -> Option<String> {\n    if lean_code.matches(\":= by\").count() != 1 {\n        return None;\n    }\n    let (head, tail) = lean_code.split_once(\":= by\")?;\n    if declaration_pattern().is_match(tail) {\n        return None;\n    }\n    Some(format!(\"{head}:= by {tactic}\\n\"))\n}"
+    },
+    {
+      "id": "replace_proof/nothing_of_the_old_proof_survives",
+      "function": "replace_proof",
+      "kind": "invariant",
+      "formal": "forall marker tactic head, (' ' :: tactic ++ ['\\n']) is a suffix of (rewrite marker tactic head)",
+      "description": "the discarded proof is gone rather than appended to: the result ends with the tactic that was written in",
+      "assumptions": [
+        "text modelled as List Char",
+        "the successful rewrite modelled on the split the Rust performs at ':= by'"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Swap a caller-written proof for `tactic`, or nothing if that would mean guessing.\n///\n/// Only a single proof is rewritten, and only when nothing follows it — anything\n/// else would require knowing where one declaration ends and the next begins.\n#[must_use]\npub fn replace_proof(lean_code: &str, tactic: &str) -> Option<String> {\n    if lean_code.matches(\":= by\").count() != 1 {\n        return None;\n    }\n    let (head, tail) = lean_code.split_once(\":= by\")?;\n    if declaration_pattern().is_match(tail) {\n        return None;\n    }\n    Some(format!(\"{head}:= by {tactic}\\n\"))\n}"
+    },
+    {
+      "id": "with_auto_tactics/text_without_a_placeholder_is_untouched",
+      "function": "with_auto_tactics",
+      "kind": "identity",
+      "formal": "forall needle repl s, not (contains needle s) -> replace_all needle repl s = s",
+      "description": "a proof with no placeholder in it comes back exactly as it went in — the tactic chain is only ever swapped for a sorry, never inserted anywhere else",
+      "assumptions": [
+        "text modelled as List Char",
+        "replacement carries fuel rather than a termination proof; the Rust's str::replace walks the string once"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Replace `sorry` placeholders with the tactic chain for a quick attempt.\n#[must_use]\npub fn with_auto_tactics(lean_code: &str) -> String {\n    lean_code\n        .replace(\":= by sorry\", &format!(\":= by {}\", auto_tactics()))\n        .replace(\"by\\n  sorry\", &format!(\"by {}\", auto_tactics()))\n}"
+    },
+    {
+      "id": "suggested_tactic/only_the_first_line_of_a_suggestion_is_taken",
+      "function": "suggested_tactic",
+      "kind": "identity",
+      "formal": "suggested 'exact Nat.le_refl n\\nexact foo' = 'exact Nat.le_refl n'",
+      "description": "a multi-line suggestion yields only its first line, so a tactic is never spliced together from two of Lean's",
+      "assumptions": [
+        "text modelled as List Char",
+        "splitlines modelled as splitting on '\\n' and trim over spaces, which is what the witness holds"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Pull the tactic out of Lean's `Try this:` suggestion.\n#[must_use]\npub fn suggested_tactic(output: &str) -> Option<String> {\n    for line in pystr::splitlines(output) {\n        let data = serde_json::from_str::<serde_json::Value>(line)\n            .ok()\n            .and_then(|parsed| {\n                parsed\n                    .get(\"data\")\n                    .and_then(|d| d.as_str())\n                    .map(ToString::to_string)\n            })\n            .unwrap_or_else(|| line.to_string());\n        let Some(found) = suggestion_pattern().captures(&data) else {\n            continue;\n        };\n        // `trim_matches` takes a set of characters, not a suffix — trimming \"\\n\"\n        // that way would eat a trailing n from `exact Nat.le_refl n`.\n        let tactic = pystr::splitlines(&found[1])\n            .first()\n            .map(|first| first.trim().trim_matches('\"').trim().to_string())\n            .unwrap_or_default();\n        if !tactic.is_empty() {\n            return Some(tactic);\n        }\n    }\n    None\n}"
+    },
+    {
+      "id": "suggested_tactic/trimming_quotes_does_not_eat_a_trailing_n",
+      "function": "suggested_tactic",
+      "kind": "identity",
+      "formal": "suggested '\"exact Nat.le_refl n\"' = 'exact Nat.le_refl n'",
+      "description": "trim_matches takes a set of characters rather than a suffix, so trimming '\\n' that way would strip the trailing n from this very tactic — trimming quotes must leave it whole",
+      "assumptions": [
+        "text modelled as List Char",
+        "trim modelled as dropWhile on both ends, which is what trim_matches does",
+        "stated on the witness the comment in the Rust names"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Pull the tactic out of Lean's `Try this:` suggestion.\n#[must_use]\npub fn suggested_tactic(output: &str) -> Option<String> {\n    for line in pystr::splitlines(output) {\n        let data = serde_json::from_str::<serde_json::Value>(line)\n            .ok()\n            .and_then(|parsed| {\n                parsed\n                    .get(\"data\")\n                    .and_then(|d| d.as_str())\n                    .map(ToString::to_string)\n            })\n            .unwrap_or_else(|| line.to_string());\n        let Some(found) = suggestion_pattern().captures(&data) else {\n            continue;\n        };\n        // `trim_matches` takes a set of characters, not a suffix — trimming \"\\n\"\n        // that way would eat a trailing n from `exact Nat.le_refl n`.\n        let tactic = pystr::splitlines(&found[1])\n            .first()\n            .map(|first| first.trim().trim_matches('\"').trim().to_string())\n            .unwrap_or_default();\n        if !tactic.is_empty() {\n            return Some(tactic);\n        }\n    }\n    None\n}"
+    },
+    {
+      "id": "cache_key/a_kind_differing_only_in_case_or_space_is_the_same_key",
+      "function": "cache_key",
+      "kind": "identity",
+      "formal": "norm_kind '  Invariant ' = norm_kind 'invariant'",
+      "description": "the kind is stripped and lowercased before it is framed, so the same kind written differently is the same key rather than a second cached proof of the same thing",
+      "assumptions": [
+        "text modelled as List Char",
+        "strip modelled over spaces, which is what the witness holds",
+        "stated on the normalisation the key rests on; the digest itself is not modelled"
+      ],
+      "source_file": "rust/formal-core/src/proof_cache.rs",
+      "function_code": "/// Identify a property by what is being proved, not by how it was described.\n///\n/// The description, preconditions and assumptions that used to be mixed in here\n/// are English prose. A fixed prompt reproduces them verbatim, so the key worked\n/// while formal wrote them itself; an agent paraphrases, and every paraphrase\n/// was a fresh key and a re-proof. Across the 148 properties observed in a real\n/// run, the function, its kind and the normalised formal statement separated all\n/// of them — an observation about that corpus, not a theorem about the function.\n/// Distinctness of digests would rest on sha256, which nothing here establishes.\n///\n/// The prompt hash is gone with them. What is cached is a proof Lean accepted,\n/// and Lean's verdict does not depend on which prompt produced the theorem — and\n/// a prompt change that alters the formalisation changes `formal`, which changes\n/// the key anyway.\n#[must_use]\npub fn cache_key(function_code: &str, kind: &str, formal: &str) -> String {\n    let payload = framed(&[\n        &normalise_code(function_code),\n        &pystr::strip(kind).to_lowercase(),\n        &normalise_formal(formal),\n    ]);\n    format!(\"{:x}\", Sha256::digest(payload.as_bytes()))\n}"
+    },
+    {
+      "id": "validate/the_duplicate_check_is_exactly_nodup",
+      "function": "validate",
+      "kind": "identity",
+      "formal": "forall ids, duplicates ids = [] <-> nodup ids",
+      "description": "the count-based duplicate check is exactly distinctness — an id that slipped through would make two properties indistinguishable to every later lookup",
+      "assumptions": [
+        "ids modelled as the list validate collects, in order"
+      ],
+      "source_file": "rust/formal-core/src/specs.rs",
+      "function_code": "/// The entries as objects, which is also what says they are usable.\nfn validate<'a>(entries: &'a [Value], path: &Path) -> Result<Vec<&'a Object>, SpecError> {\n    let mut objects = Vec::with_capacity(entries.len());\n    for (index, entry) in entries.iter().enumerate() {\n        let Some(entry) = entry.as_object() else {\n            return Err(SpecError::NotAnObject {\n                path: path.to_path_buf(),\n                index,\n            });\n        };\n        let missing: Vec<String> = REQUIRED\n            .iter()\n            .filter(|name| field(entry, name).trim().is_empty())\n            .map(|name| (*name).to_string())\n            .collect();\n        if !missing.is_empty() {\n            return Err(SpecError::MissingFields {\n                path: path.to_path_buf(),\n                index,\n                missing,\n            });\n        }\n        objects.push(entry);\n    }\n\n    let ids: Vec<String> = objects.iter().map(|entry| field(entry, \"id\")).collect();\n    let mut duplicates: Vec<String> = ids\n        .iter()\n        .filter(|id| ids.iter().filter(|other| other == id).count() > 1)\n        .cloned()\n        .collect();\n    duplicates.sort();\n    duplicates.dedup();\n    if !duplicates.is_empty() {\n        return Err(SpecError::DuplicateIds {\n            path: path.to_path_buf(),\n            ids: duplicates,\n        });\n    }\n    Ok(objects)\n}"
+    },
+    {
+      "id": "validate/the_refusal_names_every_missing_field",
+      "function": "validate",
+      "kind": "identity",
+      "formal": "forall required present r, r in missing required present <-> (r in required and r not in present)",
+      "description": "an entry short a required field is refused rather than half-read, and the refusal names every field that was missing rather than the first",
+      "assumptions": [
+        "an entry modelled by the field names it carries"
+      ],
+      "source_file": "rust/formal-core/src/specs.rs",
+      "function_code": "/// The entries as objects, which is also what says they are usable.\nfn validate<'a>(entries: &'a [Value], path: &Path) -> Result<Vec<&'a Object>, SpecError> {\n    let mut objects = Vec::with_capacity(entries.len());\n    for (index, entry) in entries.iter().enumerate() {\n        let Some(entry) = entry.as_object() else {\n            return Err(SpecError::NotAnObject {\n                path: path.to_path_buf(),\n                index,\n            });\n        };\n        let missing: Vec<String> = REQUIRED\n            .iter()\n            .filter(|name| field(entry, name).trim().is_empty())\n            .map(|name| (*name).to_string())\n            .collect();\n        if !missing.is_empty() {\n            return Err(SpecError::MissingFields {\n                path: path.to_path_buf(),\n                index,\n                missing,\n            });\n        }\n        objects.push(entry);\n    }\n\n    let ids: Vec<String> = objects.iter().map(|entry| field(entry, \"id\")).collect();\n    let mut duplicates: Vec<String> = ids\n        .iter()\n        .filter(|id| ids.iter().filter(|other| other == id).count() > 1)\n        .cloned()\n        .collect();\n    duplicates.sort();\n    duplicates.dedup();\n    if !duplicates.is_empty() {\n        return Err(SpecError::DuplicateIds {\n            path: path.to_path_buf(),\n            ids: duplicates,\n        });\n    }\n    Ok(objects)\n}"
     }
   ]
 }
