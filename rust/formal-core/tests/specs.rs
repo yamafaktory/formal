@@ -225,8 +225,8 @@ mod staleness {
         let workspace = Workspace::new();
         let path = workspace.spec_file(&[stale_entry("mod.py")]);
         let source = fs::read_to_string(workspace.path("mod.py")).expect("the source is readable");
-        let deeper: String = source.lines().map(|line| format!("    {line}\n")).collect();
-        workspace.write("mod.py", &deeper);
+        let deeper: Vec<String> = source.lines().map(|line| format!("    {line}")).collect();
+        workspace.write("mod.py", &deeper.join("\n"));
         assert_eq!(
             load(&path).expect("the file loads").stale_ids(),
             ["fmt_elapsed/bound"]

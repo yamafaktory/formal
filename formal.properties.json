@@ -427,6 +427,34 @@
       ],
       "source_file": "rust/formal-core/src/specs.rs",
       "function_code": "/// Whether the source this property was written against still says the same thing.\n///\n/// Compared as normalised text rather than parsed, so it holds for every language\n/// formal accepts. A spec with no recorded source cannot go stale — there is\n/// nothing to compare it against.\nfn is_stale(entry: &Object, root: &Path) -> bool {\n    let source_file = field(entry, \"source_file\");\n    let function_code = field(entry, \"function_code\");\n    if source_file.is_empty() || function_code.is_empty() {\n        return false;\n    }\n    let Ok(current) = fs::read_to_string(root.join(source_file)) else {\n        return true;\n    };\n    !normalise_code(&current).contains(&normalise_code(&function_code))\n}"
+    },
+    {
+      "id": "build_batch/every_span_starts_after_where_it_was_laid_out",
+      "function": "build_batch",
+      "kind": "bound",
+      "formal": "forall ms k s, s in spans ms k -> k + 2 <= first s",
+      "description": "no entry claims a line before the place it was laid out at",
+      "assumptions": [
+        "an entry is modelled by its body length, the batch by the lengths in order",
+        "the next entry's offset is this one's plus its body plus three, which is the namespace, end and blank lines build_batch pushes",
+        "line numbers are 1-based, as Lean reports them"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Check several proofs in a single Lean invocation, paying one Mathlib import.\n///\n/// Returns per-key results, or nothing when the batch itself could not be run —\n/// the caller then falls back to verifying each proof on its own.\n///\n/// `run` is what actually invokes Lean, which is what lets this be tested without\n/// one; in the service it is the runner.\npub fn verify_batch<F>(entries: &mut [BatchEntry], run: F) -> Option<Vec<(String, LeanResult)>>\nwhere\n    F: FnOnce(&str) -> LeanResult,\n{\n    if entries.is_empty() {\n        return Some(Vec::new());\n    }\n\n    let result = run(&build_batch(entries));\n\n    // An error outside every namespace (a bad hoisted import, say) invalidates the\n    // whole batch rather than any one proof.\n    for error in &result.errors {\n        let line = error.position().0.unwrap_or(0);\n        if !entries.iter().any(|entry| entry.covers(line)) {\n            return None;\n        }\n    }\n    if !result.success && result.errors.is_empty() {\n        return None;\n    }\n\n    Some(\n        entries\n            .iter()\n            .map(|entry| {\n                let errors: Vec<LeanError> = result\n                    .errors\n                    .iter()\n                    .filter(|error| entry.covers(error.position().0.unwrap_or(0)))\n                    .map(|error| rebase(error, entry))\n                    .collect();\n                let result = LeanResult {\n                    success: errors.is_empty(),\n                    output: if errors.is_empty() {\n                        String::new()\n                    } else {\n                        result.output.clone()\n                    },\n                    errors,\n                };\n                (entry.key.clone(), result)\n            })\n            .collect(),\n    )\n}"
+    },
+    {
+      "id": "verify_batch/no_line_is_claimed_by_two_entries",
+      "function": "verify_batch",
+      "kind": "invariant",
+      "formal": "forall ms k m line s, s in spans ms (k + m + 3) -> covers (this entry) line -> not (covers s line)",
+      "description": "no batch line falls inside two entries, so an error is never reported against a proof that did not produce it — verify_batch hands each error to whichever entry covers it",
+      "assumptions": [
+        "an entry is modelled by its body length, the batch by the lengths in order",
+        "the next entry's offset is this one's plus its body plus three, which is the namespace, end and blank lines build_batch pushes",
+        "line numbers are 1-based, as Lean reports them"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Check several proofs in a single Lean invocation, paying one Mathlib import.\n///\n/// Returns per-key results, or nothing when the batch itself could not be run —\n/// the caller then falls back to verifying each proof on its own.\n///\n/// `run` is what actually invokes Lean, which is what lets this be tested without\n/// one; in the service it is the runner.\npub fn verify_batch<F>(entries: &mut [BatchEntry], run: F) -> Option<Vec<(String, LeanResult)>>\nwhere\n    F: FnOnce(&str) -> LeanResult,\n{\n    if entries.is_empty() {\n        return Some(Vec::new());\n    }\n\n    let result = run(&build_batch(entries));\n\n    // An error outside every namespace (a bad hoisted import, say) invalidates the\n    // whole batch rather than any one proof.\n    for error in &result.errors {\n        let line = error.position().0.unwrap_or(0);\n        if !entries.iter().any(|entry| entry.covers(line)) {\n            return None;\n        }\n    }\n    if !result.success && result.errors.is_empty() {\n        return None;\n    }\n\n    Some(\n        entries\n            .iter()\n            .map(|entry| {\n                let errors: Vec<LeanError> = result\n                    .errors\n                    .iter()\n                    .filter(|error| entry.covers(error.position().0.unwrap_or(0)))\n                    .map(|error| rebase(error, entry))\n                    .collect();\n                let result = LeanResult {\n                    success: errors.is_empty(),\n                    output: if errors.is_empty() {\n                        String::new()\n                    } else {\n                        result.output.clone()\n                    },\n                    errors,\n                };\n                (entry.key.clone(), result)\n            })\n            .collect(),\n    )\n}"
     }
   ]
 }
