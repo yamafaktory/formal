@@ -216,6 +216,217 @@
       ],
       "source_file": "rust/formal-core/src/pystr.rs",
       "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
+    },
+    {
+      "id": "split_imports/conservation",
+      "function": "split_imports",
+      "kind": "invariant",
+      "formal": "forall ls, length (imports ls) + length (body ls) = length ls",
+      "description": "every line is either hoisted as an import or kept in the body — none is dropped and none is duplicated",
+      "assumptions": [
+        "the import test is left abstract, so the claim holds whatever counts as an import"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Split off the imports, remembering where each surviving line started.\nfn split_imports(lean_code: &str) -> (Vec<&str>, Vec<&str>, Vec<u32>) {\n    let mut imports = Vec::new();\n    let mut body = Vec::new();\n    let mut source_lines = Vec::new();\n    for (number, line) in pystr::splitlines(lean_code).into_iter().enumerate() {\n        if line.trim_start().starts_with(\"import \") {\n            imports.push(line);\n        } else {\n            body.push(line);\n            source_lines.push(u32::try_from(number + 1).unwrap_or(u32::MAX));\n        }\n    }\n    (imports, body, source_lines)\n}"
+    },
+    {
+      "id": "split_imports/every_body_line_is_numbered",
+      "function": "split_imports",
+      "kind": "invariant",
+      "formal": "forall ls, length (body ls) = length (source_lines ls)",
+      "description": "every surviving line records where it came from — the two lists a batch entry is rebased through cannot drift apart",
+      "assumptions": [
+        "the import test is left abstract, so the claim holds whatever counts as an import"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Split off the imports, remembering where each surviving line started.\nfn split_imports(lean_code: &str) -> (Vec<&str>, Vec<&str>, Vec<u32>) {\n    let mut imports = Vec::new();\n    let mut body = Vec::new();\n    let mut source_lines = Vec::new();\n    for (number, line) in pystr::splitlines(lean_code).into_iter().enumerate() {\n        if line.trim_start().starts_with(\"import \") {\n            imports.push(line);\n        } else {\n            body.push(line);\n            source_lines.push(u32::try_from(number + 1).unwrap_or(u32::MAX));\n        }\n    }\n    (imports, body, source_lines)\n}"
+    },
+    {
+      "id": "split_imports/a_recorded_number_is_in_range",
+      "function": "split_imports",
+      "kind": "bound",
+      "formal": "forall ls n num, num in source_lines ls n -> n <= num < n + length ls",
+      "description": "a recorded line number names a line that exists — it never points before the file or past its end",
+      "assumptions": [
+        "numbering starts at n, so the Rust's 1-based call is n = 1"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Split off the imports, remembering where each surviving line started.\nfn split_imports(lean_code: &str) -> (Vec<&str>, Vec<&str>, Vec<u32>) {\n    let mut imports = Vec::new();\n    let mut body = Vec::new();\n    let mut source_lines = Vec::new();\n    for (number, line) in pystr::splitlines(lean_code).into_iter().enumerate() {\n        if line.trim_start().starts_with(\"import \") {\n            imports.push(line);\n        } else {\n            body.push(line);\n            source_lines.push(u32::try_from(number + 1).unwrap_or(u32::MAX));\n        }\n    }\n    (imports, body, source_lines)\n}"
+    },
+    {
+      "id": "split_imports/a_recorded_number_names_its_own_line",
+      "function": "split_imports",
+      "kind": "identity",
+      "formal": "forall ls n num line, (num, line) in zip (source_lines ls n) (body ls n) -> ls[num - n] = line",
+      "description": "the number recorded beside a body line is the line that produced it — the whole basis for attributing a batch error to the right proof",
+      "assumptions": [
+        "numbering starts at n, so the Rust's 1-based call is n = 1",
+        "the import test is left abstract, so the claim holds whatever counts as an import"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Split off the imports, remembering where each surviving line started.\nfn split_imports(lean_code: &str) -> (Vec<&str>, Vec<&str>, Vec<u32>) {\n    let mut imports = Vec::new();\n    let mut body = Vec::new();\n    let mut source_lines = Vec::new();\n    for (number, line) in pystr::splitlines(lean_code).into_iter().enumerate() {\n        if line.trim_start().starts_with(\"import \") {\n            imports.push(line);\n        } else {\n            body.push(line);\n            source_lines.push(u32::try_from(number + 1).unwrap_or(u32::MAX));\n        }\n    }\n    (imports, body, source_lines)\n}"
+    },
+    {
+      "id": "build_batch/an_entry_spans_exactly_its_body",
+      "function": "build_batch",
+      "kind": "identity",
+      "formal": "forall before body, 0 < body -> last_line - first_line + 1 = body",
+      "description": "the lines an entry claims in the batch are exactly the lines of its body, so no error inside the span belongs to a neighbour",
+      "assumptions": [
+        "line numbers are 1-based, as Lean reports them",
+        "one entry's emission modelled as before ++ namespace :: body ++ [end], which is what build_batch pushes"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Assemble one Lean file from several independent proofs.\n///\n/// Imports are hoisted because Lean only accepts them at the top of a file, and\n/// each proof is namespaced so identically named definitions cannot collide. Each\n/// entry is told where its body landed.\npub fn build_batch(entries: &mut [BatchEntry]) -> String {\n    let mut seen_imports: Vec<String> = Vec::new();\n    let mut bodies: Vec<Vec<String>> = Vec::new();\n    for entry in &mut *entries {\n        let (imports, body, source_lines) = split_imports(&entry.lean_code);\n        entry.source_lines = source_lines;\n        for line in imports {\n            let line = line.trim().to_string();\n            if !seen_imports.contains(&line) {\n                seen_imports.push(line);\n            }\n        }\n        bodies.push(body.into_iter().map(ToString::to_string).collect());\n    }\n\n    let mut lines = seen_imports;\n    if lines.is_empty() {\n        lines.push(\"import Mathlib\".to_string());\n    }\n    lines.push(String::new());\n\n    for (index, entry) in entries.iter_mut().enumerate() {\n        lines.push(format!(\"namespace Batch{index}\"));\n        entry.first_line = u32::try_from(lines.len() + 1).unwrap_or(u32::MAX);\n        lines.extend(bodies[index].iter().cloned());\n        entry.last_line = u32::try_from(lines.len()).unwrap_or(u32::MAX);\n        lines.push(format!(\"end Batch{index}\"));\n        lines.push(String::new());\n    }\n    lines.join(\"\\n\")\n}"
+    },
+    {
+      "id": "build_batch/an_empty_body_spans_nothing",
+      "function": "build_batch",
+      "kind": "invariant",
+      "formal": "forall before line, not (covers first_line (last_line before 0) line)",
+      "description": "an entry whose body is empty claims no line at all — last_line sits below first_line rather than swallowing the namespace line",
+      "assumptions": [
+        "line numbers are 1-based, as Lean reports them"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Assemble one Lean file from several independent proofs.\n///\n/// Imports are hoisted because Lean only accepts them at the top of a file, and\n/// each proof is namespaced so identically named definitions cannot collide. Each\n/// entry is told where its body landed.\npub fn build_batch(entries: &mut [BatchEntry]) -> String {\n    let mut seen_imports: Vec<String> = Vec::new();\n    let mut bodies: Vec<Vec<String>> = Vec::new();\n    for entry in &mut *entries {\n        let (imports, body, source_lines) = split_imports(&entry.lean_code);\n        entry.source_lines = source_lines;\n        for line in imports {\n            let line = line.trim().to_string();\n            if !seen_imports.contains(&line) {\n                seen_imports.push(line);\n            }\n        }\n        bodies.push(body.into_iter().map(ToString::to_string).collect());\n    }\n\n    let mut lines = seen_imports;\n    if lines.is_empty() {\n        lines.push(\"import Mathlib\".to_string());\n    }\n    lines.push(String::new());\n\n    for (index, entry) in entries.iter_mut().enumerate() {\n        lines.push(format!(\"namespace Batch{index}\"));\n        entry.first_line = u32::try_from(lines.len() + 1).unwrap_or(u32::MAX);\n        lines.extend(bodies[index].iter().cloned());\n        entry.last_line = u32::try_from(lines.len()).unwrap_or(u32::MAX);\n        lines.push(format!(\"end Batch{index}\"));\n        lines.push(String::new());\n    }\n    lines.join(\"\\n\")\n}"
+    },
+    {
+      "id": "build_batch/the_span_holds_the_body",
+      "function": "build_batch",
+      "kind": "identity",
+      "formal": "forall before ns body end j, j < length body -> batch[first_line + j - 1] = body[j]",
+      "description": "the batch line an entry's span points at holds that entry's own body line — the other half of attributing an error correctly",
+      "assumptions": [
+        "one entry's emission modelled as before ++ namespace :: body ++ [end], which is what build_batch pushes"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "/// Assemble one Lean file from several independent proofs.\n///\n/// Imports are hoisted because Lean only accepts them at the top of a file, and\n/// each proof is namespaced so identically named definitions cannot collide. Each\n/// entry is told where its body landed.\npub fn build_batch(entries: &mut [BatchEntry]) -> String {\n    let mut seen_imports: Vec<String> = Vec::new();\n    let mut bodies: Vec<Vec<String>> = Vec::new();\n    for entry in &mut *entries {\n        let (imports, body, source_lines) = split_imports(&entry.lean_code);\n        entry.source_lines = source_lines;\n        for line in imports {\n            let line = line.trim().to_string();\n            if !seen_imports.contains(&line) {\n                seen_imports.push(line);\n            }\n        }\n        bodies.push(body.into_iter().map(ToString::to_string).collect());\n    }\n\n    let mut lines = seen_imports;\n    if lines.is_empty() {\n        lines.push(\"import Mathlib\".to_string());\n    }\n    lines.push(String::new());\n\n    for (index, entry) in entries.iter_mut().enumerate() {\n        lines.push(format!(\"namespace Batch{index}\"));\n        entry.first_line = u32::try_from(lines.len() + 1).unwrap_or(u32::MAX);\n        lines.extend(bodies[index].iter().cloned());\n        entry.last_line = u32::try_from(lines.len()).unwrap_or(u32::MAX);\n        lines.push(format!(\"end Batch{index}\"));\n        lines.push(String::new());\n    }\n    lines.join(\"\\n\")\n}"
+    },
+    {
+      "id": "rebase/an_error_inside_an_entry_always_rebases",
+      "function": "rebase",
+      "kind": "invariant",
+      "formal": "forall before body line, covers first_line last_line line -> line - first_line < body",
+      "description": "an error the batch attributes to an entry always indexes a recorded line — rebase never falls through to reporting the batch position as if it were the caller's",
+      "assumptions": [
+        "line numbers are 1-based, as Lean reports them",
+        "body is the length of the entry's source_lines, which split_imports keeps equal to its body"
+      ],
+      "source_file": "rust/formal-lean/src/verifier.rs",
+      "function_code": "    fn rebased_to(&self, line: u32) -> Self {\n        Self {\n            pos: Some(Pos {\n                line: Some(line),\n                column: self.pos.as_ref().and_then(|pos| pos.column).or(self.col),\n            }),\n            line: None,\n            ..self.clone()\n        }\n    }"
+    },
+    {
+      "id": "parse_output/a_sorry_warning_is_never_a_success",
+      "function": "parse_output",
+      "kind": "invariant",
+      "formal": "forall ms code, (exists m in ms, severity m = warning and has_sorry (data m)) -> success code (collect ms) = false",
+      "description": "a proof with a hole in it never passes — the sorry Lean reports as a warning is promoted into the errors, and a non-empty error list is not a success",
+      "assumptions": [
+        "the two substring tests are left abstract, so the claim holds whatever they are spelled with"
+      ],
+      "source_file": "rust/formal-lean/src/run.rs",
+      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines = pystr::splitlines(&captured.stdout);\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
+    },
+    {
+      "id": "parse_output/every_promoted_sorry_is_reported_as_an_error",
+      "function": "parse_output",
+      "kind": "invariant",
+      "formal": "forall m in promoted ms, severity m = error",
+      "description": "a sorry that Lean called a warning is reported as an error, not passed through with its original severity",
+      "assumptions": [
+        "the substring test for sorry is left abstract"
+      ],
+      "source_file": "rust/formal-lean/src/run.rs",
+      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines = pystr::splitlines(&captured.stdout);\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
+    },
+    {
+      "id": "parse_output/the_first_error_lean_reported_stays_first",
+      "function": "parse_output",
+      "kind": "identity",
+      "formal": "forall ms, real_errors ms <> [] -> head (collect ms) = head (real_errors ms)",
+      "description": "promoted sorries are appended after the real errors, so the first thing Lean said stays the first thing reported",
+      "assumptions": [
+        "the two substring tests are left abstract"
+      ],
+      "source_file": "rust/formal-lean/src/run.rs",
+      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines = pystr::splitlines(&captured.stdout);\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
+    },
+    {
+      "id": "parse_output/a_nonzero_exit_is_never_a_success",
+      "function": "parse_output",
+      "kind": "invariant",
+      "formal": "forall code errors, code <> some 0 -> success code errors = false",
+      "description": "an exit code other than zero is never a pass, however empty the diagnostics are",
+      "assumptions": [
+        "the exit code modelled as Option Nat, absent when the process was killed"
+      ],
+      "source_file": "rust/formal-lean/src/run.rs",
+      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines = pystr::splitlines(&captured.stdout);\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
+    },
+    {
+      "id": "hints/a_table_nothing_claims_gives_the_fallback",
+      "function": "lookup",
+      "kind": "identity",
+      "formal": "forall rules, (forall r in rules, not (claims r)) -> lookup rules = fallback",
+      "description": "a diagnostic no rule claims gets the fallback advice rather than nothing",
+      "assumptions": [
+        "whether a rule claims a diagnostic and whether it answers are left abstract"
+      ],
+      "source_file": "rust/formal-core/src/hints.rs",
+      "function_code": "    fn lookup(&self, data: &str, fired: &mut BTreeSet<String>) -> String {\n        for rule in &self.rules {\n            if rule.matches(data) {\n                fired.insert(rule.id.clone());\n                if let Some(hint) = self.answer(rule, data, fired) {\n                    return hint;\n                }\n            }\n        }\n        self.fallback.clone()\n    }"
+    },
+    {
+      "id": "hints/the_first_rule_that_answers_wins",
+      "function": "lookup",
+      "kind": "identity",
+      "formal": "forall r rest hint, claims r and answer r = some hint -> lookup (r :: rest) = hint",
+      "description": "order is the semantics: the earliest rule that both claims the diagnostic and produces advice is the one that answers",
+      "assumptions": [
+        "whether a rule claims a diagnostic and whether it answers are left abstract"
+      ],
+      "source_file": "rust/formal-core/src/hints.rs",
+      "function_code": "    fn lookup(&self, data: &str, fired: &mut BTreeSet<String>) -> String {\n        for rule in &self.rules {\n            if rule.matches(data) {\n                fired.insert(rule.id.clone());\n                if let Some(hint) = self.answer(rule, data, fired) {\n                    return hint;\n                }\n            }\n        }\n        self.fallback.clone()\n    }"
+    },
+    {
+      "id": "hints/a_rule_that_claims_without_answering_does_not_shadow",
+      "function": "lookup",
+      "kind": "identity",
+      "formal": "forall r rest, claims r and answer r = none -> lookup (r :: rest) = lookup rest",
+      "description": "a rule that claims a diagnostic but produces nothing does not swallow it — the walk continues to the rules below rather than falling to the fallback",
+      "assumptions": [
+        "whether a rule claims a diagnostic and whether it answers are left abstract"
+      ],
+      "source_file": "rust/formal-core/src/hints.rs",
+      "function_code": "    fn lookup(&self, data: &str, fired: &mut BTreeSet<String>) -> String {\n        for rule in &self.rules {\n            if rule.matches(data) {\n                fired.insert(rule.id.clone());\n                if let Some(hint) = self.answer(rule, data, fired) {\n                    return hint;\n                }\n            }\n        }\n        self.fallback.clone()\n    }"
+    },
+    {
+      "id": "is_stale/trailing_space_does_not_break_the_match",
+      "function": "is_stale",
+      "kind": "invariant",
+      "formal": "describes (with_trailing_space) (recorded) = true",
+      "description": "trailing whitespace in the source does not make a property stale — normalise_code rstrips every line before the comparison",
+      "assumptions": [
+        "text modelled as List Char, one list per line where lines matter",
+        "splitlines modelled as splitting on '\\n', which is all the witness contains",
+        "stated on a witness rather than universally, as the collision properties are"
+      ],
+      "source_file": "rust/formal-core/src/specs.rs",
+      "function_code": "/// Whether the source this property was written against still says the same thing.\n///\n/// Compared as normalised text rather than parsed, so it holds for every language\n/// formal accepts. A spec with no recorded source cannot go stale — there is\n/// nothing to compare it against.\nfn is_stale(entry: &Object, root: &Path) -> bool {\n    let source_file = field(entry, \"source_file\");\n    let function_code = field(entry, \"function_code\");\n    if source_file.is_empty() || function_code.is_empty() {\n        return false;\n    }\n    let Ok(current) = fs::read_to_string(root.join(source_file)) else {\n        return true;\n    };\n    !normalise_code(&current).contains(&normalise_code(&function_code))\n}"
+    },
+    {
+      "id": "is_stale/reindenting_does_break_the_match",
+      "function": "is_stale",
+      "kind": "counterexample",
+      "formal": "describes (reindented) (recorded) = false",
+      "description": "reindenting a function DOES make its property stale — normalise_code preserves leading whitespace because indentation is meaning, so a function moved one level deeper no longer matches what was recorded",
+      "assumptions": [
+        "text modelled as List Char, one list per line where lines matter",
+        "splitlines modelled as splitting on '\\n', which is all the witness contains",
+        "stated on the witness that the README claimed would still match"
+      ],
+      "source_file": "rust/formal-core/src/specs.rs",
+      "function_code": "/// Whether the source this property was written against still says the same thing.\n///\n/// Compared as normalised text rather than parsed, so it holds for every language\n/// formal accepts. A spec with no recorded source cannot go stale — there is\n/// nothing to compare it against.\nfn is_stale(entry: &Object, root: &Path) -> bool {\n    let source_file = field(entry, \"source_file\");\n    let function_code = field(entry, \"function_code\");\n    if source_file.is_empty() || function_code.is_empty() {\n        return false;\n    }\n    let Ok(current) = fs::read_to_string(root.join(source_file)) else {\n        return true;\n    };\n    !normalise_code(&current).contains(&normalise_code(&function_code))\n}"
     }
   ]
 }

@@ -188,7 +188,10 @@ nothing, so formal declines to. Re-read the function, update the property and it
 stale.
 
 Comparison is normalised text rather than a parse, so it works for every language formal
-accepts, and reindentation is not a change. A property with no `source_file` cannot go
+accepts, and trailing whitespace is not a change. Reindenting the function is: normalising
+keeps leading whitespace, because indentation is meaning in the language the cache keys
+were recorded from, so a function that moves a level deeper is reported stale and its
+`function_code` has to be updated with it. A property with no `source_file` cannot go
 stale — there is nothing recorded to compare against.
 
 ### Add this to your agent's instructions

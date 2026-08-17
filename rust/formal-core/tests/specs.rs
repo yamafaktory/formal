@@ -209,12 +209,28 @@ mod staleness {
     }
 
     #[test]
-    fn reindenting_the_file_does_not_make_a_spec_stale() {
+    fn trailing_whitespace_does_not_make_a_spec_stale() {
         let workspace = Workspace::new();
         let path = workspace.spec_file(&[stale_entry("mod.py")]);
         let source = fs::read_to_string(workspace.path("mod.py")).expect("the source is readable");
         workspace.write("mod.py", &source.replace('\n', "   \n"));
         assert!(load(&path).expect("the file loads").stale_ids().is_empty());
+    }
+
+    /// Normalising rstrips each line but keeps the indentation in front of it, so a
+    /// function that moves a level deeper no longer matches what was recorded. The
+    /// test above is named for trailing space because that is all it changes.
+    #[test]
+    fn reindenting_the_file_does_make_a_spec_stale() {
+        let workspace = Workspace::new();
+        let path = workspace.spec_file(&[stale_entry("mod.py")]);
+        let source = fs::read_to_string(workspace.path("mod.py")).expect("the source is readable");
+        let deeper: String = source.lines().map(|line| format!("    {line}\n")).collect();
+        workspace.write("mod.py", &deeper);
+        assert_eq!(
+            load(&path).expect("the file loads").stale_ids(),
+            ["fmt_elapsed/bound"]
+        );
     }
 
     #[test]
