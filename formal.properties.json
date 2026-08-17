@@ -39,6 +39,183 @@
       ],
       "source_file": "rust/formal-core/src/proof_cache.rs",
       "function_code": "/// Spelled as words, so they only count on a word boundary: `in` inside `ainb`\n/// is not the membership operator, and treating it as one merged unrelated\n/// statements.\nconst WORD_OPERATORS: &[(&str, &str)] =\n    &[(\"forall\", \"∀\"), (\"exists\", \"∃\"), (\"not\", \"¬\"), (\"in\", \"∈\")];\n\nfn word_pattern() -> &'static Regex {\n    static PATTERN: OnceLock<Regex> = OnceLock::new();\n    PATTERN.get_or_init(|| {\n        let alternation = WORD_OPERATORS\n            .iter()\n            .map(|&(word, _)| word)\n            .collect::<Vec<_>>()\n            .join(\"|\");\n        Regex::new(&format!(r\"\\b({alternation})\\b\")).expect(\"the operator words are literals\")\n    })\n}"
+    },
+    {
+      "id": "is_space/the_separator_control_range_is_closed_at_both_ends",
+      "function": "is_space",
+      "kind": "bound",
+      "formal": "forall ws, is_space ws '\\u001c' /\\ is_space ws '\\u001f' /\\ is_space ws '\\u001b' = ws '\\u001b' /\\ is_space ws '\\u0020' = ws '\\u0020'",
+      "description": "the extension covers U+001C and U+001F and stops there — U+001B and U+0020 are left to Unicode",
+      "assumptions": [
+        "char::is_whitespace left abstract as ws, so the claim holds whatever Unicode says",
+        "the inclusive range '\\u{1c}'..='\\u{1f}' modelled as a comparison on code points"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.isspace()`, which is wider than Rust's `char::is_whitespace`.\n///\n/// The four separator controls U+001C..U+001F are whitespace to Python and not\n/// to the Unicode `White_Space` property Rust follows.\n#[must_use]\npub fn is_space(c: char) -> bool {\n    c.is_whitespace() || ('\\u{1c}'..='\\u{1f}').contains(&c)\n}"
+    },
+    {
+      "id": "is_space/differs_from_unicode_whitespace",
+      "function": "is_space",
+      "kind": "counterexample",
+      "formal": "forall ws, ws '\\u001c' = false -> is_space ws '\\u001c' <> ws '\\u001c'",
+      "description": "is_space is not char::is_whitespace — on U+001C the two disagree, which is why swapping one for the other moves every cache key",
+      "assumptions": [
+        "char::is_whitespace left abstract as ws",
+        "that U+001C is not Unicode White_Space enters as a hypothesis, not as a fact of the model"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.isspace()`, which is wider than Rust's `char::is_whitespace`.\n///\n/// The four separator controls U+001C..U+001F are whitespace to Python and not\n/// to the Unicode `White_Space` property Rust follows.\n#[must_use]\npub fn is_space(c: char) -> bool {\n    c.is_whitespace() || ('\\u{1c}'..='\\u{1f}').contains(&c)\n}"
+    },
+    {
+      "id": "rstrip/removes_only_a_suffix_of_space",
+      "function": "rstrip",
+      "kind": "invariant",
+      "formal": "forall p s, exists z, s = rstrip p s ++ z /\\ (forall c in z, p c)",
+      "description": "rstrip cuts a suffix and nothing else, and every character it cuts is space",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.rstrip()`.\n#[must_use]\npub fn rstrip(s: &str) -> &str {\n    s.trim_end_matches(is_space)\n}"
+    },
+    {
+      "id": "rstrip/never_ends_in_space",
+      "function": "rstrip",
+      "kind": "invariant",
+      "formal": "forall p s t c, rstrip p s = t ++ [c] -> not (p c)",
+      "description": "whatever rstrip returns, its last character is not space — the run it removes is maximal",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.rstrip()`.\n#[must_use]\npub fn rstrip(s: &str) -> &str {\n    s.trim_end_matches(is_space)\n}"
+    },
+    {
+      "id": "rstrip/idempotent",
+      "function": "rstrip",
+      "kind": "idempotency",
+      "formal": "forall p s, rstrip p (rstrip p s) = rstrip p s",
+      "description": "rstripping a line twice is rstripping it once, so normalisation is a fixed point",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.rstrip()`.\n#[must_use]\npub fn rstrip(s: &str) -> &str {\n    s.trim_end_matches(is_space)\n}"
+    },
+    {
+      "id": "strip/removes_a_prefix_and_a_suffix_of_space",
+      "function": "strip",
+      "kind": "invariant",
+      "formal": "forall p s, exists pre suf, s = pre ++ strip p s ++ suf /\\ (forall c in pre, p c) /\\ (forall c in suf, p c)",
+      "description": "strip cuts one run from each end and nothing from the middle, and every character it cuts is space",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.strip()`.\n#[must_use]\npub fn strip(s: &str) -> &str {\n    s.trim_matches(is_space)\n}"
+    },
+    {
+      "id": "strip/ends_are_not_space",
+      "function": "strip",
+      "kind": "invariant",
+      "formal": "forall p s, (forall c t, strip p s = c :: t -> not (p c)) /\\ (forall t c, strip p s = t ++ [c] -> not (p c))",
+      "description": "neither end of a stripped string is space — both runs removed are maximal",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end",
+        "an empty result satisfies both halves vacuously"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.strip()`.\n#[must_use]\npub fn strip(s: &str) -> &str {\n    s.trim_matches(is_space)\n}"
+    },
+    {
+      "id": "strip/idempotent",
+      "function": "strip",
+      "kind": "idempotency",
+      "formal": "forall p s, strip p (strip p s) = strip p s",
+      "description": "stripping twice is stripping once, which is what makes the cache key stable under re-normalisation",
+      "assumptions": [
+        "text modelled as List Char",
+        "quantified over the trimming predicate, so it covers pystr::is_space in particular",
+        "trim_matches modelled as dropping a maximal run of matching characters from an end"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.strip()`.\n#[must_use]\npub fn strip(s: &str) -> &str {\n    s.trim_matches(is_space)\n}"
+    },
+    {
+      "id": "splitlines/a_break_ends_the_line_before_it",
+      "function": "splitlines",
+      "kind": "identity",
+      "formal": "forall a br b, (forall c in a, not (is_break c)) -> is_break br -> br <> '\\r' -> splitlines (a ++ br :: b) = a :: splitlines b",
+      "description": "a boundary closes the text before it as one whole line and is itself dropped; with b empty this is why a trailing newline makes no empty last line",
+      "assumptions": [
+        "text modelled as List Char, a line as the characters between two boundaries",
+        "the boundary set is the ten characters the Rust match names",
+        "carriage return excluded here and covered by the bare-CR property"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
+    },
+    {
+      "id": "splitlines/crlf_is_one_boundary",
+      "function": "splitlines",
+      "kind": "identity",
+      "formal": "forall a b, (forall c in a, not (is_break c)) -> splitlines (a ++ '\\r' :: '\\n' :: b) = a :: splitlines b",
+      "description": "CR LF is a single boundary — the line feed is consumed with the carriage return and starts no empty line",
+      "assumptions": [
+        "text modelled as List Char, a line as the characters between two boundaries",
+        "the boundary set is the ten characters the Rust match names"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
+    },
+    {
+      "id": "splitlines/a_bare_cr_is_a_boundary",
+      "function": "splitlines",
+      "kind": "identity",
+      "formal": "forall a b, (forall c in a, not (is_break c)) -> (forall t, b <> '\\n' :: t) -> splitlines (a ++ '\\r' :: b) = a :: splitlines b",
+      "description": "a carriage return not followed by a line feed is a boundary on its own, including at the end of the text",
+      "assumptions": [
+        "text modelled as List Char, a line as the characters between two boundaries",
+        "the boundary set is the ten characters the Rust match names"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
+    },
+    {
+      "id": "splitlines/no_line_contains_a_break",
+      "function": "splitlines",
+      "kind": "invariant",
+      "formal": "forall s l c, l in splitlines s -> c in l -> not (is_break c)",
+      "description": "no line handed back still contains a boundary — the split is complete, so a vertical tab cannot hide inside a line",
+      "assumptions": [
+        "text modelled as List Char, a line as the characters between two boundaries",
+        "the boundary set is the ten characters the Rust match names"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
+    },
+    {
+      "id": "splitlines/text_without_a_break_is_one_line",
+      "function": "splitlines",
+      "kind": "identity",
+      "formal": "forall s, (forall c in s, not (is_break c)) -> splitlines s = (if s = [] then [] else [s])",
+      "description": "text with no boundary is one line, and empty text is no lines at all — Python's '' splits to nothing, not to one empty line",
+      "assumptions": [
+        "text modelled as List Char, a line as the characters between two boundaries",
+        "the boundary set is the ten characters the Rust match names"
+      ],
+      "source_file": "rust/formal-core/src/pystr.rs",
+      "function_code": "/// `str.splitlines()`, which breaks on more than `\\n` and `\\r\\n`.\n///\n/// Rust's `str::lines` knows two line boundaries; Python knows eleven, and a\n/// vertical tab or a U+2028 inside a pasted function is enough for the two to\n/// disagree about how many lines it has.\n#[must_use]\npub fn splitlines(s: &str) -> Vec<&str> {\n    let mut lines = Vec::new();\n    let mut start = 0;\n    let mut chars = s.char_indices().peekable();\n    while let Some((i, c)) = chars.next() {\n        let width = match c {\n            '\\n' | '\\u{b}' | '\\u{c}' | '\\u{1c}' | '\\u{1d}' | '\\u{1e}' | '\\u{85}' | '\\u{2028}'\n            | '\\u{2029}' => c.len_utf8(),\n            '\\r' => {\n                if chars.peek().map(|&(_, next)| next) == Some('\\n') {\n                    chars.next();\n                    1 + '\\n'.len_utf8()\n                } else {\n                    1\n                }\n            }\n            _ => continue,\n        };\n        lines.push(&s[start..i]);\n        start = i + width;\n    }\n    if start < s.len() {\n        lines.push(&s[start..]);\n    }\n    lines\n}"
     }
   ]
 }
