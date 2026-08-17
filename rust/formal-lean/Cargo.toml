@@ -10,6 +10,7 @@ version.workspace = true
 [dependencies]
 formal-core = { path = "../formal-core" }
 regex = { workspace = true }
+rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

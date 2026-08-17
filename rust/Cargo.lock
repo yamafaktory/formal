@@ -288,6 +288,7 @@ version = "1.0.0"
 dependencies = [
  "formal-core",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

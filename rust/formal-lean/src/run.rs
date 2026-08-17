@@ -22,13 +22,19 @@ use std::{
         Stdio,
     },
     sync::{
+        Arc,
+        Mutex,
         OnceLock,
+        PoisonError,
         atomic::{
             AtomicBool,
             Ordering,
         },
     },
-    thread,
+    thread::{
+        self,
+        JoinHandle,
+    },
     time::{
         Duration,
         Instant,
@@ -36,6 +42,11 @@ use std::{
 };
 
 use formal_core::pystr;
+use rustix::process::{
+    Pid,
+    Signal,
+    kill_process_group,
+};
 use tempfile::Builder;
 use thiserror::Error;
 
@@ -64,6 +75,11 @@ const LEAN_ENV_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often a running Lean is asked whether it has finished.
 const POLL: Duration = Duration::from_millis(20);
 
+/// How long the pipes get to close once the deadline has passed and the group has
+/// been killed. Enough for the last of what was written to arrive, not enough to
+/// matter to a caller that asked for a bound.
+const DRAIN_GRACE: Duration = Duration::from_millis(500);
+
 /// The pseudo-error that means the proof is incomplete rather than wrong.
 const SORRY_DECLARATION: &str = "declaration uses 'sorry'";
 
@@ -86,6 +102,12 @@ pub struct Captured {
 /// than a pipe buffer holds would otherwise block forever on a write while this
 /// side blocks forever on a wait, and the timeout would be the only thing that
 /// ever ended it.
+///
+/// The deadline bounds the call and not just the process. Waiting for the pipes
+/// to close would hand that bound back to whatever holds them: a grandchild the
+/// group kill did not reach, or one the process left behind before exiting
+/// cleanly. Once the deadline has passed the readers are left to finish on their
+/// own and what they collected so far is what comes back.
 ///
 /// # Errors
 ///
@@ -116,68 +138,106 @@ pub fn run_command(
         .spawn()?;
 
     let missing = || std::io::Error::other("a pipe the child was given did not exist");
-    let mut out_pipe = child.stdout.take().ok_or_else(missing)?;
-    let mut err_pipe = child.stderr.take().ok_or_else(missing)?;
-    let readers = thread::scope(|scope| {
-        let out = scope.spawn(move || {
-            let mut buffer = Vec::new();
-            let _ = out_pipe.read_to_end(&mut buffer);
-            buffer
-        });
-        let err = scope.spawn(move || {
-            let mut buffer = Vec::new();
-            let _ = err_pipe.read_to_end(&mut buffer);
-            buffer
-        });
+    let out_pipe = child.stdout.take().ok_or_else(missing)?;
+    let err_pipe = child.stderr.take().ok_or_else(missing)?;
+    let stdout = Arc::new(Mutex::new(Vec::new()));
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let out = drain(out_pipe, &stdout);
+    let err = drain(err_pipe, &stderr);
 
-        let started = Instant::now();
-        let mut timed_out = false;
-        let code = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status.code(),
-                Err(_) => break None,
-                Ok(None) => {}
-            }
-            if started.elapsed() >= timeout {
-                kill_group(child.id());
-                let _ = child.kill();
-                let _ = child.wait();
-                timed_out = true;
-                break None;
-            }
-            thread::sleep(POLL);
-        };
-        (
-            code,
-            timed_out,
-            out.join().unwrap_or_default(),
-            err.join().unwrap_or_default(),
-        )
-    });
+    let deadline = Instant::now() + timeout;
+    let mut timed_out = false;
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Err(_) => break None,
+            Ok(None) => {}
+        }
+        if Instant::now() >= deadline {
+            kill_group(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+            timed_out = true;
+            break None;
+        }
+        thread::sleep(POLL);
+    };
 
-    let (code, timed_out, stdout, stderr) = readers;
+    // The process is over, one way or the other. The pipes may not be, so the rest
+    // of the deadline is what the reading gets; then the group is killed for still
+    // holding them, and given a moment to let go.
+    if !drained(&out, &err, deadline) {
+        kill_group(child.id());
+        drained(&out, &err, Instant::now() + DRAIN_GRACE);
+    }
+
     Ok(Captured {
         code,
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        stdout: String::from_utf8_lossy(&collected(&stdout)).into_owned(),
+        stderr: String::from_utf8_lossy(&collected(&stderr)).into_owned(),
         timed_out,
     })
 }
 
+/// Read a pipe into `sink` until it closes.
+///
+/// In chunks rather than to the end, so that what a reader collected is readable
+/// by the deadline whether or not the reader ever finishes.
+fn drain(mut pipe: impl Read + Send + 'static, sink: &Arc<Mutex<Vec<u8>>>) -> JoinHandle<()> {
+    let sink = Arc::clone(sink);
+    thread::spawn(move || {
+        let mut buffer = [0u8; 8192];
+        loop {
+            match pipe.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => guard(&sink).extend_from_slice(&buffer[..read]),
+            }
+        }
+    })
+}
+
+/// Whether both readers reached the end of their pipe before `until`.
+fn drained(out: &JoinHandle<()>, err: &JoinHandle<()>, until: Instant) -> bool {
+    loop {
+        if out.is_finished() && err.is_finished() {
+            return true;
+        }
+        if Instant::now() >= until {
+            return false;
+        }
+        thread::sleep(POLL);
+    }
+}
+
+/// What a reader has collected so far.
+fn collected(sink: &Mutex<Vec<u8>>) -> Vec<u8> {
+    std::mem::take(&mut *guard(sink))
+}
+
+/// A lock on a buffer, poisoned or not: a reader that panicked mid-pipe has still
+/// read everything it wrote there.
+fn guard(sink: &Mutex<Vec<u8>>) -> std::sync::MutexGuard<'_, Vec<u8>> {
+    sink.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Kill a process and everything it started.
 ///
-/// The child leads its own process group, so signalling the negated pid reaches
-/// its descendants too. Killing only the child is not enough: a grandchild
-/// inherits the pipe this side is still reading, holds it open, and the deadline
-/// then bounds nothing at all — the call returns `timed_out` after waiting for the
-/// grandchild to finish on its own. `lake env lean` is exactly that shape.
+/// The child leads its own process group, so signalling the group reaches its
+/// descendants too. Killing only the child is not enough: a grandchild inherits
+/// the pipe this side is still reading and holds it open. `lake env lean` is
+/// exactly that shape, and so is any `sh -c` on a shell that does not exec what
+/// it was given.
+///
+/// Sent here rather than by running `kill`, which asks the host for a binary that
+/// need not be installed and, where it is, need not read `-1234` as a group.
 fn kill_group(pid: u32) {
-    let _ = Command::new("kill")
-        .arg("-KILL")
-        .arg(format!("-{pid}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let Ok(raw) = i32::try_from(pid) else {
+        return;
+    };
+    let Some(pid) = Pid::from_raw(raw) else {
+        return;
+    };
+    let _ = kill_process_group(pid, Signal::KILL);
 }
 
 /// Read what `lean --json` printed into a verdict.
@@ -524,6 +584,27 @@ mod tests {
             )
             .expect("the shell runs");
             assert!(captured.timed_out);
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "{:?}",
+                started.elapsed()
+            );
+        }
+
+        #[test]
+        fn a_process_that_leaves_a_child_holding_the_pipe_does_not_stall() {
+            // Nothing here overruns: the shell exits at once, and `sleep 30` keeps the
+            // pipe. Waiting for the reading to end rather than for the deadline is the
+            // same call taking thirty seconds for a process that took none.
+            let started = Instant::now();
+            let captured = run_command(
+                &sh("sleep 30 & exit 0"),
+                Path::new("/"),
+                &env(),
+                Duration::from_millis(200),
+            )
+            .expect("the shell runs");
+            assert_eq!(captured.code, Some(0));
             assert!(
                 started.elapsed() < Duration::from_secs(5),
                 "{:?}",
