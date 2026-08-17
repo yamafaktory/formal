@@ -2,7 +2,7 @@ import Mathlib
 
 -- Assumptions: text modelled as List Char. Only the membership operator is modelled,
 -- which is all these witnesses exercise; a word is replaced only when neither
--- neighbour is a word character, matching the \b...\b in the Python.
+-- neighbour is a word character, matching the \b...\b in the pattern.
 
 def isWordChar (c : Char) : Bool := c.isAlphanum || c == '_'
 

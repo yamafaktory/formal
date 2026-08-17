@@ -5,43 +5,51 @@ on:
   pull_request:
   workflow_call:
 
+defaults:
+  run:
+    working-directory: rust
+
 jobs:
-  ruff:
+  # rustfmt.toml uses group_imports, imports_granularity and imports_layout, which
+  # are nightly-only rustfmt options. Nothing else here needs nightly, so nothing
+  # else uses it: a new nightly lint should not be able to fail a build.
+  fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.0
+      - run: rustup toolchain install nightly --profile minimal --component rustfmt
+      - run: cargo +nightly fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - uses: Swatinem/rust-cache@v2
         with:
-          enable-cache: true
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-
-  shfmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Pinned, not "latest": resolving the tag needs an unauthenticated call to
-      # api.github.com, and when that is rate-limited the version comes back empty,
-      # the download 404s into the binary, and the job fails with nothing to do
-      # with the shell script.
-      - run: |
-          SHFMT_VERSION=v3.13.1
-          curl -fsSL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
-          chmod +x /usr/local/bin/shfmt
-          shfmt --version
-          shfmt -d formal
-
-  shellcheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ludeeus/action-shellcheck@2.0.0
+          workspaces: rust
+      - run: cargo +stable clippy --all-targets --locked
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.0
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
         with:
-          enable-cache: true
-      - run: uv run pytest --tb=short
+          workspaces: rust
+      # The tests that need Lean do nothing when there is none, so this is the rest:
+      # the frozen cache keys, the hint corpus, the guide digests, and the HTTP
+      # surface against tests/conformance/golden/responses.json. Installing Mathlib
+      # here would cost several GB and minutes per run for four tests.
+      - run: cargo +stable test --workspace --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.95 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo +1.95 check --workspace --all-targets --locked

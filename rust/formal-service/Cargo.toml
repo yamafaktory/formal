@@ -1,0 +1,22 @@
+[package]
+authors.workspace = true
+description = "What formal does with a proof: screen it, check it, and remember what Lean said."
+edition.workspace = true
+license.workspace = true
+name = "formal-service"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+formal-core = { path = "../formal-core" }
+formal-lean = { path = "../formal-lean" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

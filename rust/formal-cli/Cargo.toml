@@ -1,0 +1,24 @@
+[package]
+authors.workspace = true
+description = "Property checker for code, backed by Lean 4. Agents drive it over HTTP."
+edition.workspace = true
+license.workspace = true
+name = "formal-cli"
+repository.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "formal"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+formal-lean = { path = "../formal-lean" }
+formal-server = { path = "../formal-server" }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

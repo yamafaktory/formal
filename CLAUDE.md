@@ -1,67 +1,80 @@
 # formal
 
-## Python
+## Rust
 
-The package lives in `src/formal/`. After every Python file change, run:
+The workspace is `rust/`, in four crates:
 
-```sh
-uv run ruff check .
-uv run ruff format .
-```
+- `formal-core` — what can be held to a fixture: the cache key, the spec file,
+  the hint table, the guide. No files, no Lean, no requests.
+- `formal-lean` — where Lean is, how it is confined, and how it is run.
+- `formal-service` — what formal does with a proof: screen, check, remember.
+- `formal-server` / `formal-cli` — the HTTP surface, and the binary named `formal`.
 
-## Shell
-
-After every shell file change, run:
-
-```sh
-shfmt -w formal
-shellcheck formal
-```
-
-## Tests
-
-Tests live in `tests/`. Run them with:
+After every change, from `rust/`:
 
 ```sh
-uv run pytest --tb=short
+cargo fmt --all
+cargo clippy --all-targets
+cargo test
 ```
 
-When adding new code, add tests for anything that is pure or can be tested
-with a mocked LLM (`unittest.mock.patch`). Good candidates:
+Edition 2024, `clippy::pedantic` denied, lint table in the workspace manifest.
+`rustfmt.toml` uses nightly-only options, so formatting needs a nightly rustfmt.
 
-- Pure logic (string transformations, hash functions, data parsing)
-- Cache behaviour in `proof_cache.py` — key determinism, save/load, TTL
-- Spec loading and staleness in `specs.py`
+`formal-lean::env::Env` is where configuration comes from. Read it from there
+rather than calling `std::env::var`: setting a variable in a live process is
+unsafe in Rust 2024, and every constructor already takes a `resolve(&Env)`.
 
-Do not test Lean proof correctness — that requires the full runtime and is
-covered by integration use.
+`formal_core::pystr` exists because the frozen fixtures were recorded from
+Python. Its idea of whitespace and of a line boundary is the specification for
+anything the cache key touches — reaching for `str::lines` or
+`char::is_whitespace` instead is how the keys move.
 
-## Conformance
+## The files that judge changes
 
-`tests/conformance/` states the HTTP surface without reference to Python, and
-`tests/conformance/golden/responses.json` says what each request must answer.
-It runs as part of `pytest`, and against any server:
+Four things outside `rust/` decide whether a change is allowed to land. All are
+data, and none of them mention an implementation.
 
-```sh
-PROOF_CACHE_DIR=$(mktemp -d) uv run --group dev python -m uvicorn formal.api:app --port 8000
-uv run --group dev python -m tests.conformance.run --base-url http://127.0.0.1:8000
-```
+- `tests/conformance/golden/responses.json` — the HTTP surface. 27 steps, status
+  codes everywhere including the refusals, bodies where formal writes them.
+  Driven by `formal-server/tests/conformance.rs`, which can also judge an
+  already-running server:
 
-Add `--update` to re-record after a deliberate change, and read the diff — that
-file is the contract, so a line moving in it is a decision, not a detail. The
-server under test needs an empty `PROOF_CACHE_DIR`, or properties the suite
-expects to be unproved come back cached.
+  ```sh
+  FORMAL_CONFORMANCE_URL=http://127.0.0.1:1337 cargo test -p formal-server --test conformance
+  ```
 
-Two other golden files exist for the same reason: `tests/fixtures/cache_keys.json`
-(the exact digests — get these wrong and every cached proof is silently
-unreachable) and `tests/fixtures/hint_corpus.json`.
+  Re-record only deliberately, and read the diff — a line moving in that file is
+  a decision, not a detail.
+
+- `tests/fixtures/cache_keys.toml` — the exact digests. Get these wrong and every
+  cached proof is silently unreachable: the answers stay correct, they just cost
+  a Lean run each, forever.
+
+- `tests/fixtures/hint_corpus.toml` — every hint pinned to its text, and every
+  rule in the table reached by a sample.
+
+- `rust/formal-core/guidance/` — the text formal serves. Its three topic bodies
+  are pinned by digest inside `responses.json`, so an edit there moves a golden
+  entry and has to be re-recorded on purpose.
 
 ## Hints
 
-The advice returned for a failing proof lives in `src/formal/guidance/hints.toml`,
-not in Python. `hints.py` is only the matcher. When adding a rule:
+The advice for a failing proof lives in `rust/formal-core/guidance/hints.toml`,
+not in Rust. `hints.rs` is only the matcher. When adding a rule:
 
 - Order is the semantics — a general rule placed above a specific one swallows it.
-- Add a sample to `tests/fixtures/hint_corpus.json` that reaches it. A rule with
-  no sample fails `TestNoRuleIsUnreachable`, which is the only thing standing
-  between the table and a rule nobody can ever trigger.
+- Add a sample to `tests/fixtures/hint_corpus.toml` that reaches it. A rule with
+  no sample fails `every_rule_answers_at_least_one_sample`, which is the only
+  thing standing between the table and a rule nobody can ever trigger.
+
+## Lean
+
+The tests that need Lean do nothing when there is none, so `cargo test` is safe
+without it and much slower with it. They are the only thing that says formal
+still checks proofs:
+
+```sh
+cargo test -p formal-lean --test lean          # a true theorem, a false one, a hole, a batch
+cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
+```

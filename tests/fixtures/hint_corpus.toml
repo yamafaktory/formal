@@ -1,0 +1,355 @@
+# Every hint pinned to its text, and every rule in the table reached by a sample.
+#
+# The hints were a 434-line `if ... in data` chain. Unit tests covered the branches
+# someone thought to write one for; this covers all of them. A refactor that drops,
+# reorders or subtly rewords a rule fails here rather than in front of an agent
+# trying to fix a proof.
+#
+# Recorded as-is, not as assertions about what they ought to say. The question this
+# answers is only "does it still say the same thing".
+
+[empty]
+# Lean reported no error at all, so there is nothing to advise.
+hint = ''
+
+[string_literal_length_goal]
+error = '''
+unsolved goals
+⊢ 0 < "abc".length'''
+hint = 'Each case has a remaining goal of the form `0 < "literal".length` — these are closed concrete propositions (no free variables), so use `decide` or `norm_num` to close them. Add `· decide` (or `· norm_num`) after each case branch, or add `all_goals decide` at the end to close all such goals at once. Do NOT use `omega` — it cannot evaluate un-reduced string literal lengths.'
+
+[prefix_not_defeq]
+error = '''
+not definitionally equal
+  String.isPrefixOf a b'''
+hint = '''
+String-level prefix goals cannot be closed in this Lean version: `String.startsWith` is implemented through `String.Slice.Pattern.ForwardPattern`, and `String.isPrefixOf` does not reduce either — `simp`, `rfl`, `decide` and unfolding all fail on them.
+Convert to `List Char`, where the goal is trivial:
+  simp [String.toList_append, List.isPrefixOf]
+This closes goals of the form `a.toList.isPrefixOf (a ++ b).toList = true`.
+Better still, state the property over `List Char` in the first place — model the function as taking `List Char` rather than `String`, and `simp [List.isPrefixOf]`, `List.prefix_append` and `List.take_append` all apply directly.
+Use `.toList`, NOT `.data` — `.data` does not reduce. Do NOT use `String.isPrefixOf_iff`, `String.isPrefixOf_append_left` or `List.isPrefixOf_append_left`: they do not exist. `String.toList_append` takes no explicit arguments, so pass it to `simp`, never `exact`.'''
+
+[prefix_unsolved_append]
+error = '''
+unsolved goals
+  startsWith (a ++ b)'''
+hint = '''
+String-level prefix goals cannot be closed in this Lean version: `String.startsWith` is implemented through `String.Slice.Pattern.ForwardPattern`, and `String.isPrefixOf` does not reduce either — `simp`, `rfl`, `decide` and unfolding all fail on them.
+Convert to `List Char`, where the goal is trivial:
+  simp [String.toList_append, List.isPrefixOf]
+This closes goals of the form `a.toList.isPrefixOf (a ++ b).toList = true`.
+Better still, state the property over `List Char` in the first place — model the function as taking `List Char` rather than `String`, and `simp [List.isPrefixOf]`, `List.prefix_append` and `List.take_append` all apply directly.
+Use `.toList`, NOT `.data` — `.data` does not reduce. Do NOT use `String.isPrefixOf_iff`, `String.isPrefixOf_append_left` or `List.isPrefixOf_append_left`: they do not exist. `String.toList_append` takes no explicit arguments, so pass it to `simp`, never `exact`.'''
+
+[no_goals]
+error = 'No goals to be proved'
+hint = '''
+A tactic ran but there were no goals left — an earlier tactic already closed everything. Common causes:
+(1) A tactic like `simp at h`, `exact`, or `rw` closed the goal and you have extra tactics after it. Remove them.
+(2) In an `iff` proof with `constructor` + `split_ifs at h`, if `simp at h` in one branch fails to close by contradiction (e.g. `h : Except.ok X = Except.error ()`), that sub-goal leaks out and the backward-direction `·` bullet ends up on the wrong goal. Fix: replace bare `simp at h` with `exact absurd h (by simp)` or `simp [Except.ok.injEq] at h` to guarantee the contradiction closes the branch.
+(3) For the backward direction of `iff` with `if-then-else`: prefer
+    `simp only [functionName, if_pos h]`
+  over `unfold` + `rw [if_pos h]` — the `rw` closes the goal automatically via rfl, leaving nothing for subsequent tactics.'''
+
+[no_goals_in_cases]
+error = '''
+No goals
+cases branch already closed'''
+hint = 'One of the `cases` (or `match`) branches already closed its goal before all its tactics ran. Each branch must be proved independently — remove any tactics that appear after the goal is already closed in that branch.'
+
+[split_ifs_no_if]
+error = 'split_ifs requires an if-then-else but no if-then-else was found'
+hint = '`split_ifs` requires a visible `if`-`then`-`else` — there is none here. Do NOT call `split_ifs`. Instead: (1) use `obtain ⟨h1, h2⟩ := h` to split a conjunction hypothesis, (2) then case on the list to reduce it to a singleton (`cases l with | nil => simp at h1 | cons a t => cases t with | nil => ... | cons b t => omega`), (3) then `simp` to close the membership goal.'
+
+[constructor_generic]
+error = '''
+constructor
+no applicable constructor'''
+hint = 'The goal is not a conjunction/disjunction — `constructor` does not apply. Use `exact h`, `assumption`, `linarith`, `ring`, or `omega` to close it directly.'
+
+[constructor_arithmetic]
+error = '''
+constructor
+no applicable constructor
+zipWith'''
+hint = "The goal is an arithmetic equation — `constructor` does not apply here. In a list-induction cons case with a 'all elements satisfy P' hypothesis, the pattern is: (1) extract the head fact with `have hhead := hweights _ (by simp)` (or `List.mem_cons_self`), (2) build the tail hypothesis with `have htail : ∀ x ∈ tl, P x := fun x hx => hweights x (by simp [hx])`, (3) apply the IH to the tail, (4) close with `simp [hhead, mul_zero, ih]` or `linarith`/`ring`."
+
+[simp_no_progress]
+error = 'simp made no progress'
+hint = 'simp cannot simplify the target. Common causes and fixes: (1) Branch order after `split_ifs` depends on the guard shape: for `if !boolField then none else body`, the FIRST branch has `hGuard: !boolField = true` (meaning bool is FALSE, function returns none) — `simp at h` closes `h: none = some _` THERE, and the SECOND branch is the real-content branch. For a plain `if cond then body else none`, it is the opposite: first branch is real content. Check which branch you are in and move `simp at h` accordingly. (2) For list length contradictions: `simp [List.length_cons] at h` then `omega`. (3) `unfold f at h` or `delta f at h` to expand a definition simp cannot see through. (4) If `simp` makes no progress after `generalize`, the hypothesis still contains an unsimplified `if`-expression — use `split_ifs at h` BEFORE `generalize` to eliminate the guard first.'
+
+[binder_annotation]
+error = '''
+invalid binder annotation
+T is not a class instance'''
+hint = 'Square brackets `[h : T]` are reserved for typeclass arguments only — Lean rejected this because `T` is not a typeclass. Change every `[h : T]` in the theorem signature to `(h : T)` (round brackets). Example: `[h : op = PLUS]` → `(h : op = PLUS)`.'
+
+[hypothesis_missing]
+error = 'unknown identifier `h2`'
+hint = '`h2` is not in the local context — it was never introduced. Check the goal state for the names that actually exist there.'
+
+[hypothesis_missing_split_ifs]
+error = '''
+unknown identifier `h2`
+split_ifs with h1'''
+hint = '`h2` is not in the local context — it was never introduced. Check the goal state for the names that actually exist there. `split_ifs with h1 h2` names only as many hypotheses as there are if-conditions in that goal, and some branches have fewer.'
+
+[guessed_lemma]
+error = 'Unknown identifier `made_up_lemma`'
+hint = 'That identifier or constant does not exist in Mathlib. Do not guess lemma names. Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding the definition and casing on the structure.'
+
+[known_rename]
+error = 'Unknown constant `Nat.eq_comm`'
+hint = '`Nat.eq_comm` does not exist. Use `eq_comm` (works for any type, no `Nat.` prefix needed).'
+
+[app_mismatch_option]
+error = '''
+application type mismatch
+has type
+  Option String
+but is expected to have type
+  Option Nat'''
+hint = 'You have `Option String` but `Option Nat` is needed. Extract the field from inside the Option with `.map`: e.g. `list.head?.map (·.id)` instead of `list.head?`.'
+
+[app_mismatch_issome]
+error = '''
+application type mismatch
+isSome
+Option'''
+hint = '`Option.get` requires an explicit proof argument `h : o.isSome = true` — it is NOT the same as `Option.get!`. Use pattern matching instead: `rcases o with _ | v` or `match o with | some v => ... | none => ...`'
+
+[app_mismatch_sort]
+error = "application type mismatch\nsort 'Type\nsort 'Prop'"
+hint = 'You passed a value where a proof is expected. The lemma takes a *proof* (e.g. `h : l ≠ []`) not the value itself (e.g. `l`). Pass the proof term, or derive it with `by simp`, `by omega`, or from a hypothesis.'
+
+[app_mismatch_data]
+error = '''
+application type mismatch
+.data'''
+hint = "A list lemma was applied to a struct's `.data` field, but the lemma operates on `List` directly — the struct's `++` is not the same as `List.append`. Fix: (1) Add `have happ : (s ++ t).data = s.data ++ t.data := rfl` (or `by simp`) and `rw [happ]` before applying the lemma, or (2) redesign the model to use `List T` directly instead of a struct with a `.data` field — this is almost always cleaner: just type-alias the aggregation as `List T`."
+
+[app_mismatch_arrow]
+error = '''
+application type mismatch
+has type
+  A → B
+but is expected to have type
+  C'''
+hint = '''
+`ih` is a function (type: `A → ...`) — you must apply it to a proof of `A` before passing it anywhere.
+WRONG:  `le_trans ih ...`  ← ih is not yet a proof, it's still a function
+RIGHT:  `le_trans (ih (by omega)) ...`  ← apply ih first
+Common proofs for arithmetic preconditions:
+  `by omega`                    — works for any linear arithmetic goal
+  `Nat.le_add_right n k`        — proves `n ≤ n + k`
+  `Nat.le_refl n`               — proves `n ≤ n`
+If the induction is over a difference `k` obtained via `obtain ⟨k, rfl⟩`, also consider replacing the whole induction with `gcongr` — for monotonicity goals like `a ^ m ≤ a ^ n` with `ha : 1 ≤ a` and `hmn : m ≤ n` in context, `gcongr` closes the goal in one step without any induction.'''
+
+[app_mismatch_bare]
+error = '''
+application type mismatch
+something else'''
+hint = 'The argument has the wrong type. Common causes: (1) An induction hypothesis is still a function (has `→` in its type) — you must apply it to a proof of its precondition before using it as a value. (2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). Read the expected type in the error and find or derive a proof of exactly that type.'
+
+[type_mismatch_true]
+error = '''
+type mismatch
+expected to have type
+  true = true'''
+hint = "The goal has already been reduced to `true = true` (the field was unfolded to `true`), but you passed a hypothesis `h : x.field = true` where `true = true` is expected. Don't use `exact h` here — close the goal with `rfl` instead. If the goal still contains the field name, use `simp [h]` to rewrite it first."
+
+[type_mismatch_bool]
+error = '''
+type mismatch
+Bool
+= true'''
+hint = 'Bool equality goals like `x = true` and `¬(x = false)` are not automatically interchangeable. Use `decide`, `simp [Bool.eq_true_iff_ne_false]`, or `cases x <;> simp` to normalise.'
+
+[type_mismatch_bare]
+error = '''
+type mismatch
+unrelated'''
+hint = "The types don't match. Check your annotations and coercions."
+
+[inhabited_generate]
+error = '''
+failed to generate instance
+  Inhabited MyType'''
+hint = 'The type has no default value so `Inhabited` cannot be derived — do NOT add `deriving Inhabited`. Avoid `List.head!` and `l[0]!` entirely. Use `List.head?` (returns `Option`) or case on the list structure to extract the element safely.'
+
+[synth_ofnat_fin]
+error = '''
+failed to synthesize
+OfNat
+Fin n'''
+hint = 'You are indexing a list with a numeric literal used as `Fin n` where `n` is a variable — Lean cannot synthesize `OfNat (Fin n)` for a non-concrete bound. Case on the list structure instead of using `List.get`.'
+
+[synth_inhabited]
+error = '''
+failed to synthesize
+Inhabited'''
+hint = '`List.head!` and `l[0]!` require an `Inhabited` instance which the domain type may not have. Use `List.head?` (returns `Option`) or case on the list structure to extract the element safely.'
+
+[synth_bare]
+error = '''
+failed to synthesize
+SomeClass'''
+hint = 'A typeclass instance is missing. Check your imports.'
+
+[free_vars_string]
+error = '''
+Expected type must not contain free variables
+isPrefixOf'''
+hint = '''
+String-level prefix goals cannot be closed in this Lean version: `String.startsWith` is implemented through `String.Slice.Pattern.ForwardPattern`, and `String.isPrefixOf` does not reduce either — `simp`, `rfl`, `decide` and unfolding all fail on them.
+Convert to `List Char`, where the goal is trivial:
+  simp [String.toList_append, List.isPrefixOf]
+This closes goals of the form `a.toList.isPrefixOf (a ++ b).toList = true`.
+Better still, state the property over `List Char` in the first place — model the function as taking `List Char` rather than `String`, and `simp [List.isPrefixOf]`, `List.prefix_append` and `List.take_append` all apply directly.
+Use `.toList`, NOT `.data` — `.data` does not reduce. Do NOT use `String.isPrefixOf_iff`, `String.isPrefixOf_append_left` or `List.isPrefixOf_append_left`: they do not exist. `String.toList_append` takes no explicit arguments, so pass it to `simp`, never `exact`.'''
+
+[free_vars_bare]
+error = 'Expected type must not contain free variables'
+hint = '`decide` cannot work when the goal contains free variables. Use `simp`, `omega`, `ring`, or `linarith` instead, or case-split on the free variables until the remaining goals are ground.'
+
+[omega_string_length]
+error = '''
+omega could not prove the goal
+ a := "WEIGHTED".length'''
+hint = '''
+`omega` cannot evaluate string literal lengths (e.g. `"WEIGHTED_SUM((".length`) — they appear as opaque variables to omega. String literal lengths are definitionally equal to their character count and can be reduced inline with `show ... from rfl`. Use this exact pattern:
+  simp only [String.length_append,
+    show "PREFIX".length = N from rfl,
+    show "MID".length = M from rfl,
+    show "SUFFIX".length = K from rfl]
+  omega
+Replace each literal and its count (N, M, K) with the actual strings and their character counts. Count carefully — every character including spaces and punctuation.
+IMPORTANT: do NOT use `simp [String.length]` or `simp [String.length_append, String.length]` — `String.length` unfolds recursively and causes maximum recursion depth errors.
+Also do NOT use `String.length_mk` — it does not exist in Mathlib.'''
+
+[omega_generic]
+error = '''
+omega could not prove the goal
+ b := (List.filter p t).length'''
+hint = '''
+`omega` reasons about linear integer arithmetic only — every other subterm is an opaque variable to it, which is why the counterexample it prints mentions terms you expected to have been reduced away.
+Look at the `where` block in the error: if the same value appears under two different names (typically an unreduced projection such as `(a, b).2` alongside the `b` it should have become), omega cannot know they are equal. Reduce it before calling omega — `simp` the projection away, rewrite with the lemma that states the equality, or prove the arithmetic fact as a standalone `have` over the already-reduced form and close the goal with `simpa using` it.
+Adding more hypotheses to omega will not help while the terms remain opaque.'''
+
+[forward_pattern]
+error = 'ForwardPattern'
+hint = '''
+String-level prefix goals cannot be closed in this Lean version: `String.startsWith` is implemented through `String.Slice.Pattern.ForwardPattern`, and `String.isPrefixOf` does not reduce either — `simp`, `rfl`, `decide` and unfolding all fail on them.
+Convert to `List Char`, where the goal is trivial:
+  simp [String.toList_append, List.isPrefixOf]
+This closes goals of the form `a.toList.isPrefixOf (a ++ b).toList = true`.
+Better still, state the property over `List Char` in the first place — model the function as taking `List Char` rather than `String`, and `simp [List.isPrefixOf]`, `List.prefix_append` and `List.take_append` all apply directly.
+Use `.toList`, NOT `.data` — `.data` does not reduce. Do NOT use `String.isPrefixOf_iff`, `String.isPrefixOf_append_left` or `List.isPrefixOf_append_left`: they do not exist. `String.toList_append` takes no explicit arguments, so pass it to `simp`, never `exact`.'''
+
+[already_declared]
+error = 'has already been declared'
+hint = '''
+The generated code redeclares a name that Mathlib already defines (commonly `Path`, `Option`, `Prod`, `List`, `String`, `Nat`, or a tactic name). `import Mathlib` brings it into scope, so the definition collides.
+Rename the local model with a prefix that cannot clash — `MyPath`, `SrcOption`, `ModelString` — and update every reference to it in the theorem and proof. Do NOT try to work around it with `namespace`, `open`, or `_root_.`: the theorem should model your function's own type, not shadow a Mathlib one.'''
+
+[uses_sorry]
+error = "declaration uses 'sorry'"
+hint = 'Replace sorry with a real proof. Try omega, simp, decide, or rfl.'
+
+[timeout]
+error = 'timeout'
+hint = '''
+The proof timed out. Try a faster strategy:
+(1) Replace `simp` chains with `omega` (Nat/Int arithmetic) or `linarith`/`ring` (Rat/Real).
+(2) For commutativity/linearity over Rat: `ring` closes most goals directly.
+(3) For a property about a specific enum/constructor value (e.g. `h : op = PLUS`): use `subst h` to replace the variable with the concrete value everywhere, then `simp [PLUS.getPrecedence, PLUS.print, ...]` to reduce the multi-branch if/match. Do NOT use `decide` or `aesop` on open inductive types — they do not terminate.
+(4) For string injectivity (f a b = f a' b' → a = a' ∧ b = b'): use `String.mk.injEq` to reduce to `List Char` equality, then `simp [List.append_inj_iff]`.
+(5) Avoid `aesop` and `decide` on non-finite or large types — they do not terminate.
+(6) If the goal needs induction, make the induction hypothesis strong enough (generalize first).'''
+
+[function_expected_exists]
+error = '''
+function expected
+∃ x, p x'''
+hint = 'The term already has an existential type — you cannot apply it as a function. To extract the witnesses, use `obtain ⟨a, b, h⟩ := term` instead of `term arg`.'
+
+[function_expected_mem_cons]
+error = '''
+function expected
+mem_cons_self applied to arguments'''
+hint = '''
+`List.mem_cons_self` takes ZERO explicit arguments — all its parameters are implicit. Writing `List.mem_cons_self w` or `List.mem_cons_self _ _` is WRONG and will always fail. Correct forms:
+  · To close a goal `a ∈ a :: l`:  `exact List.mem_cons_self`  (nothing after it)
+  · To pass as proof to another lemma, e.g. `hweights _ proof`:  use `hweights _ (List.mem_cons_self)` — NO args after `mem_cons_self`, or use an anonymous proof: `hweights _ (by simp)`.'''
+
+[function_expected_field]
+error = '''
+function expected
+.id field access'''
+hint = 'Lean parsed a space before `.field` as function application. Write field access without a space: `x.id` not `x .id`. Also avoid `head!` — use `List.head?` or case on the list instead.'
+
+[function_expected_hastype]
+error = '''
+function expected
+has type
+  a = b'''
+hint = '`that lemma` is a theorem/proposition, not a function — you cannot apply it to arguments. Use `simp [that lemma]` or `rw [that lemma]` to rewrite with it instead of passing arguments directly.'
+
+[function_expected_bare]
+error = '''
+function expected
+nothing else'''
+hint = 'You applied too many arguments — the term is already a value or proposition, not a function. Remove the extra argument(s) and use `exact` to close the goal directly.'
+
+[max_rec_depth]
+error = 'maximum recursion depth has been reached'
+hint = '''
+Lean ran out of recursion budget rather than rejecting the proof. Raising `maxRecDepth` moves the failure and, pushed far enough, crashes instead of erroring — restructure instead.
+The usual cause is `decide` on something that only looks small: a bounded `∀` over a list of `Char`, or a nested one over a table of pairs, evaluates a decision procedure across the whole type. Turn the membership into a disjunction and take the cases, so each branch is ground:
+  simp only [theTable, List.mem_cons, List.not_mem_nil, or_false]
+  rintro p (rfl | rfl | rfl)
+  all_goals rfl
+For a long `if`-chain, `by_cases` with `rw [if_pos]`/`rw [if_neg]` costs far less than `split_ifs` or `fin_cases`.'''
+
+[heartbeats]
+error = 'maximum number of heartbeats has been reached'
+hint = 'Lean hit its heartbeat budget — a tactic is doing far more work than the goal warrants, usually a bare `simp` or `decide` over something large. Name the lemmas with `simp only [...]`, or case-split by hand so each goal is small. `set_option maxHeartbeats` raises the ceiling but rarely fixes the cause.'
+
+[tactic_rfl]
+error = '''
+Tactic `rfl` failed: The left-hand side
+  a
+is not definitionally'''
+hint = '''
+The `rfl` tactic ran and failed to close the goal. The two sides are not definitionally equal, so no amount of unfolding will close this. Prove it by `induction` or `simp` with the relevant lemmas, or check the statement is actually true — `rfl` failing on something you expected to be trivial usually means the model does not say what you meant.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+
+[tactic_decide]
+error = 'Tactic `decide` failed: could not decide'
+hint = '''
+The `decide` tactic ran and failed to close the goal. The proposition is not closed, or deciding it exhausts the recursion budget. `decide` only works on ground decidable propositions; case-split the free variables first, and prefer explicit `rcases`/`by_cases` over `decide` on anything ranging over a large type such as `Char`.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+
+[unmatched]
+error = 'some completely unknown lean complaint'
+hint = 'Review Lean 4 syntax and ensure all imports are present.'
+
+[unknown_identifier_unquoted]
+error = 'unknown identifier at the top level, no name in backticks'
+hint = 'That identifier or constant does not exist in Mathlib. Do not guess lemma names. Instead prove the goal with `simp`, `omega`, `decide`, `rfl`, or by unfolding the definition and casing on the structure.'
+
+[app_mismatch_option_same_inner]
+error = '''
+application type mismatch
+has type
+  Option Nat
+but is expected to have type
+  Option Nat'''
+hint = 'The argument has the wrong type. Common causes: (1) An induction hypothesis is still a function (has `→` in its type) — you must apply it to a proof of its precondition before using it as a value. (2) Passing a struct where a field value is needed — access it explicitly (e.g. `.id`). Read the expected type in the error and find or derive a proof of exactly that type.'
+
+[function_expected_field_word]
+error = '''
+Function expected
+unexpected Field access after a space'''
+hint = 'Lean parsed a space before `.field` as function application. Write field access without a space: `x.id` not `x .id`. Also avoid `head!` — use `List.head?` or case on the list instead.'
