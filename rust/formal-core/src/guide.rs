@@ -250,12 +250,15 @@ fn extract() -> String {
 }
 
 fn tactics() -> String {
+    let (search_heading, search_body) = titled("search_before_proving");
     let (finite_heading, finite_body) = titled("finite_case_analysis");
     let (filter_heading, filter_body) = titled("filter_and_partition");
     [
         "## Rules that prevent the common failures".to_string(),
         prompts::text("proof_generation_system").trim().to_string(),
         render(prompts::text("proof_generation_user")),
+        search_heading,
+        search_body,
         finite_heading,
         finite_body,
         filter_heading,
@@ -268,10 +271,13 @@ fn tactics() -> String {
 }
 
 fn formalize() -> String {
+    let (statement_heading, statement_body) = titled("statement_check");
     [
         "## Writing the Lean".to_string(),
         prompts::text("autoformalize_system").trim().to_string(),
         render(prompts::text("property_formalize_and_prove_user")),
+        statement_heading,
+        statement_body,
         "## Submitting".to_string(),
         SUBMITTING.to_string(),
         BATCHING_IS_NOT_YOUR_PROBLEM.to_string(),

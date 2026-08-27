@@ -30,6 +30,8 @@ guidance![
     "property_extraction_system",
     "property_extraction_user",
     "property_formalize_and_prove_user",
+    "search_before_proving",
+    "statement_check",
 ];
 
 /// The file holds the text plus one trailing newline, so it ends cleanly on disk.

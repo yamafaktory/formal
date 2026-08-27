@@ -42,8 +42,8 @@
  "guide_formalize": {
   "body": {
    "instructions": {
-    "chars": 10772,
-    "sha256": "9fad3c91a028782d4aa8b9a5bd85e4d0a0ad3d9e3c7e50dd8a9ab35d1267cb0a"
+    "chars": 12659,
+    "sha256": "2b96a315deff4a3052c2ed54427aa884366471254b1325840bfa8119fe906a63"
    },
    "topic": "formalize"
   },
@@ -103,8 +103,8 @@
  "guide_tactics": {
   "body": {
    "instructions": {
-    "chars": 14249,
-    "sha256": "35a85d02689bef3c51c1f12ee7628bd5fe6c5f17d5ba50953439c225a4185423"
+    "chars": 16107,
+    "sha256": "67b1cf95eecfafbbca6a64a2977a805fc6408db415238ed06ffafd0fadc96204"
    },
    "topic": "tactics"
   },
