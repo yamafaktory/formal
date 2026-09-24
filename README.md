@@ -5,200 +5,186 @@
 **Property checker for code, backed by Lean 4 and Mathlib. Your agent writes the
 properties and the proofs; formal checks them.**
 
-State a property about a pure function — that splitting preserves line count, that a
-discount stays between 0 and 1 — as a Lean 4 theorem. formal checks it against Mathlib
-and tells you whether it holds. What Lean accepts is mechanically verified, within the
-limits described below.
+Take a function that applies a discount. The property to establish: for every
+non-negative price and every rate, the result lies between 0 and the price. Your agent
+states it as a Lean theorem and writes a proof. formal has Lean check the proof and
+returns the verdict: verified, or rejected with Lean's first error and a hint.
 
-**formal does not call a model.** No API key, no backend setting, no opinion about which
-model you use. The agent already reading your code writes the properties and the Lean;
-formal runs Lean over them in one batched invocation, recovers the failures it can
-without help — auto-tactics, then a Mathlib premise search — remembers every proof Lean
-accepted, and tells you when the code moves out from under a property.
+formal does not call a model. It needs no API key and has no opinion about which model
+you use. The agent that already reads your code writes the Lean. formal does everything
+that needs no model:
 
-That split is the whole design. An agent that can write Lean does not need a second model
-started on its behalf to do it.
+- it checks proofs, in Lean processes that keep Mathlib loaded between checks,
+- it retries a rejected proof with an automatic tactic chain, then a Mathlib premise
+  search (`exact?`),
+- it audits the axioms every accepted proof depends on,
+- it caches every proof that passes, and
+- it detects when the code changes under a property.
 
-## What this actually is
+## How it works
 
-Three judgements happen before Lean ever runs, and the agent makes all three:
+Three judgements precede any Lean run, and your agent makes all three:
 
-1. **Decomposition** — which parts of the code are pure functions
-2. **Property extraction** — what those functions should satisfy, with explicit
-   preconditions and modelling assumptions
-3. **Formalization** — the Lean 4 theorem that says so
+1. **Decomposition.** Which parts of the code are pure functions. Code with side effects,
+   such as database calls, HTTP or file access, is out of scope.
+2. **Property extraction.** What those functions must satisfy, with explicit
+   preconditions and modelling assumptions.
+3. **Formalization.** The Lean 4 theorem that states the property.
 
-Only then does Lean check the proof. Lean is mechanically sound — it cannot be fooled —
-but it only checks what it is given. If those three judgements misread your function, or
-produced a property that is technically true but misses the point, Lean will happily
-prove the wrong thing. `GET /guide` serves the instructions formal has for making them
-well; it cannot make them for you.
+Then Lean checks the proof. Its kernel is sound: a proof it accepts is a valid derivation
+of the stated theorem. But Lean checks only the theorem it receives. If the formalization
+misreads the function, Lean proves a true theorem about a different function. Read
+[What a result means](#what-a-result-means) before you rely on a result.
 
-**What "verified" means here:** Lean accepted a proof of a theorem someone derived from
-your code. That is a meaningful signal — LLMs make logical errors and Lean catches them —
-but it is not equivalent to a certified compiler or a formal proof that your source is
-correct.
+## Quick start
 
-**Useful for:**
-- Catching logical errors in generated code that tests might miss
-- Surfacing the assumptions made about your code, stated explicitly
-- Confidence in pure domain logic: calculations, transformations, validations
-- A machine-checked, reviewable record of what holds under which assumptions
-
-**Does not give you:**
-- A guarantee your source is correct — only that a Lean model of it satisfies the stated properties
-- Complete coverage — whoever writes the properties chooses them, and may miss important ones
-- Traditional formal verification — that needs a certified translation from source to proof, which this does not have
-
-Side effects (DB calls, HTTP, I/O) are excluded by design. Properties that depend on
-reference equality, reflection or runtime behaviour are classified `unverifiable` — a
-modelling limit, not a bug and not a failure.
-
-## Setup
-
-Requires a Rust toolchain.
+You need a Rust toolchain.
 
 ```sh
 cargo install --git https://github.com/yamafaktory/formal formal-cli
 formal setup
-```
-
-No clone needed — the Lean project is bundled in the binary and created under
-`~/.local/share/formal` on first run, which is also where Mathlib's oleans land.
-
-Working on formal itself? Clone it, and a binary built from the checkout keeps its
-Lean project and results inside the repo.
-
-`formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
-toolchain, downloads prebuilt Mathlib oleans, and builds the
-[Lean REPL](https://github.com/leanprover-community/repl) that keeps Mathlib loaded
-between checks (see [Warm Lean](#warm-lean)). That is all it does — there is no
-backend to configure. Re-running is safe: completed steps are skipped.
-
-Any elan already on your system is used as-is. Nothing is added to your shell
-configuration — formal locates the toolchain under `ELAN_HOME` (default `~/.elan`)
-itself. See [lean-lang.org/install](https://lean-lang.org/install/).
-
-Then check it:
-
-```sh
 formal status
 ```
 
-## Driving formal from an agent
+`formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
+version. Then it downloads Mathlib's prebuilt oleans (compiled Lean modules, several GB
+the first time), and builds the [Lean REPL](https://github.com/leanprover-community/repl)
+that keeps Mathlib loaded. It asks before the large download. You can run it again
+safely: it skips every step that is already done.
 
-formal exposes an HTTP API. The agent reads your code, states the properties, writes the
-Lean, and formal checks it. Nothing else is started.
+The binary carries its own Lean project and creates it under `~/.local/share/formal`. You
+do not need to clone this repository. A binary built from a clone keeps its Lean project
+and results inside the clone instead.
 
-Start the server once — the command is safe to run before every request, since it
-returns immediately when one is already up:
+formal uses any elan already on your system, and changes nothing in your shell
+configuration.
+
+Start the server:
 
 ```sh
-formal serve --background     # detaches, returns when /health answers
-formal status                 # …  server  http://127.0.0.1:1337 (running)
+formal serve --background   # returns once the server answers, or at once if it already runs
+formal status               # … server  http://127.0.0.1:1337 (running)
 formal stop
 ```
 
-### The loop
+## A worked example
 
-```
-GET  /guide                      the workflow and the spec-file schema (~650 tokens)
-GET  /guide/extract              how to find pure functions and properties
-     → write formal.properties.json, commit it
-POST /session {"spec_file": …}   → {cached, work, stale}
-GET  /guide/formalize            Lean 4 conventions for stating a property
-GET  /guide/tactics              rules that prevent the common proof failures
-POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
-     → {verified, failed: [{id, error, line, col, hint}], remaining, complete}
-     fix the failures, resubmit only those ids, repeat
+This is a real session. The responses below come from formal itself.
+
+**The function.** `pricing.py`:
+
+```python
+def apply_discount(price, rate):
+    rate = max(0.0, min(rate, 1.0))
+    return price * (1 - rate)
 ```
 
-The guide is served in stages rather than as one document, so an agent pays for the Lean
-conventions only once it is actually writing Lean. `tactics` is the accumulated list of
-what goes wrong — never adding a tactic after `simp`, `decide` rather than `omega` for
-string-literal lengths, how to close an `Except.ok = Except.error` branch. Most
-first-attempt failures are on it.
-
-Three things keep the loop cheap. Properties are registered once, so a retry carries only
-the corrected Lean and not the metadata again. Every proof in a request is checked in a
-single Lean invocation, so a batch pays one `import Mathlib` rather than one per proof.
-And a failure comes back as its first error plus a targeted hint — never the full Lean
-output, which for a Mathlib failure runs to thousands of tokens of noise.
-
-Before a failure is reported at all, formal tries to close it without a model: the
-auto-tactic chain first, then a Mathlib premise search for a lemma that discharges the
-goal. Proofs recovered that way never reach the agent.
-
-### The spec file
-
-Properties live in a JSON file you commit alongside the code:
+**The property.** The agent adds it to `formal.properties.json` and commits the file:
 
 ```json
 {
   "version": 1,
   "properties": [
     {
-      "id": "split_imports/conservation",
-      "function": "split_imports",
+      "id": "apply_discount/bounded",
+      "function": "apply_discount",
       "kind": "invariant",
-      "formal": "forall ls, length (fst (partition ls)) + length (snd (partition ls)) = length ls",
-      "description": "splitting preserves the number of lines",
-      "preconditions": [],
-      "assumptions": ["text modelled as List String, one element per line"],
-      "source_file": "rust/formal-lean/src/verifier.rs",
-      "function_code": "fn split_imports(lean_code: &str) -> ..."
+      "formal": "forall price rate, 0 <= price -> 0 <= apply_discount price rate /\\ apply_discount price rate <= price",
+      "description": "a discounted price is never negative and never above the original price",
+      "preconditions": ["price is not negative"],
+      "assumptions": ["prices and rates modelled as rationals, not floats"],
+      "source_file": "pricing.py",
+      "function_code": "def apply_discount(price, rate):\n    rate = max(0.0, min(rate, 1.0))\n    return price * (1 - rate)\n"
     }
   ]
 }
 ```
 
-`id`, `function`, `kind` and `formal` are required. `source_file` is resolved relative to
-the spec file unless you pass `root`. The `spec_file` path itself must be absolute: the
-server resolves it, and its working directory is not the caller's.
+**The session.** The agent opens a session on the spec file:
 
-**Commit it.** That is not a filing preference — it is what makes the cache work. Two
-independent extraction runs over one small function produced six and seven properties,
-agreed on the wording of none of them, and stated one of them in opposite directions.
-Nothing re-derived each run can hit a cache. A committed file is the same bytes every
-time, so a proof is written once and reused forever.
-
-It also makes the claim reviewable. A verification tool whose properties are re-invented
-on every run cannot tell you what it checked last week, and cannot show you a diff when
-the answer changes.
-
-### formal's own properties
-
-`formal.properties.json` in this repository is formal's own spec, with the proofs in
-`proofs/`. Three properties so far, two of them guarding collisions that were real: that
-a word-spelled operator is only an operator on a word boundary, and that no field of the
-cache payload can imitate the boundary between two others. Both were found by pointing
-formal at its own key derivation.
-
-### Staleness
-
-The risk a committed spec introduces is outliving its code. Each property records the
-function source it was written against; if that source has since changed, the property is
-reported as `stale` and never proved:
-
-```json
-{ "work": [], "cached": [], "stale": ["split_imports/conservation"], "complete": false }
+```sh
+curl -s -X POST localhost:1337/session -H 'content-type: application/json' \
+  -d '{"spec_file": "/abs/path/to/formal.properties.json"}'
 ```
 
-Proving a property against code it no longer describes yields a true theorem about
-nothing, so formal declines to. Re-read the function, update the property and its
-`function_code`, and the session goes green again. `complete` is false while anything is
-stale.
+```json
+{ "session_id": "fb2c6e49…", "cached": [], "work": ["apply_discount/bounded"], "stale": [], "complete": false }
+```
 
-Comparison is normalised text rather than a parse, so it works for every language formal
-accepts, and trailing whitespace is not a change. Reindenting the function is: normalising
-keeps leading whitespace, because indentation is meaning in the language the cache keys
-were recorded from, so a function that moves a level deeper is reported stale and its
-`function_code` has to be updated with it. A property with no `source_file` cannot go
-stale — there is nothing recorded to compare against.
+**A first proof.** The agent models the function over rationals and tries `linarith`:
 
-### Add this to your agent's instructions
+```lean
+import Mathlib
 
-For Claude Code, add to `CLAUDE.md`; for other agents, the equivalent file.
+def applyDiscount (price rate : ℚ) : ℚ :=
+  price * (1 - max 0 (min rate 1))
+
+theorem apply_discount_bounded (price rate : ℚ) (h : 0 ≤ price) :
+    0 ≤ applyDiscount price rate ∧ applyDiscount price rate ≤ price := by
+  unfold applyDiscount
+  constructor <;> linarith
+```
+
+```sh
+curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/json' \
+  -d '{"proof_files": {"apply_discount/bounded": "/abs/path/to/proofs/discount.lean"}}'
+```
+
+```json
+{
+  "verified": [],
+  "recovered": [],
+  "failed": [{
+    "id": "apply_discount/bounded",
+    "error": "linarith failed to find a contradiction\ncase left.h\nprice rate : ℚ\nh : 0 ≤ price\na✝ : price * (1 - max 0 (min rate 1)) < 0\n⊢ False\nfailed",
+    "line": 9, "col": 18,
+    "hint": "…"
+  }],
+  "remaining": ["apply_discount/bounded"],
+  "complete": false
+}
+```
+
+formal first tried to recover the proof on its own, and failed. The error shows the goal
+Lean could not close. It is nonlinear: it multiplies `price` by a term in `rate`, and
+`linarith` decides only linear arithmetic.
+
+**The fix.** The agent states the bounds on the clamped rate as hypotheses, and switches
+to `nlinarith`, which multiplies hypotheses together and so reaches nonlinear goals:
+
+```lean
+  unfold applyDiscount
+  have lo : 0 ≤ max 0 (min rate 1) := le_max_left _ _
+  have hi : max 0 (min rate 1) ≤ 1 := max_le zero_le_one (min_le_right _ _)
+  constructor <;> nlinarith
+```
+
+```json
+{ "verified": ["apply_discount/bounded"], "recovered": [], "failed": [], "remaining": [], "complete": true }
+```
+
+This check took 0.24 s, because the server keeps Mathlib loaded.
+
+**Next time.** formal stores the accepted proof. A later session on the same spec file
+finds it, and reports what was proved:
+
+```json
+{
+  "cached": [{
+    "id": "apply_discount/bounded",
+    "description": "a discounted price is never negative and never above the original price",
+    "kind": "invariant",
+    "assumptions": ["prices and rates modelled as rationals, not floats"]
+  }],
+  "work": [], "stale": [], "complete": true
+}
+```
+
+## Using formal from an agent
+
+### Tell your agent about it
+
+For Claude Code, add this to `CLAUDE.md`. For other agents, use their equivalent file.
 
 ````markdown
 ## Formal verification
@@ -217,275 +203,362 @@ proof is not evidence about your code. A `stale` id means the function changed a
 property needs rewriting.
 ````
 
+### The loop
+
+formal serves its instructions in stages. An agent reads the Lean conventions only once it
+starts to write Lean.
+
+```
+GET  /guide                      the workflow and the spec file schema
+GET  /guide/extract              how to find pure functions and their properties
+     → write formal.properties.json, commit it
+POST /session {"spec_file": …}   → {cached, work, stale}
+GET  /guide/formalize            how to state a property in Lean, and how to check the statement
+GET  /guide/tactics              the proof failures that come up most, and how to avoid them
+POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}} or {"proof_files": {"<id>": "<path>"}}
+     → {verified, recovered, failed, remaining, complete}
+     fix the failures, send only those ids again, repeat
+```
+
+Three things keep the loop cheap:
+
+- **Properties are registered once.** A retry sends only the corrected Lean.
+- **A failure comes back short.** formal returns the first error and a hint, never Lean's
+  full output, which for a Mathlib failure runs to thousands of tokens.
+- **formal recovers what it can.** Before it reports a failure, it replaces the proof
+  with an automatic tactic chain (`rfl`, `omega`, `norm_num`, `linarith`, `ring`,
+  `decide`, `simp`), then with a premise search (`exact?`). A proof recovered this way
+  appears under `recovered` and never goes back to the agent.
+
+### The spec file
+
+Properties live in a JSON file that you commit next to the code. The
+[worked example](#a-worked-example) shows one entry. `id`, `function`, `kind` and
+`formal` are required. formal resolves `source_file` against the spec file's directory,
+or against `root` when you pass one. Send `spec_file` as an absolute path: the server
+resolves it, and its working directory is not yours.
+
+**Commit the file.** The cache depends on it. Two independent runs over one small function
+produced six and seven properties. They agreed on the wording of none of them, and stated
+one of them in opposite directions. A cache cannot match properties that change on every
+run. A committed file is the same every time, so a proof is written once and reused.
+
+A committed file is also reviewable. It shows what was checked last week, and a diff
+shows when the answer changes.
+
+### Stale properties
+
+A committed property can outlive its code. Each property records the function source it
+was written against, in `function_code`. When that source changes, formal reports the
+property as `stale` and does not check it:
+
+```json
+{ "work": [], "cached": [], "stale": ["apply_discount/bounded"], "complete": false }
+```
+
+A proof against code the property no longer describes yields a true theorem about
+nothing, so formal declines to check it. Read the function again, update the property and
+its `function_code`, and the session completes again.
+
+formal compares normalised text, not a parse, so this works for any language. Trailing
+whitespace is not a change. Indentation is: a function that moves one level deeper
+becomes stale, and its `function_code` needs the new indentation. A property without a
+`source_file` cannot become stale, because there is nothing to compare it with.
+
+### formal's own properties
+
+formal checks itself. `formal.properties.json` in this repository is formal's own spec,
+with the proofs in `proofs/`. Two of its properties guard against collisions that really
+happened in formal's cache key: an operator spelled as a word counts only at a word
+boundary, and no field of the key can imitate the boundary between two others.
+
+## What a result means
+
+### What "verified" means
+
+Lean's kernel accepted a proof of a theorem derived from your code, relative to Mathlib
+and the axioms `propext`, `Classical.choice` and `Quot.sound`. That is strong evidence
+against logical errors, which models make and Lean catches. It is not a proof that your
+source code is correct: the theorem concerns a Lean model of the code, and nothing
+certifies that the model is faithful.
+
+formal is good for:
+
+- catching logical errors in generated code that tests might miss,
+- stating the assumptions about your code explicitly,
+- confidence in pure logic: calculations, transformations, validations, and
+- a machine-checked record of what holds, and under which assumptions.
+
+formal does not give you:
+
+- a guarantee that your source code is correct, only that a Lean model of it satisfies
+  the stated properties,
+- complete coverage, because whoever writes the properties chooses them and can miss
+  important ones, or
+- formal verification in the traditional sense, which requires a certified translation
+  from source code to Lean. formal has none.
+
+Properties that depend on reference equality, reflection or runtime behaviour lie outside
+what a Lean model can express. They are classified `unverifiable`: a limit of the
+modelling, not a failed proof.
+
+### What formal refuses
+
+A file that Lean accepts does not always establish its theorems. Lean accepts a theorem
+derived from an axiom the file itself declares, and `axiom cheat : False` derives
+anything. `#exit` ends elaboration without an error, so no declaration after it is
+checked. formal closes both gaps:
+
+- **It refuses proofs that can run code.** Code that runs during a check could print a
+  fake verdict. formal refuses `#eval`, `#exit`, `#guard_msgs`, `run_cmd` and the other
+  `run_` commands, `elab`, `macro`, `syntax`, `initialize`, `unsafe`, `implemented_by`,
+  `extern`, and the `IO` and `Lean` namespaces. It ignores these words inside comments.
+- **It audits the axiomatic dependencies of every declaration.** formal appends a command
+  to the proof. The command lists every declaration that depends, directly or through
+  other declarations in the file, on an axiom other than `propext`, `Classical.choice`
+  and `Quot.sound`. A declared axiom, a `sorry` (`sorryAx`) or `native_decide` fails the
+  check at the line of that declaration. This also catches a `sorry` whose warning
+  `#guard_msgs` suppresses.
+- **It requires the audit to report.** The report carries a random nonce that the proof
+  cannot know. If no report comes back, the check fails. This happens when elaboration
+  stops before the end of the file, for example at an unclosed comment.
+
+The audit takes imported Mathlib declarations as built, the same trust Lean extends to
+them. It costs about 0.27 s on a cold check, and nothing measurable on a warm one.
+
+### Check the statement yourself
+
+Lean guarantees that the stated theorem follows from its axioms. It cannot tell you
+whether that theorem is the property you meant. If the formalization misread your code,
+Lean proves the wrong statement and reports success. This failure is indistinguishable
+from a pass, which makes it the one formal is least able to detect.
+
+`GET /guide/formalize` includes questions for the agent to put to its own theorem before
+it submits:
+
+- Is every hypothesis necessary, or does it narrow the claim only so that the proof goes
+  through?
+- Are the hypotheses jointly satisfiable, or is the theorem vacuous?
+- Is it trivially true, a restatement of the definition that `rfl` closes?
+- Are the quantifiers, and the direction of every implication and equivalence, those of
+  the property?
+- Does it still match the `formal` and `description` fields of the spec file?
+
+This check is not blinded. The agent read both the property and its theorem, and cannot
+unread either. formal once ran a blinded check: it translated each theorem back into
+English without the original description, so it compared two independent readings. That
+check left with the model pipeline, and the self check is a weaker replacement.
+
+So read the result the way a reviewer would. On a cache hit, formal reports the
+description and assumptions recorded with the proof. If that model is not yours, the hit
+is not the property you meant.
+
+### Limitations
+
+- **The agent decides what is checked.** It can misread code, miss properties, or write
+  theorems that are true but beside the point. formal has no second opinion to offer.
+- **Preconditions and assumptions can be wrong.** A proof that rests on a wrong
+  assumption is not evidence about your code.
+- **Only pure logic.** formal excludes side effects by design.
+- **Modelling limits.** Floats are modelled as rationals, and strings with structural
+  equality. IEEE 754 rounding and reference semantics fall outside the model.
+- **It does not replace tests.** formal establishes a property for all inputs that
+  satisfy the stated assumptions. It does not replace integration or end-to-end tests.
+- **Complex proofs can time out.** Raise `LEAN_TIMEOUT` if they do.
+- **The first install is large.** Mathlib's prebuilt oleans take several GB and a few
+  minutes, once, during `formal setup`.
+
 ## API reference
 
-`formal serve` binds `127.0.0.1:1337` by default (`FORMAL_HOST`, `FORMAL_PORT`).
+`formal serve` listens on `127.0.0.1:1337` (`FORMAL_HOST`, `FORMAL_PORT`).
+`GET /openapi.json` gives the full schema of every request and response.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /guide` | Workflow, spec-file schema, topic list |
-| `GET /guide/{extract\|formalize\|tactics}` | Instructions for one phase |
-| `POST /session` | `{"spec_file": path, "root"?: path}` or `{"properties": [...]}` |
-| `GET /session/{id}` | Current state |
-| `POST /session/{id}/check` | `{"proofs": {id: lean}}` |
-| `DELETE /session/{id}` | Close early |
+| `GET /health` | Answers when the server is up |
+| `GET /openapi.json` | The full schema |
+| `GET /guide` | The workflow, the spec file schema and the topic list |
+| `GET /guide/{extract\|formalize\|tactics}` | The instructions for one phase |
+| `POST /session` | `{"spec_file": path, "root"?: path}`, or `{"properties": [...]}` |
+| `GET /session/{id}` | The current state of a session |
+| `POST /session/{id}/check` | `{"proofs": {id: lean}}`, or `{"proof_files": {id: path}}` |
+| `GET /session/{id}/proof/{property_id}` | The proof Lean accepted for one property |
+| `DELETE /session/{id}` | Close a session early |
 
-```sh
-curl -X POST localhost:1337/session -H 'content-type: application/json' \
-  -d '{"spec_file": "/abs/path/to/formal.properties.json"}'
-```
+A session expires after `SESSION_TTL_MINUTES` of inactivity (default 60). Inline
+`properties` suit a one off check, but nothing carries over to a later run. Paths in
+`proof_files` must be absolute, like `spec_file`.
 
-```json
-{
-  "session_id": "7577b934…",
-  "cached": [{"id": "…", "description": "…", "kind": "…", "assumptions": ["…"]}],
-  "work": ["split_imports/conservation"],
-  "stale": [],
-  "complete": false
-}
-```
+## Running formal
 
-A cache hit reports what was actually proved, not what you asked for — see
-[Proof cache](#proof-cache) for why that distinction matters.
+### Configuration
 
-```sh
-curl -X POST localhost:1337/session/$SID/check -H 'content-type: application/json' \
-  -d '{"proofs": {"split_imports/conservation": "import Mathlib\ntheorem …"}}'
-```
+formal reads an optional `.env` file in `FORMAL_HOME`. Environment variables override
+it. `formal status` prints the values in use and names any key in `.env` that nothing
+reads.
 
-```json
-{
-  "verified": ["split_imports/conservation"],
-  "failed": [{"id": "…", "error": "unknown identifier 'foo'", "line": 4, "col": 2, "hint": "…"}],
-  "remaining": [],
-  "complete": true
-}
-```
-
-Sessions expire after `SESSION_TTL_MINUTES` (default 60). Passing `properties` inline
-instead of `spec_file` works for ad-hoc use, but nothing is reusable across runs.
-
-## Configuration
-
-Set in `.env` (created by `formal setup`), overridable by environment variable.
-`formal status` prints the resolved values and flags any key nothing reads.
-
-| Variable | Description |
+| Variable | Meaning |
 |---|---|
-| `FORMAL_HOST` | Server bind address (default `127.0.0.1`) |
-| `FORMAL_PORT` | Server port (default `1337`) |
-| `SESSION_TTL_MINUTES` | Idle lifetime of a proof session (default `60`) |
+| `FORMAL_HOST` | Address the server listens on (default `127.0.0.1`) |
+| `FORMAL_PORT` | Port the server listens on (default `1337`) |
+| `SESSION_TTL_MINUTES` | How long an idle session lives (default `60`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default `120`) |
-| `FORMAL_SANDBOX` | `auto` (default), `bwrap` (require it), or `off` |
-| `FORMAL_WARM` | How many Lean processes to keep with Mathlib loaded between checks: `on` or unset for one, a number for more, `off` to start Lean for every check |
-| `ELAN_HOME` | Lean toolchain install (default `~/.elan`) |
-| `FORMAL_HOME` | Root for everything below (default: the checkout) |
-| `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib |
-| `FORMAL_RESULTS_DIR` | Directory for saved results |
-| `PROOF_CACHE_DIR` | Cached proofs (default `$FORMAL_RESULTS_DIR/cache`) |
-| `PROOF_CACHE_TTL_DAYS` | Entries older than this are deleted on the next save (default `7`, `0` disables) |
-| `XDG_DATA_HOME` | Honoured when resolving the default `FORMAL_HOME` outside a checkout |
-| `NO_COLOR` | Honoured — suppresses colour in progress output |
+| `FORMAL_SANDBOX` | `auto` (default), `bwrap` to require bubblewrap, or `off` |
+| `FORMAL_WARM` | How many Lean processes keep Mathlib loaded: `on` or unset for one, a number for more, `off` for none |
+| `ELAN_HOME` | Where the Lean toolchain lives (default `~/.elan`) |
+| `FORMAL_HOME` | The root for everything below (default: the clone, or `~/.local/share/formal`) |
+| `LEAN_PROJECT_DIR` | The Lean project that holds the toolchain pin and Mathlib |
+| `FORMAL_RESULTS_DIR` | Where results are saved |
+| `PROOF_CACHE_DIR` | Where accepted proofs are cached (default `$FORMAL_RESULTS_DIR/cache`) |
+| `PROOF_CACHE_TTL_DAYS` | Age after which the next save deletes an entry (default `7`). `0` keeps nothing: each save deletes every entry |
+| `XDG_DATA_HOME` | Used to find the default `FORMAL_HOME` outside a clone |
+| `NO_COLOR` | Turns off colour in progress output |
 
-An `.env` left over from before the LLM pipeline was removed will list keys formal no
-longer reads; `formal status` names them so they can be deleted.
+An `.env` from before formal dropped its model pipeline lists keys that formal no longer
+reads. `formal status` names them so you can delete them.
 
-## Proof cache
+### Warm Lean
 
-A proof Lean accepted is written to disk and reused. Both paths share one cache: a proof
-an agent wrote is a hit for a later autonomous run, and the reverse.
-
-**The key is what is being proved** — the function source, the property kind, and the
-formal statement, with operator spelling and spacing normalised so `∀ x, p x → q x` and
-`forall x, p x -> q x` are one statement.
-
-**The prose is deliberately not in the key.** Descriptions, preconditions and assumptions
-are English, and English varies between writers and between runs; keying on it meant
-every rephrasing was a fresh key and a re-proof of something already proved. Across the
-148 properties from a real run, the function, kind and formal statement separate all of
-them.
-
-The cost of that choice is that two callers can agree on a statement while modelling it
-differently. So a cache hit reports the description and assumptions recorded when the
-proof was accepted:
-
-```json
-{"id": "…", "description": "splitting preserves the line count",
- "assumptions": ["text modelled as List String"]}
-```
-
-Read them. If that modelling is not yours, the hit is not the property you meant, and you
-should change the formal statement so it says so.
-
-Only proofs Lean actually accepted are cached — a verdict with no Lean run behind it, a
-proof still containing `sorry`, or text that does not parse as Lean is refused and
-logged. Failures are never cached; they always go through the full retry loop.
-
-One JSON file per entry under `PROOF_CACHE_DIR`. Entries older than
-`PROOF_CACHE_TTL_DAYS` are deleted on the next save. The cache is strictly an
-optimisation: if it cannot be written, the failure is logged and the result is unaffected.
-
-## Checking the formalization
-
-Lean guarantees the theorem it was given is true. It cannot tell you whether that theorem
-is the property you wanted — if formalization misread your code, Lean proves the wrong
-thing and reports success. That is the failure this tool is least able to notice, because
-it looks exactly like a pass.
-
-formal used to do this itself, reading each proved theorem back into English *without
-showing the model the original description* and comparing the two:
-
-```
-  ✓ [bound] discount is always between 0 and 1
-      ⚠ theorem may not match this property: the hypothesis assumes the
-        conclusion, so it holds for any definition of the function
-        Lean theorem states: for any rational d, if 0 ≤ d ≤ 1 then 0 ≤ d ≤ 1
-```
-
-That check went with the pipeline, and nothing replaces it. It is now yours to do: read
-the theorem you wrote and ask whether it says what the property says.
-
-Be aware of what you lose. The removed check was *blinded* — it back-translated without
-seeing the original description, so the comparison was between two independent readings.
-An agent checking its own translation has already seen both, and cannot un-see them. That
-is weaker, and it is the one capability full inversion cost outright.
-
-## Sandboxing
-
-Lean is not a passive checker: elaboration can execute arbitrary code through `#eval`,
-macros and `initialize` blocks. Since the code being elaborated was written by a model,
-proofs are checked inside [bubblewrap](https://github.com/containers/bubblewrap):
-
-- No network — `--unshare-net`, so a proof cannot exfiltrate anything it reads
-- No home directory — masked by a tmpfs, so `~/.claude`, `~/.ssh` and `~/.aws` are invisible
-- Read-only root, with the Lean toolchain bound read-only
-- Nothing writable except `lean_project/`
-
-Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to enable it.
-Without it Lean runs unsandboxed and warns once per run; `FORMAL_SANDBOX=bwrap` makes its
-absence a hard error, `off` opts out silently. `formal status` shows which applies.
-
-Measured cost of sandboxing: none — 3.19s sandboxed against 3.31s unsandboxed for a proof
-importing Mathlib.
-
-The server binds to localhost and `POST /session/{id}/check` runs caller-supplied Lean.
-Do not expose it beyond the loopback interface.
-
-## What a pass means
-
-Lean accepting a file is not enough for formal. Lean accepts, without any message, a
-theorem proved from an axiom the file declares, and it stops checking at `#exit`. formal
-refuses both cases:
-
-- **Proofs that can run code are refused before Lean runs.** Such code could print a fake
-  verdict. The refusal covers `#eval`, `#exit`, `#guard_msgs`, `run_cmd` and the other
-  `run_` commands, `elab`, `macro`, `syntax`, `initialize`, `unsafe`, `implemented_by`,
-  `extern`, and the `IO` and `Lean` namespaces. Comments are ignored.
-- **Every check ends with an axiom audit.** formal adds a command after the proof. It lists
-  every declaration in the file that depends on an axiom other than `propext`,
-  `Classical.choice` and `Quot.sound`. A declared axiom, a `sorry` (also one hidden with
-  `#guard_msgs`) or `native_decide` makes the check fail at the line of that declaration.
-- **The audit must report.** Its report carries a random nonce that the proof cannot know.
-  If the report is missing, the check fails. This happens when Lean stops before the end
-  of the file, for example at an unclosed comment.
-
-The audit follows dependencies only through the file's own declarations. Imported Mathlib
-declarations are trusted as built, which is the same trust Lean gives them. The audit costs
-about 0.27 s on a cold check, and nothing measurable on a warm one.
-
-Cached proofs from before the audit are not trusted: formal checks each one again on its
-first use.
-
-## Warm Lean
-
-Most of a Lean check is spent loading Mathlib, not checking the proof. The server keeps a
-Lean process with Mathlib already imported, and sends it each proof it can. It starts that
-process when the server starts, inside the same bubblewrap sandbox as every other Lean run.
+Most of a cold Lean check goes to loading Mathlib, not to checking the proof. So the
+server keeps Lean processes with Mathlib already loaded, and sends them every proof they
+can take. It starts them when the server starts, inside the same sandbox as any other Lean
+run.
 
 Measured on one machine (Mathlib v4.29.0, 20 cores):
 
-| | Cold (new Lean per check) | Warm |
+| | Cold: a new Lean per check | Warm |
 |---|---|---|
-| Two simple proofs | 2.65 s | 20–25 ms |
-| `exact?` premise search | 7.0 s every time (44 s of CPU) | 5 s once, then about 25 ms |
-| `POST /check`, three proofs, one recovered | 13.9–16.7 s | 1.2 s (5.9 s on the first request) |
+| Two simple proofs | 2.65 s | 20 to 25 ms |
+| `exact?` premise search | 7.0 s every time | 5 s once, then about 25 ms |
+| One `POST /check`: three proofs, one recovered | 13.9 to 16.7 s | 1.2 s (5.9 s on the first request) |
 
-A proof is checked warm only when its only import is `import Mathlib`, which is the
-environment the warm process holds. Everything else is checked cold, as before. A proof
-that could run code never gets this far (see [What a pass means](#what-a-pass-means)).
-This matters more for warm checks: they share a process, so code run by one proof could
-write a false answer for the next. Each check starts from the same Mathlib environment,
-so declarations do not carry over from one check to the next.
+A warm process takes a proof only when its sole import is `import Mathlib`. Any other
+proof runs cold, as before. Warm checks share a process, so code run by one proof could
+write a false answer for the next. That is one more reason formal refuses proofs that can
+run code. Every warm check starts from the same Mathlib environment, so declarations do
+not carry over from one check to the next.
 
-Each warm process runs one check at a time. `FORMAL_WARM=3` keeps three, and a check takes
-whichever one is free. When all of them are busy, the check runs cold instead of waiting.
-With three requests at the same moment, one process sent one of them cold (2.9 s). Three
-processes kept all of them warm (0.12 s or less). A check that runs past `LEAN_TIMEOUT`
-kills its process, and a later check starts a new one. Each process is also replaced after
-1,000 checks, because it keeps about 300 KB for every check it has run.
+A warm process runs one check at a time. `FORMAL_WARM=3` keeps three, and each check
+takes a free one. When all of them are busy, the check runs cold instead of waiting. In a
+test with three requests at the same moment, one process sent one request cold (2.9 s).
+Three processes kept all three warm (0.12 s or less).
 
-A warm process holds about 6.3 GB resident. Most of that is Mathlib's files mapped into
-memory, and every process shares those pages. One process lowers available memory by about
-600 MB, and each further process by about 650 MB.
+- **Timeouts.** A check that runs past `LEAN_TIMEOUT` stops its process. A later check
+  starts a new one.
+- **Memory.** A warm process shows about 6.3 GB resident, but most of that is Mathlib's
+  files, which all processes share. The first process takes about 600 MB of available
+  memory, and each further process about 650 MB.
+- **Replacement.** A process keeps about 300 KB for every check it runs, so formal
+  replaces it after 1,000 checks.
 
-`formal status` shows whether warm checking is on. If the REPL is not built, formal says so
-once and checks everything cold; `formal setup` builds it. For a Lean project made by an
-older formal, setup first adds the REPL to its `lakefile.toml`, at the tag that matches the
-project's `lean-toolchain`. It changes nothing else in the project and downloads no Mathlib
-files.
+`formal status` shows whether warm checking is on. Without the REPL, formal says so once
+and checks everything cold. `formal setup` builds the REPL. For a Lean project that an
+older formal created, setup first adds the REPL to `lakefile.toml`, at the tag that
+matches the project's `lean-toolchain`. It changes nothing else and downloads nothing from
+Mathlib.
 
-## Limitations
+### Proof cache
 
-- **The agent decides what is checked.** It can misread code, miss properties, or produce
-  theorems that are true but irrelevant. Lean only checks what it is given, and formal has
-  no second opinion to offer — it does not run a model.
-- **No blinded fidelity check.** An agent verifying that its own theorem matches its own
-  property has seen both. See [Checking the formalization](#checking-the-formalization).
-- **Preconditions and assumptions may be wrong.** A proof built on a wrong assumption is
-  not evidence your code is correct.
-- **Pure logic only.** Side effects are excluded by design.
-- **Modelling limits.** Floats are modelled as rationals; strings use structural equality.
-  IEEE 754 precision and reference semantics cannot be modelled.
-- **Not a test replacement.** This checks properties for all inputs under stated
-  assumptions; it does not replace integration or end-to-end tests.
-- **Lean timeouts.** Complex proofs may time out — raise `LEAN_TIMEOUT`.
-- **First install is large.** Mathlib's prebuilt oleans are several GB and take a few
-  minutes, once, during `formal setup`.
+formal writes every proof that Lean accepted and the audit passed to disk, and reuses it.
+
+**The key is what is being proved:** the function source, the property kind, and the
+`formal` statement. formal normalises operator spelling and spacing, so
+`∀ x, p x → q x` and `forall x, p x -> q x` count as one statement.
+
+**The prose is left out of the key on purpose.** Descriptions, preconditions and
+assumptions are English, and English varies between writers and between runs. With prose
+in the key, every rephrasing meant a new key and a new proof of something already proved.
+Across the 148 properties of a real run, the function, the kind and the statement
+distinguished all of them. That is an observation about that corpus, not a theorem: the
+distinctness of keys rests on SHA-256.
+
+That choice has a cost: two callers can agree on a statement but model it differently.
+So a cache hit reports the description and assumptions recorded with the proof, as in the
+[worked example](#a-worked-example). Read them. If that model is not yours, change the
+`formal` statement so that it says what you mean.
+
+formal caches only proofs that Lean accepted and the audit passed. It never caches a
+failure, a proof that contains `sorry`, or a proof it refused. Cache entries from before
+the axiom audit are not trusted: formal checks each one again on first use.
+
+The cache holds one JSON file per entry under `PROOF_CACHE_DIR`. The next save deletes
+entries older than `PROOF_CACHE_TTL_DAYS`. The cache only saves time: when a write fails,
+formal logs it and the result stays the same.
+
+### Sandbox
+
+formal refuses proofs that can run code, but Lean itself remains a program that runs
+input written by a model. So formal also runs Lean inside
+[bubblewrap](https://github.com/containers/bubblewrap):
+
+- **No network,** so a proof cannot send out anything it reads.
+- **No home directory.** A temporary file system hides it, so `~/.claude`, `~/.ssh` and
+  `~/.aws` stay invisible.
+- **A read only root,** with the Lean toolchain mounted read only.
+- **One writable directory,** `lean_project/`.
+
+Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to turn it on.
+Without it, Lean runs outside a sandbox and formal warns once per run.
+`FORMAL_SANDBOX=bwrap` makes a missing bubblewrap an error, and `off` turns the sandbox
+off without a warning. `formal status` shows which one applies.
+
+The sandbox costs nothing measurable: 3.19 s with it and 3.31 s without, for a cold proof
+that imports Mathlib.
+
+The server listens on localhost, and `POST /session/{id}/check` runs Lean that the caller
+sent. Do not expose it beyond the loopback interface.
 
 ## Development
 
 From `rust/`:
 
 ```sh
-cargo fmt --all           # format (needs a nightly rustfmt)
-cargo clippy --all-targets  # lint
-cargo test                # tests
+cargo +nightly fmt --all       # format: rustfmt.toml uses options only nightly has
+cargo clippy --all-targets     # lint: clippy::pedantic is denied
+cargo test                     # test
 ```
 
-Edition 2024, `clippy::pedantic` denied. The tests that need Lean do nothing when
-there is none, so `cargo test` is quick without a toolchain and thorough with one —
-`--test lean` checks proofs, `--test guide_lemmas` checks that every lemma this
-guide names still exists in Mathlib.
+The code uses Rust edition 2024. The tests that need Lean skip themselves when there is
+none, so `cargo test` is quick without Lean and thorough with it. Five suites need Lean:
 
-What decides whether a change may land is data, not code:
-`tests/conformance/golden/responses.json` for the HTTP surface,
-`tests/fixtures/cache_keys.toml` for the digests every cached proof is filed
-under, and `tests/fixtures/hint_corpus.toml` for the advice. See CLAUDE.md.
+```sh
+cargo test -p formal-lean --test lean          # a true theorem, a false one, a hole, a batch
+cargo test -p formal-lean --test audit         # the false theorems Lean accepts and formal must not
+cargo test -p formal-lean --test warm          # a warm Lean gives the verdict a cold one gives
+cargo test -p formal-lean --test confinement   # bubblewrap confines what it claims to
+cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
+```
+
+CI runs all five in its `lean` job, inside the sandbox, on every pull request and on every
+push to `main`. The job fails before the tests if Lean or the REPL is missing, so no suite
+can pass by skipping itself.
+
+Three data files decide whether a change may land:
+
+- `tests/conformance/golden/responses.json` pins the HTTP surface.
+- `tests/fixtures/cache_keys.toml` pins the digest that files each cached proof.
+- `tests/fixtures/hint_corpus.toml` pins every hint.
+
+See `CLAUDE.md` for how to change them.
 
 ### Updating Lean dependencies
 
-`lean_project/lake-manifest.json` pins the exact commit of Mathlib and everything it pulls
-in — `lakefile.toml` only names a revision for Mathlib itself, so inherited packages are
-unpinned without it. `formal setup` skips `lake update` whenever the manifest exists.
+`lean_project/lake-manifest.json` pins the exact commit of Mathlib and of everything it
+pulls in. `lakefile.toml` names a revision only for the direct dependencies, so the
+manifest is what pins the rest. `formal setup` skips `lake update` whenever the manifest
+exists.
 
-To move to a newer Mathlib, bump both `rev`s in `lakefile.toml` (Mathlib and the REPL
-use the same Lean version tag) and the version in `lean-toolchain`, then regenerate and
-commit:
+To move to a newer Mathlib:
 
-```sh
-cd lean_project
-lake update && lake exe cache get && lake build Warmup repl
-```
+1. In `lakefile.toml`, bump both `rev` values. Mathlib and the REPL use the same Lean
+   version tag.
+2. Bump the version in `lean-toolchain`.
+3. Regenerate the manifest and the build, then commit:
 
-Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on lemma names
-or `simp` behaviour that changed.
+   ```sh
+   cd lean_project
+   lake update && lake exe cache get && lake build Warmup repl
+   ```
+
+Check a proof afterwards. A Mathlib update can break proofs that rely on lemma names or on
+`simp` behaviour that changed.
