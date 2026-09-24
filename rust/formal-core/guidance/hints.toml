@@ -78,6 +78,12 @@ default_name = '''that lemma'''
 template = '''`{name}` is a theorem/proposition, not a function — you cannot apply it to arguments. Use `simp [{name}]` or `rw [{name}]` to rewrite with it instead of passing arguments directly.'''
 
 [handler.tactic_failed]
+patterns = [
+  '''[Tt]actic `([^`]+)` failed''',
+  '''^tactic '([^']+)' failed''',
+  '''^([a-z_]+) failed to ''',
+  '''^([a-z_]+) (?:did not make|made no) progress''',
+]
 template = '''The `{name}` tactic ran and failed to close the goal.'''
 suffix = '''
 
@@ -88,7 +94,7 @@ The error prints the goal state after the failure — read it before rewriting t
 "decide" = '''The proposition is not closed, or deciding it exhausts the recursion budget. `decide` only works on ground decidable propositions; case-split the free variables first, and prefer explicit `rcases`/`by_cases` over `decide` on anything ranging over a large type such as `Char`.'''
 "omega" = '''`omega` handles linear integer and natural arithmetic only. Everything else in the goal is an opaque term to it, including unreduced projections and function calls — reduce those first, then call it.'''
 "simp" = '''`simp` could not make progress or could not close the goal. Give it the lemmas it needs — `simp [thoseLemmas]` — or use `simp only [...]` to keep it from rewriting into a shape you did not intend.'''
-"linarith" = '''`linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products.'''
+"linarith" = '''`linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. `nlinarith` reports its failures as `linarith` too: if the proof already used it, give it the products it needs as hypotheses, such as `mul_nonneg ha hb`.'''
 
 [[rule]]
 id = "foreign_axiom"

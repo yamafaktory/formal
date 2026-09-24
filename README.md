@@ -138,7 +138,7 @@ curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/
     "id": "apply_discount/bounded",
     "error": "linarith failed to find a contradiction\ncase left.h\nprice rate : ℚ\nh : 0 ≤ price\na✝ : price * (1 - max 0 (min rate 1)) < 0\n⊢ False\nfailed",
     "line": 9, "col": 18,
-    "hint": "…"
+    "hint": "The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. …"
   }],
   "remaining": ["apply_discount/bounded"],
   "complete": false
@@ -147,7 +147,8 @@ curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/
 
 formal first tried to recover the proof on its own, and failed. The error shows the goal
 Lean could not close. It is nonlinear: it multiplies `price` by a term in `rate`, and
-`linarith` decides only linear arithmetic.
+`linarith` decides only linear arithmetic. The hint says so, and names the two ways out:
+state the needed facts as hypotheses, or use `nlinarith`.
 
 **The fix.** The agent states the bounds on the clamped rate as hypotheses, and switches
 to `nlinarith`, which multiplies hypotheses together and so reaches nonlinear goals:

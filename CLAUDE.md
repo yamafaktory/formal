@@ -68,6 +68,13 @@ not in Rust. `hints.rs` is only the matcher. When adding a rule:
   no sample fails `every_rule_answers_at_least_one_sample`, which is the only
   thing standing between the table and a rule nobody can ever trigger.
 
+Lean words a tactic failure differently from tactic to tactic and from version to
+version. `[handler.tactic_failed] patterns` lists the wordings it recognises, and
+the first match names the tactic. A wording missing from that list sends the
+failure to the generic fallback without any test failing. When Lean rewords a
+failure, add the new wording there, and record the corpus sample from a real Lean
+run, never from memory.
+
 ## Lean
 
 The tests that need Lean do nothing when there is none, so `cargo test` is safe
