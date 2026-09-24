@@ -76,5 +76,16 @@ still checks proofs:
 
 ```sh
 cargo test -p formal-lean --test lean          # a true theorem, a false one, a hole, a batch
+cargo test -p formal-lean --test audit         # the false theorems Lean accepts and formal must not
+cargo test -p formal-lean --test warm          # a warm Lean gives the verdict a cold one gives
+cargo test -p formal-lean --test confinement   # bubblewrap confines what it claims to
 cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
 ```
+
+CI runs all five in the `lean` job, sandboxed, and fails before them if Lean or
+the REPL is missing, so none of them can pass by skipping.
+
+## Commits and pull requests
+
+No `Co-Authored-By` trailer on commits, and no "Generated with Claude Code" line
+in pull request descriptions.
