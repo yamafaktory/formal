@@ -267,6 +267,7 @@ dependencies = [
  "formal-server",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]

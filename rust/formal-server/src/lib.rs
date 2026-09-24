@@ -179,6 +179,8 @@ type ApiResult<T> = Result<Json<T>, ApiError>;
 /// Failing to bind the address, or failing while serving.
 pub async fn serve(state: Arc<AppState>, host: &str, port: u16) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind((host, port)).await?;
+    let warming = Arc::clone(&state);
+    tokio::task::spawn_blocking(move || warming.runner.warm_up());
     axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown())
         .await

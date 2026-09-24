@@ -70,7 +70,9 @@ Working on formal itself? Clone it, and a binary built from the checkout keeps i
 Lean project and results inside the repo.
 
 `formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
-toolchain, then downloads prebuilt Mathlib oleans. That is all it does — there is no
+toolchain, downloads prebuilt Mathlib oleans, and builds the
+[Lean REPL](https://github.com/leanprover-community/repl) that keeps Mathlib loaded
+between checks (see [Warm Lean](#warm-lean)). That is all it does — there is no
 backend to configure. Re-running is safe: completed steps are skipped.
 
 Any elan already on your system is used as-is. Nothing is added to your shell
@@ -275,6 +277,7 @@ Set in `.env` (created by `formal setup`), overridable by environment variable.
 | `SESSION_TTL_MINUTES` | Idle lifetime of a proof session (default `60`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default `120`) |
 | `FORMAL_SANDBOX` | `auto` (default), `bwrap` (require it), or `off` |
+| `FORMAL_WARM` | `on` (default) keeps a Lean with Mathlib loaded between checks; `off` starts Lean for every check |
 | `ELAN_HOME` | Lean toolchain install (default `~/.elan`) |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |
 | `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib |
@@ -368,6 +371,46 @@ importing Mathlib.
 The server binds to localhost and `POST /session/{id}/check` runs caller-supplied Lean.
 Do not expose it beyond the loopback interface.
 
+## Warm Lean
+
+Most of a Lean check is spent loading Mathlib, not checking the proof. The server keeps one
+Lean process with Mathlib already imported, and sends it each proof it can. It starts that
+process when the server starts, inside the same bubblewrap sandbox as every other Lean run.
+
+Measured on one machine (Mathlib v4.29.0, 20 cores):
+
+| | Cold (new Lean per check) | Warm |
+|---|---|---|
+| Two simple proofs | 2.65 s | 20–25 ms |
+| `exact?` premise search | 7.0 s every time (44 s of CPU) | 5 s once, then about 25 ms |
+| `POST /check`, three proofs, one recovered | 13.4–14.1 s | 1.1 s (5.8 s on the first request) |
+
+A proof is checked warm only when:
+
+- its only import is `import Mathlib`, which is the environment the warm process holds, and
+- it contains nothing that can run code while it elaborates: `#eval`, `run_cmd`, `elab`,
+  `macro`, `syntax`, `unsafe`, `native_decide`, or the names `IO` and `Lean`, among others.
+
+Everything else is checked cold, as before. The second rule exists because warm checks share
+a process: code run by one proof could write a false answer for the next proof. Each check
+starts from the same Mathlib environment, so declarations do not carry over from one check
+to the next.
+
+Only one warm check runs at a time. A check that finds the warm process busy runs cold
+instead of waiting. A check that runs past `LEAN_TIMEOUT` kills the warm process, and the
+next check starts a new one. The process is also replaced after 1,000 checks, because it
+keeps about 300 KB for every check it has run.
+
+The warm process holds about 6.4 GB resident. Most of that is Mathlib's files mapped into
+memory; its own heap is about 420 MB. A cold check peaks at about the same size, but only
+while it runs.
+
+`formal status` shows whether warm checking is on. If the REPL is not built, formal says so
+once and checks everything cold; `formal setup` builds it. For a Lean project made by an
+older formal, setup first adds the REPL to its `lakefile.toml`, at the tag that matches the
+project's `lean-toolchain`. It changes nothing else in the project and downloads no Mathlib
+files.
+
 ## Limitations
 
 - **The agent decides what is checked.** It can misread code, miss properties, or produce
@@ -412,12 +455,13 @@ under, and `tests/fixtures/hint_corpus.toml` for the advice. See CLAUDE.md.
 in — `lakefile.toml` only names a revision for Mathlib itself, so inherited packages are
 unpinned without it. `formal setup` skips `lake update` whenever the manifest exists.
 
-To move to a newer Mathlib, bump `rev` in `lakefile.toml` and the version in
-`lean-toolchain`, then regenerate and commit:
+To move to a newer Mathlib, bump both `rev`s in `lakefile.toml` (Mathlib and the REPL
+use the same Lean version tag) and the version in `lean-toolchain`, then regenerate and
+commit:
 
 ```sh
 cd lean_project
-lake update && lake exe cache get && lake build Warmup
+lake update && lake exe cache get && lake build Warmup repl
 ```
 
 Verify a file afterwards — a Mathlib bump can invalidate proofs that relied on lemma names

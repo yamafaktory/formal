@@ -9,19 +9,21 @@ use formal_lean::{
     process::Server,
     sandbox::Sandbox,
     toolchain::Toolchain,
+    warm,
 };
 
 /// Every key formal understands.
 ///
 /// A key outside this set is reported by `formal status`: something in `.env` that
 /// nothing reads is a misconfiguration that otherwise says nothing at all.
-pub(crate) const KNOWN_ENV_KEYS: [&str; 13] = [
+pub(crate) const KNOWN_ENV_KEYS: [&str; 14] = [
     "ELAN_HOME",
     "FORMAL_HOME",
     "FORMAL_HOST",
     "FORMAL_PORT",
     "FORMAL_RESULTS_DIR",
     "FORMAL_SANDBOX",
+    "FORMAL_WARM",
     "LEAN_PROJECT_DIR",
     "LEAN_TIMEOUT",
     "NO_COLOR",
@@ -98,6 +100,7 @@ impl Status {
                 },
             ),
             ("lean sandbox".to_string(), sandbox.describe()),
+            ("warm lean".to_string(), warm_lean(env, &paths)),
             (
                 "server".to_string(),
                 format!(
@@ -137,6 +140,16 @@ impl Status {
             .map(|(name, value)| format!("{name:width$}  {value}"))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+fn warm_lean(env: &Env, paths: &Paths) -> String {
+    if !warm::enabled(env) {
+        "off (FORMAL_WARM)".to_string()
+    } else if warm::repl_bin(&paths.lean_project_dir).is_file() {
+        "on".to_string()
+    } else {
+        "REPL not built — run: formal setup".to_string()
     }
 }
 
@@ -192,6 +205,7 @@ mod tests {
                 "lean toolchain",
                 "mathlib oleans",
                 "lean sandbox",
+                "warm lean",
                 "server",
             ]
         );
@@ -205,6 +219,18 @@ mod tests {
         };
         assert_eq!(by_name("home"), "/srv/formal");
         assert_eq!(by_name("lean sandbox"), "off (FORMAL_SANDBOX)");
+        assert_eq!(by_name("warm lean"), "REPL not built — run: formal setup");
+    }
+
+    #[test]
+    fn warm_lean_says_when_it_was_switched_off() {
+        let env = Env::from_pairs([("FORMAL_HOME", "/srv/formal"), ("FORMAL_WARM", "off")]);
+        let status = Status::read(&env, &[]);
+        assert!(
+            status.render().contains("off (FORMAL_WARM)"),
+            "{}",
+            status.render()
+        );
     }
 
     #[test]

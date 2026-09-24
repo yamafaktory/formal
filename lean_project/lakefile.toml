@@ -11,3 +11,8 @@ name = "Verify"
 
 [[lean_lib]]
 name = "Warmup"
+
+[[require]]
+name = "REPL"
+git = "https://github.com/leanprover-community/repl"
+rev = "v4.29.0"
