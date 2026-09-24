@@ -36,7 +36,7 @@ fn lean_accepts_a_true_theorem_and_rejects_a_false_one() {
     );
     assert!(!rejected.success);
     let first = rejected.first_error().expect("Lean said what was wrong");
-    assert!(!first.data.is_empty());
+    assert_ne!(first.data, "");
     assert_eq!(first.position().0, Some(3), "{first:?}");
 }
 

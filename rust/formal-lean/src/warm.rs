@@ -19,6 +19,7 @@ use std::{
     },
     sync::{
         Mutex,
+        OnceLock,
         TryLockError,
         atomic::{
             AtomicBool,
@@ -28,6 +29,7 @@ use std::{
             self,
             Receiver,
             RecvTimeoutError,
+            Sender,
         },
     },
     thread,
@@ -41,32 +43,17 @@ use serde_json::{
 };
 
 use crate::{
+    audit,
     env::Env,
     run::{
         Captured,
         kill_group,
     },
+    verifier::runs_code,
 };
 
 /// The only header a proof can have and still be checked warm.
 pub const WARM_IMPORT: &str = "import Mathlib";
-
-const DENIED: [&str; 14] = [
-    "IO",
-    "Lean",
-    "#eval",
-    "#exit",
-    "#guard",
-    "run_",
-    "elab",
-    "macro",
-    "syntax",
-    "initialize",
-    "unsafe",
-    "implemented_by",
-    "extern",
-    "native",
-];
 
 const OFF: [&str; 4] = ["off", "none", "0", "false"];
 
@@ -81,7 +68,7 @@ const MAX_COMMANDS: u32 = 1000;
 /// is the one it would have reported for the file.
 #[must_use]
 pub fn warm_command(lean_code: &str) -> Option<String> {
-    if DENIED.iter().any(|token| lean_code.contains(token)) {
+    if runs_code(lean_code).is_some() {
         return None;
     }
     let mut command = String::with_capacity(lean_code.len());
@@ -171,23 +158,57 @@ struct Session {
     stdin: ChildStdin,
     replies: Receiver<String>,
     commands: u32,
+    base: u64,
+}
+
+fn spawn_child(launch: &Launch) -> std::io::Result<Child> {
+    let (program, rest) = launch
+        .argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "nothing to run"))?;
+    Command::new(program)
+        .args(rest)
+        .current_dir(&launch.cwd)
+        .env_clear()
+        .envs(&launch.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+}
+
+type Spawned = std::io::Result<Child>;
+
+#[derive(Debug)]
+struct Spawner {
+    requests: Sender<(Launch, Sender<Spawned>)>,
+}
+
+impl Spawner {
+    fn new() -> Self {
+        let (requests, received) = mpsc::channel::<(Launch, Sender<Spawned>)>();
+        thread::spawn(move || {
+            for (launch, answer) in received {
+                let _ = answer.send(spawn_child(&launch));
+            }
+        });
+        Self { requests }
+    }
+
+    fn spawn(&self, launch: &Launch) -> Spawned {
+        let gone = || std::io::Error::other("the thread that starts warm Leans is gone");
+        let (answer, answered) = mpsc::channel();
+        self.requests
+            .send((launch.clone(), answer))
+            .map_err(|_| gone())?;
+        answered.recv().map_err(|_| gone())?
+    }
 }
 
 impl Session {
-    fn spawn(launch: &Launch) -> std::io::Result<Self> {
-        let (program, rest) = launch.argv.split_first().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "nothing to run")
-        })?;
-        let mut child = Command::new(program)
-            .args(rest)
-            .current_dir(&launch.cwd)
-            .env_clear()
-            .envs(&launch.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()?;
+    fn spawn(launch: &Launch, spawner: &Spawner) -> std::io::Result<Self> {
+        let mut child = spawner.spawn(launch)?;
         let missing = || std::io::Error::other("a pipe the child was given did not exist");
         let stdin = child.stdin.take().ok_or_else(missing)?;
         let stdout = child.stdout.take().ok_or_else(missing)?;
@@ -196,6 +217,7 @@ impl Session {
             stdin,
             replies: read_replies(stdout),
             commands: 0,
+            base: 0,
         })
     }
 
@@ -211,19 +233,33 @@ impl Session {
         }
     }
 
-    fn start(launch: &Launch) -> Result<Self, String> {
-        let mut session = Self::spawn(launch).map_err(|e| e.to_string())?;
-        match session.ask(&json!({ "cmd": WARM_IMPORT }), IMPORT_TIMEOUT) {
-            Asked::Answered(reply) => match captured_from_reply(&reply) {
-                Some(captured) if captured.code == Some(0) => Ok(session),
-                _ => Err(format!("importing Mathlib failed: {reply}")),
-            },
+    fn prepare(&mut self, command: &Value, what: &str) -> Result<u64, String> {
+        match self.ask(command, IMPORT_TIMEOUT) {
+            Asked::Answered(reply) => {
+                let env = serde_json::from_str::<Reply>(&reply)
+                    .ok()
+                    .and_then(|parsed| parsed.env);
+                match (captured_from_reply(&reply), env) {
+                    (Some(captured), Some(env)) if captured.code == Some(0) => Ok(env),
+                    _ => Err(format!("{what} failed: {reply}")),
+                }
+            }
             Asked::TimedOut => Err(format!(
-                "importing Mathlib took more than {}s",
+                "{what} took more than {}s",
                 IMPORT_TIMEOUT.as_secs()
             )),
-            Asked::Broken => Err("the REPL exited while importing Mathlib".to_string()),
+            Asked::Broken => Err(format!("the REPL exited while {what}")),
         }
+    }
+
+    fn start(launch: &Launch, spawner: &Spawner) -> Result<Self, String> {
+        let mut session = Self::spawn(launch, spawner).map_err(|e| e.to_string())?;
+        let imported = session.prepare(&json!({ "cmd": WARM_IMPORT }), "importing Mathlib")?;
+        session.base = session.prepare(
+            &json!({ "cmd": audit::definition(), "env": imported }),
+            "defining the axiom audit",
+        )?;
+        Ok(session)
     }
 }
 
@@ -256,22 +292,26 @@ fn read_replies(stdout: impl Read + Send + 'static) -> Receiver<String> {
     receive
 }
 
-/// One warm Lean, shared by every check that finds it free.
+/// Warm Leans, each taken by whichever check finds it free.
 #[derive(Debug)]
 pub struct Warm {
-    session: Mutex<Option<Session>>,
+    sessions: Vec<Mutex<Option<Session>>>,
     enabled: AtomicBool,
     max_commands: u32,
+    spawner: OnceLock<Spawner>,
 }
 
+type Slot<'a> = std::sync::MutexGuard<'a, Option<Session>>;
+
 impl Warm {
-    /// A warm Lean that starts on first use, or never when `enabled` is false.
+    /// Up to `processes` warm Leans, each started on first use; none when zero.
     #[must_use]
-    pub fn new(enabled: bool) -> Self {
+    pub fn new(processes: usize) -> Self {
         Self {
-            session: Mutex::new(None),
-            enabled: AtomicBool::new(enabled),
+            sessions: (0..processes).map(|_| Mutex::new(None)).collect(),
+            enabled: AtomicBool::new(processes > 0),
             max_commands: MAX_COMMANDS,
+            spawner: OnceLock::new(),
         }
     }
 
@@ -281,17 +321,29 @@ impl Warm {
         self.enabled.load(Ordering::Relaxed)
     }
 
-    /// Start Lean and import Mathlib now, unless it is already running or busy.
-    pub fn warm_up(&self, launch: impl FnOnce() -> Result<Launch, String>) {
+    /// How many warm Leans there may be at once.
+    #[must_use]
+    pub fn processes(&self) -> usize {
+        self.sessions.len()
+    }
+
+    /// Start every warm Lean now, side by side, rather than on first use.
+    pub fn warm_up(&self, launch: impl Fn() -> Result<Launch, String> + Sync) {
         if !self.enabled() {
             return;
         }
-        let Some(mut session) = self.free() else {
-            return;
-        };
-        if session.is_none() {
-            *session = self.start(launch);
-        }
+        thread::scope(|scope| {
+            for slot in &self.sessions {
+                let launch = &launch;
+                scope.spawn(move || {
+                    if let Some(mut session) = free(slot)
+                        && session.is_none()
+                    {
+                        *session = self.start(launch);
+                    }
+                });
+            }
+        });
     }
 
     /// Check `command`, or nothing when it has to be checked cold instead.
@@ -304,12 +356,12 @@ impl Warm {
         if !self.enabled() {
             return None;
         }
-        let mut guard = self.free()?;
+        let mut guard = self.take()?;
         if guard.is_none() {
             *guard = self.start(launch);
         }
         let session = guard.as_mut()?;
-        let asked = session.ask(&json!({ "cmd": command, "env": 0 }), timeout);
+        let asked = session.ask(&json!({ "cmd": command, "env": session.base }), timeout);
         session.commands += 1;
         let recycle = session.commands >= self.max_commands;
         let warmed = match asked {
@@ -323,31 +375,52 @@ impl Warm {
         warmed
     }
 
-    fn free(&self) -> Option<std::sync::MutexGuard<'_, Option<Session>>> {
-        match self.session.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
-            Err(TryLockError::WouldBlock) => None,
+    fn take(&self) -> Option<Slot<'_>> {
+        let mut unstarted = None;
+        for slot in &self.sessions {
+            if let Some(guard) = free(slot) {
+                if guard.is_some() {
+                    return Some(guard);
+                }
+                unstarted.get_or_insert(guard);
+            }
         }
+        unstarted
     }
 
     fn start(&self, launch: impl FnOnce() -> Result<Launch, String>) -> Option<Session> {
-        match launch().and_then(|launch| Session::start(&launch)) {
+        let spawner = self.spawner.get_or_init(Spawner::new);
+        match launch().and_then(|launch| Session::start(&launch, spawner)) {
             Ok(session) => Some(session),
             Err(reason) => {
-                self.enabled.store(false, Ordering::Relaxed);
-                eprintln!("[LEAN] warm Lean unavailable, checking cold: {reason}");
+                if self.enabled.swap(false, Ordering::Relaxed) {
+                    eprintln!("[LEAN] warm Lean unavailable, checking cold: {reason}");
+                }
                 None
             }
         }
     }
 }
 
-/// Whether `FORMAL_WARM` leaves warm checking on, which it is unless switched off.
+fn free(slot: &Mutex<Option<Session>>) -> Option<Slot<'_>> {
+    match slot.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(TryLockError::WouldBlock) => None,
+    }
+}
+
+/// How many warm Leans `FORMAL_WARM` asks for: a count, `off` for none, and one
+/// when it is unset or says anything else.
 #[must_use]
-pub fn enabled(env: &Env) -> bool {
-    env.get("FORMAL_WARM")
-        .is_none_or(|value| !OFF.contains(&value.to_lowercase().as_str()))
+pub fn processes(env: &Env) -> usize {
+    let Some(value) = env.get("FORMAL_WARM") else {
+        return 1;
+    };
+    if OFF.contains(&value.to_lowercase().as_str()) {
+        return 0;
+    }
+    value.parse().unwrap_or(1)
 }
 
 /// Where `lake build repl` leaves the REPL inside a Lean project.
@@ -413,8 +486,7 @@ mod tests {
                 "elab \"x\" : tactic => pure ()",
                 "macro \"x\" : tactic => `(tactic| rfl)",
                 "unsafe def f : Nat := 0",
-                "theorem t : 2 + 2 = 4 := by native_decide",
-                "theorem t : 2 + 2 = 4 := by decide +native",
+                "#exit",
             ] {
                 let code = format!("import Mathlib\n{code}\n");
                 assert_eq!(warm_command(&code), None, "{code}");
@@ -423,12 +495,14 @@ mod tests {
     }
 
     #[test]
-    fn warm_checking_is_on_unless_switched_off() {
-        assert!(enabled(&Env::from_pairs::<&str, &str>([])));
-        assert!(enabled(&Env::from_pairs([("FORMAL_WARM", "on")])));
+    fn one_warm_lean_unless_told_otherwise() {
+        assert_eq!(processes(&Env::from_pairs::<&str, &str>([])), 1);
+        assert_eq!(processes(&Env::from_pairs([("FORMAL_WARM", "on")])), 1);
+        assert_eq!(processes(&Env::from_pairs([("FORMAL_WARM", "3")])), 3);
         for value in ["off", "OFF", "0", "false", "none"] {
-            assert!(
-                !enabled(&Env::from_pairs([("FORMAL_WARM", value)])),
+            assert_eq!(
+                processes(&Env::from_pairs([("FORMAL_WARM", value)])),
+                0,
                 "{value}"
             );
         }
@@ -513,7 +587,7 @@ mod tests {
 
         #[test]
         fn a_command_is_answered_and_the_session_is_kept() {
-            let warm = Warm::new(true);
+            let warm = Warm::new(1);
             assert_eq!(
                 replied(warm.check("ok", SECOND, || Ok(fake()))).code,
                 Some(0)
@@ -528,7 +602,7 @@ mod tests {
 
         #[test]
         fn an_overrun_is_killed_and_the_next_check_starts_afresh() {
-            let warm = Warm::new(true);
+            let warm = Warm::new(1);
             let started = Instant::now();
             assert!(matches!(
                 warm.check("slow", Duration::from_millis(200), || Ok(fake())),
@@ -543,7 +617,7 @@ mod tests {
 
         #[test]
         fn a_repl_that_dies_or_misanswers_hands_the_check_back() {
-            let warm = Warm::new(true);
+            let warm = Warm::new(1);
             assert!(warm.check("crash", SECOND, || Ok(fake())).is_none());
             assert!(warm.check("broken", SECOND, || Ok(fake())).is_none());
             assert!(warm.enabled());
@@ -555,23 +629,82 @@ mod tests {
 
         #[test]
         fn a_busy_session_hands_the_check_back_rather_than_queueing() {
-            let warm = Warm::new(true);
-            let _held = warm.session.lock().expect("an unpoisoned lock");
+            let warm = Warm::new(1);
+            let _held = warm.sessions[0].lock().expect("an unpoisoned lock");
             assert!(warm.check("ok", SECOND, || Ok(fake())).is_none());
         }
 
         #[test]
+        fn a_second_lean_takes_the_check_the_first_is_too_busy_for() {
+            let warm = Warm::new(2);
+            replied(warm.check("ok", SECOND, || Ok(fake())));
+            let _held = warm.sessions[0].lock().expect("an unpoisoned lock");
+            replied(warm.check("ok", SECOND, || Ok(fake())));
+            assert!(
+                warm.sessions[1]
+                    .lock()
+                    .expect("an unpoisoned lock")
+                    .is_some()
+            );
+        }
+
+        #[test]
+        fn a_running_lean_is_preferred_to_starting_another() {
+            let warm = Warm::new(3);
+            replied(warm.check("ok", SECOND, || Ok(fake())));
+            replied(warm.check("ok", SECOND, || panic!("one is already running")));
+        }
+
+        #[test]
+        fn a_lean_outlives_the_thread_that_asked_for_it() {
+            if !Path::new("/usr/bin/setpriv").is_file() {
+                return;
+            }
+            let dies_with_its_parent = || {
+                let mut launch = fake();
+                let mut argv: Vec<OsString> = ["/usr/bin/setpriv", "--pdeathsig", "KILL", "--"]
+                    .map(OsString::from)
+                    .into();
+                argv.append(&mut launch.argv);
+                launch.argv = argv;
+                Ok(launch)
+            };
+            let warm = Warm::new(1);
+            thread::scope(|scope| {
+                scope.spawn(|| warm.warm_up(dies_with_its_parent));
+            });
+            thread::sleep(Duration::from_millis(200));
+            replied(warm.check("ok", SECOND, || {
+                panic!("the first one should still be running")
+            }));
+        }
+
+        #[test]
+        fn warming_up_starts_every_lean_at_once() {
+            let warm = Warm::new(3);
+            warm.warm_up(|| Ok(fake()));
+            for slot in &warm.sessions {
+                assert!(slot.lock().expect("an unpoisoned lock").is_some());
+            }
+        }
+
+        #[test]
         fn a_session_is_replaced_after_its_quota_of_commands() {
-            let mut warm = Warm::new(true);
+            let mut warm = Warm::new(1);
             warm.max_commands = 2;
             replied(warm.check("ok", SECOND, || Ok(fake())));
             replied(warm.check("ok", SECOND, || Ok(fake())));
-            assert!(warm.session.lock().expect("an unpoisoned lock").is_none());
+            assert!(
+                warm.sessions[0]
+                    .lock()
+                    .expect("an unpoisoned lock")
+                    .is_none()
+            );
         }
 
         #[test]
         fn a_launch_that_fails_turns_warm_checking_off() {
-            let warm = Warm::new(true);
+            let warm = Warm::new(1);
             assert!(
                 warm.check("ok", SECOND, || Err("no REPL".to_string()))
                     .is_none()
@@ -582,7 +715,7 @@ mod tests {
 
         #[test]
         fn switched_off_it_never_launches() {
-            let warm = Warm::new(false);
+            let warm = Warm::new(0);
             assert!(
                 warm.check("ok", SECOND, || panic!("nothing to launch"))
                     .is_none()

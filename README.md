@@ -277,7 +277,7 @@ Set in `.env` (created by `formal setup`), overridable by environment variable.
 | `SESSION_TTL_MINUTES` | Idle lifetime of a proof session (default `60`) |
 | `LEAN_TIMEOUT` | Seconds before a Lean check times out (default `120`) |
 | `FORMAL_SANDBOX` | `auto` (default), `bwrap` (require it), or `off` |
-| `FORMAL_WARM` | `on` (default) keeps a Lean with Mathlib loaded between checks; `off` starts Lean for every check |
+| `FORMAL_WARM` | How many Lean processes to keep with Mathlib loaded between checks: `on` or unset for one, a number for more, `off` to start Lean for every check |
 | `ELAN_HOME` | Lean toolchain install (default `~/.elan`) |
 | `FORMAL_HOME` | Root for everything below (default: the checkout) |
 | `LEAN_PROJECT_DIR` | Lean project holding the toolchain and Mathlib |
@@ -371,9 +371,34 @@ importing Mathlib.
 The server binds to localhost and `POST /session/{id}/check` runs caller-supplied Lean.
 Do not expose it beyond the loopback interface.
 
+## What a pass means
+
+Lean accepting a file is not enough for formal. Lean accepts, without any message, a
+theorem proved from an axiom the file declares, and it stops checking at `#exit`. formal
+refuses both cases:
+
+- **Proofs that can run code are refused before Lean runs.** Such code could print a fake
+  verdict. The refusal covers `#eval`, `#exit`, `#guard_msgs`, `run_cmd` and the other
+  `run_` commands, `elab`, `macro`, `syntax`, `initialize`, `unsafe`, `implemented_by`,
+  `extern`, and the `IO` and `Lean` namespaces. Comments are ignored.
+- **Every check ends with an axiom audit.** formal adds a command after the proof. It lists
+  every declaration in the file that depends on an axiom other than `propext`,
+  `Classical.choice` and `Quot.sound`. A declared axiom, a `sorry` (also one hidden with
+  `#guard_msgs`) or `native_decide` makes the check fail at the line of that declaration.
+- **The audit must report.** Its report carries a random nonce that the proof cannot know.
+  If the report is missing, the check fails. This happens when Lean stops before the end
+  of the file, for example at an unclosed comment.
+
+The audit follows dependencies only through the file's own declarations. Imported Mathlib
+declarations are trusted as built, which is the same trust Lean gives them. The audit costs
+about 0.27 s on a cold check, and nothing measurable on a warm one.
+
+Cached proofs from before the audit are not trusted: formal checks each one again on its
+first use.
+
 ## Warm Lean
 
-Most of a Lean check is spent loading Mathlib, not checking the proof. The server keeps one
+Most of a Lean check is spent loading Mathlib, not checking the proof. The server keeps a
 Lean process with Mathlib already imported, and sends it each proof it can. It starts that
 process when the server starts, inside the same bubblewrap sandbox as every other Lean run.
 
@@ -383,27 +408,25 @@ Measured on one machine (Mathlib v4.29.0, 20 cores):
 |---|---|---|
 | Two simple proofs | 2.65 s | 20–25 ms |
 | `exact?` premise search | 7.0 s every time (44 s of CPU) | 5 s once, then about 25 ms |
-| `POST /check`, three proofs, one recovered | 13.4–14.1 s | 1.1 s (5.8 s on the first request) |
+| `POST /check`, three proofs, one recovered | 13.9–16.7 s | 1.2 s (5.9 s on the first request) |
 
-A proof is checked warm only when:
+A proof is checked warm only when its only import is `import Mathlib`, which is the
+environment the warm process holds. Everything else is checked cold, as before. A proof
+that could run code never gets this far (see [What a pass means](#what-a-pass-means)).
+This matters more for warm checks: they share a process, so code run by one proof could
+write a false answer for the next. Each check starts from the same Mathlib environment,
+so declarations do not carry over from one check to the next.
 
-- its only import is `import Mathlib`, which is the environment the warm process holds, and
-- it contains nothing that can run code while it elaborates: `#eval`, `run_cmd`, `elab`,
-  `macro`, `syntax`, `unsafe`, `native_decide`, or the names `IO` and `Lean`, among others.
+Each warm process runs one check at a time. `FORMAL_WARM=3` keeps three, and a check takes
+whichever one is free. When all of them are busy, the check runs cold instead of waiting.
+With three requests at the same moment, one process sent one of them cold (2.9 s). Three
+processes kept all of them warm (0.12 s or less). A check that runs past `LEAN_TIMEOUT`
+kills its process, and a later check starts a new one. Each process is also replaced after
+1,000 checks, because it keeps about 300 KB for every check it has run.
 
-Everything else is checked cold, as before. The second rule exists because warm checks share
-a process: code run by one proof could write a false answer for the next proof. Each check
-starts from the same Mathlib environment, so declarations do not carry over from one check
-to the next.
-
-Only one warm check runs at a time. A check that finds the warm process busy runs cold
-instead of waiting. A check that runs past `LEAN_TIMEOUT` kills the warm process, and the
-next check starts a new one. The process is also replaced after 1,000 checks, because it
-keeps about 300 KB for every check it has run.
-
-The warm process holds about 6.4 GB resident. Most of that is Mathlib's files mapped into
-memory; its own heap is about 420 MB. A cold check peaks at about the same size, but only
-while it runs.
+A warm process holds about 6.3 GB resident. Most of that is Mathlib's files mapped into
+memory, and every process shares those pages. One process lowers available memory by about
+600 MB, and each further process by about 650 MB.
 
 `formal status` shows whether warm checking is on. If the REPL is not built, formal says so
 once and checks everything cold; `formal setup` builds it. For a Lean project made by an

@@ -139,11 +139,97 @@ impl LeanResult {
     }
 }
 
+fn runs_code_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    PATTERN.get_or_init(|| {
+        Regex::new(
+            r"#(?:eval|exit|guard)\w*|\b(?:run_\w+|by_elab|elab|elab_rules|macro|macro_rules|syntax|declare_syntax_cat|\w*initialize|unsafe\w*|implemented_by|extern|(?:command|term|tactic)_elab|delab|(?:E|Base)?IO|Lean)\b",
+        )
+        .expect("the pattern is a literal")
+    })
+}
+
+fn without_comments(lean_code: &str) -> String {
+    let mut kept = String::with_capacity(lean_code.len());
+    let mut rest = lean_code;
+    while let Some(c) = rest.chars().next() {
+        if rest.starts_with("--") {
+            let end = rest.find('\n').unwrap_or(rest.len());
+            kept.push(' ');
+            rest = &rest[end..];
+        } else if rest.starts_with("/-") {
+            let mut depth = 0usize;
+            let mut index = 0;
+            while index < rest.len() {
+                if rest[index..].starts_with("/-") {
+                    depth += 1;
+                    index += 2;
+                } else if rest[index..].starts_with("-/") {
+                    depth -= 1;
+                    index += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    index += rest[index..].chars().next().map_or(1, char::len_utf8);
+                }
+            }
+            kept.push(' ');
+            rest = &rest[index.min(rest.len())..];
+        } else if c == '"' {
+            let mut index = 1;
+            let mut escaped = false;
+            for (offset, next) in rest[1..].char_indices() {
+                index = 1 + offset + next.len_utf8();
+                if escaped {
+                    escaped = false;
+                } else if next == '\\' {
+                    escaped = true;
+                } else if next == '"' {
+                    break;
+                }
+            }
+            kept.push_str(&rest[..index]);
+            rest = &rest[index..];
+        } else if rest.starts_with("'\"'") {
+            kept.push_str("'\"'");
+            rest = &rest[3..];
+        } else {
+            kept.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    kept
+}
+
+/// The first thing in `lean_code` that could run code while Lean elaborates it.
+///
+/// Such code could print what formal reads as Lean's verdict, so a proof that
+/// contains any of it is refused rather than checked. Comments are ignored.
+#[must_use]
+pub fn runs_code(lean_code: &str) -> Option<String> {
+    runs_code_pattern()
+        .find(&without_comments(lean_code))
+        .map(|found| found.as_str().to_string())
+}
+
 /// Fast pre-check before invoking the full Lean verifier.
 #[must_use]
 pub fn check_syntax(lean_code: &str) -> (bool, String) {
     if lean_code.trim().is_empty() {
         return (false, "Empty Lean code".to_string());
+    }
+    if let Some(found) = runs_code(lean_code) {
+        return (
+            false,
+            format!(
+                "The proof contains `{found}`, which can run code while Lean checks it or stop \
+                 Lean before the end of the file, and formal does not check proofs that can. \
+                 Prove the property with tactics and terms, \
+                 without #eval, #exit, #guard_msgs, run_cmd, elab, macro, syntax, initialize, \
+                 unsafe, implemented_by, extern, or the IO and Lean namespaces."
+            ),
+        );
     }
     if !REQUIRED_KEYWORDS
         .iter()
@@ -356,17 +442,21 @@ pub fn build_batch(entries: &mut [BatchEntry]) -> String {
 }
 
 /// Move a position from the concatenated batch back into the submitted proof.
-fn rebase(error: &LeanError, entry: &BatchEntry) -> LeanError {
+fn rebase(error: &LeanError, entry: &BatchEntry, index: usize) -> LeanError {
+    let unqualified = LeanError {
+        data: error.data.replace(&format!("`Batch{index}."), "`"),
+        ..error.clone()
+    };
     let Some(line) = error.position().0 else {
-        return error.clone();
+        return unqualified;
     };
-    let Some(index) = line.checked_sub(entry.first_line) else {
-        return error.clone();
+    let Some(offset) = line.checked_sub(entry.first_line) else {
+        return unqualified;
     };
-    entry
-        .source_lines
-        .get(index as usize)
-        .map_or_else(|| error.clone(), |source| error.rebased_to(*source))
+    entry.source_lines.get(offset as usize).map_or_else(
+        || unqualified.clone(),
+        |source| unqualified.rebased_to(*source),
+    )
 }
 
 /// Check several proofs in a single Lean invocation, paying one Mathlib import.
@@ -401,12 +491,13 @@ where
     Some(
         entries
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(index, entry)| {
                 let errors: Vec<LeanError> = result
                     .errors
                     .iter()
                     .filter(|error| entry.covers(error.position().0.unwrap_or(0)))
-                    .map(|error| rebase(error, entry))
+                    .map(|error| rebase(error, entry, index))
                     .collect();
                 let result = LeanResult {
                     success: errors.is_empty(),
@@ -480,10 +571,9 @@ mod tests {
 
         #[test]
         fn anything_unrecognised_still_gets_an_answer() {
-            assert!(
-                !failure("some completely unknown error xyz")
-                    .hint_for_error(table())
-                    .is_empty()
+            assert_ne!(
+                failure("some completely unknown error xyz").hint_for_error(table()),
+                ""
             );
         }
     }
@@ -506,6 +596,67 @@ mod tests {
             ] {
                 assert!(check_syntax(code).0, "{code}");
             }
+        }
+
+        #[test]
+        fn a_proof_that_can_run_code_is_refused_by_what_it_contains() {
+            for (code, found) in [
+                ("theorem t : True := trivial\n#eval 1", "#eval"),
+                ("#exit\ntheorem t : (1 : Nat) = 2 := by rfl", "#exit"),
+                ("#guard_msgs in\ntheorem t : True := trivial", "#guard_msgs"),
+                ("run_cmd pure ()\ntheorem t : True := trivial", "run_cmd"),
+                ("open Lean in\ntheorem t : True := trivial", "Lean"),
+                (
+                    "def f : IO Unit := pure ()\ntheorem t : True := trivial",
+                    "IO",
+                ),
+                (
+                    "def f : BaseIO Unit := pure ()\ntheorem t : True := trivial",
+                    "BaseIO",
+                ),
+                (
+                    "@[implemented_by g] def f := 1\ntheorem t : True := trivial",
+                    "implemented_by",
+                ),
+                (
+                    "macro_rules | `(x) => `(y)\ntheorem t : True := trivial",
+                    "macro_rules",
+                ),
+                (
+                    "unsafe def f : Nat := 0\ntheorem t : True := trivial",
+                    "unsafe",
+                ),
+                (
+                    "initialize pure ()\ntheorem t : True := trivial",
+                    "initialize",
+                ),
+            ] {
+                let (ok, message) = check_syntax(code);
+                assert!(!ok, "{code}");
+                assert!(message.contains(&format!("`{found}`")), "{code}: {message}");
+            }
+        }
+
+        #[test]
+        fn a_word_inside_a_comment_or_another_name_is_not_refused() {
+            for code in [
+                "-- elaborated with #eval once\ntheorem t : True := trivial",
+                "/- a macro, /- nested -/ and IO -/\ntheorem t : True := trivial",
+                "theorem relabel_ok : True := trivial",
+                "theorem t (ratIO : Nat) : ratIO = ratIO := rfl",
+                "theorem t : \"-- not a comment\" = \"-- not a comment\" := rfl",
+                "def q : Char := '\"'\ntheorem t : q = q := rfl",
+            ] {
+                assert!(check_syntax(code).0, "{code}");
+            }
+        }
+
+        #[test]
+        fn code_after_a_string_that_looks_like_a_comment_is_still_read() {
+            assert_eq!(
+                runs_code("theorem t : \"--\" = \"--\" := rfl #eval 1").as_deref(),
+                Some("#eval")
+            );
         }
 
         #[test]
@@ -825,7 +976,7 @@ mod tests {
         #[test]
         fn a_batch_position_becomes_a_position_in_the_submitted_proof() {
             let entry = entry();
-            let rebased = rebase(&at(entry.first_line + 1, 3), &entry);
+            let rebased = rebase(&at(entry.first_line + 1, 3), &entry, 0);
             assert_eq!(rebased.position(), (Some(entry.source_lines[1]), Some(3)));
         }
 
@@ -833,14 +984,25 @@ mod tests {
         fn a_position_outside_the_entry_is_left_alone() {
             let entry = entry();
             let original = at(9999, 1);
-            assert_eq!(rebase(&original, &entry), original);
+            assert_eq!(rebase(&original, &entry, 0), original);
         }
 
         #[test]
         fn a_position_before_the_entry_is_left_alone() {
             let entry = entry();
             let original = at(1, 1);
-            assert_eq!(rebase(&original, &entry), original);
+            assert_eq!(rebase(&original, &entry, 0), original);
+        }
+
+        #[test]
+        fn the_batch_namespace_is_taken_off_a_name_the_error_quotes() {
+            let entry = entry();
+            let error = LeanError {
+                data: "`Batch2.p0` rests on `Batch2.cheat`".to_string(),
+                ..at(entry.first_line, 0)
+            };
+            assert_eq!(rebase(&error, &entry, 2).data, "`p0` rests on `cheat`");
+            assert_eq!(rebase(&error, &entry, 1).data, error.data);
         }
 
         #[test]
@@ -850,7 +1012,7 @@ mod tests {
                 data: "boom".to_string(),
                 ..LeanError::default()
             };
-            assert_eq!(rebase(&original, &entry), original);
+            assert_eq!(rebase(&original, &entry, 0), original);
         }
 
         #[test]

@@ -144,10 +144,15 @@ impl Status {
 }
 
 fn warm_lean(env: &Env, paths: &Paths) -> String {
-    if !warm::enabled(env) {
+    let processes = warm::processes(env);
+    if processes == 0 {
         "off (FORMAL_WARM)".to_string()
     } else if warm::repl_bin(&paths.lean_project_dir).is_file() {
-        "on".to_string()
+        if processes == 1 {
+            "on".to_string()
+        } else {
+            format!("on ({processes} processes)")
+        }
     } else {
         "REPL not built — run: formal setup".to_string()
     }
@@ -181,7 +186,10 @@ mod tests {
 
     #[test]
     fn every_key_formal_understands_is_accepted() {
-        assert!(unknown_env_keys(&dotenv(&KNOWN_ENV_KEYS)).is_empty());
+        assert_eq!(
+            unknown_env_keys(&dotenv(&KNOWN_ENV_KEYS)),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

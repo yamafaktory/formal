@@ -12,6 +12,14 @@
 # Lean reported no error at all, so there is nothing to advise.
 hint = ''
 
+[foreign_axiom]
+error = '`p0` rests on `cheat`, and formal accepts only `propext`, `Classical.choice`, `Quot.sound`. A proof that depends on another axiom, on `sorry` or on `native_decide` establishes nothing.'
+hint = '''Only `propext`, `Classical.choice` and `Quot.sound` are accepted. Remove any `axiom` declaration and prove the fact it stood for, replace every `sorry` with a proof, and replace `native_decide` with `decide`, `norm_num` or `simp`.'''
+
+[stopped_before_the_end]
+error = 'formal could not confirm that Lean checked the whole file: the axiom check formal appends after the proof never ran. `#exit`, an unclosed comment, or a trailing `... in` stops it.'
+hint = '''Lean stopped before the end of the file, so nothing after that point was checked. Remove `#exit`, close every `/-` comment, and do not end the file with `set_option ... in` or `open ... in` without a declaration after it.'''
+
 [string_literal_length_goal]
 error = '''
 unsolved goals

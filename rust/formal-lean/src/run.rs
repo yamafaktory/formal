@@ -51,6 +51,7 @@ use tempfile::Builder;
 use thiserror::Error;
 
 use crate::{
+    audit::Audit,
     env::Env,
     paths::Paths,
     sandbox::{
@@ -382,7 +383,7 @@ impl Runner {
         let timeout = env
             .number("LEAN_TIMEOUT")
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
-        Self::new(paths, toolchain, sandbox, timeout).with_warm(crate::warm::enabled(env))
+        Self::new(paths, toolchain, sandbox, timeout).with_warm(crate::warm::processes(env))
     }
 
     /// A runner told what to use rather than asked to find it.
@@ -395,14 +396,15 @@ impl Runner {
             timeout,
             lean_env: OnceLock::new(),
             warned: AtomicBool::new(false),
-            warm: Warm::new(false),
+            warm: Warm::new(0),
         }
     }
 
-    /// The same runner, keeping a warm Lean for the proofs that can use one.
+    /// The same runner, keeping up to `processes` warm Leans for the proofs that
+    /// can use one.
     #[must_use]
-    pub fn with_warm(mut self, enabled: bool) -> Self {
-        self.warm = Warm::new(enabled);
+    pub fn with_warm(mut self, processes: usize) -> Self {
+        self.warm = Warm::new(processes);
         self
     }
 
@@ -525,12 +527,17 @@ impl Runner {
             return Ok(failed("Empty Lean code"));
         }
 
+        let audit = Audit::new();
         let effective = timeout.unwrap_or(self.timeout);
         if let Some(command) = warm_command(lean_code)
-            && let Some(warmed) = self.warm.check(&command, effective, || self.warm_launch())
+            && let Some(warmed) = self
+                .warm
+                .check(&audit.called_after(&command), effective, || {
+                    self.warm_launch()
+                })
         {
             return Ok(match warmed {
-                Warmed::Replied(captured) => parse_output(&captured),
+                Warmed::Replied(captured) => audit.judge(parse_output(&captured)),
                 Warmed::TimedOut => timed_out(effective),
             });
         }
@@ -552,7 +559,7 @@ impl Runner {
             .tempfile_in(&dir)
             .map_err(unwritable)?;
         scratch
-            .write_all(lean_code.as_bytes())
+            .write_all(audit.appended_to(lean_code).as_bytes())
             .and_then(|()| scratch.flush())
             .map_err(unwritable)?;
 
@@ -564,7 +571,7 @@ impl Runner {
         if captured.timed_out {
             return Ok(timed_out(effective));
         }
-        Ok(parse_output(&captured))
+        Ok(audit.judge(parse_output(&captured)))
     }
 
     /// Check several proofs in one invocation, paying one Mathlib import.
@@ -733,7 +740,7 @@ mod tests {
         fn a_clean_run_succeeds() {
             let result = parse_output(&captured(0, ""));
             assert!(result.success);
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
         }
 
         #[test]
@@ -750,7 +757,7 @@ mod tests {
                 0,
                 &message("error", "declaration uses 'sorry'", 1),
             ));
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
             assert!(result.success);
         }
 
@@ -788,7 +795,7 @@ mod tests {
         #[test]
         fn a_json_line_that_is_not_an_object_is_not_a_diagnostic() {
             let result = parse_output(&captured(0, "5\n[1, 2]\n\"a string\""));
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
             assert!(result.success);
         }
 

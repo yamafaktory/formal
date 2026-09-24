@@ -96,6 +96,6 @@ mod tests {
 
     #[test]
     fn nothing_splits_the_empty_string() {
-        assert!(splitlines("").is_empty());
+        assert_eq!(splitlines(""), Vec::<&str>::new());
     }
 }

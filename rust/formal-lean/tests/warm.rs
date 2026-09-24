@@ -20,12 +20,12 @@ use formal_lean::{
 };
 
 fn runners() -> Option<(Runner, Runner)> {
-    let cold = Runner::from_env().with_warm(false);
+    let cold = Runner::from_env().with_warm(0);
     let project = &cold.paths().lean_project_dir;
     let ready = project.join("lakefile.toml").is_file()
         && project.join(".lake").is_dir()
         && repl_bin(project).is_file();
-    ready.then(|| (Runner::from_env().with_warm(true), cold))
+    ready.then(|| (Runner::from_env().with_warm(1), cold))
 }
 
 type Verdict = (
