@@ -361,3 +361,43 @@ error = '''
 Function expected
 unexpected Field access after a space'''
 hint = 'Lean parsed a space before `.field` as function application. Write field access without a space: `x.id` not `x .id`. Also avoid `head!` — use `List.head?` or case on the list instead.'
+
+[linarith_failed_to_find_a_contradiction]
+# Lean 4.29 wording; nlinarith reports its failures the same way.
+error = '''
+linarith failed to find a contradiction
+case h
+p r : ℚ
+h : 0 ≤ p
+a✝ : p * r < 0
+⊢ False
+failed'''
+hint = '''
+The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. `nlinarith` reports its failures as `linarith` too: if the proof already used it, give it the products it needs as hypotheses, such as `mul_nonneg ha hb`.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+
+[aesop_failed_in_quotes]
+# Lean 4.29 quotes the tactic name instead of backticks.
+error = '''
+tactic 'aesop' failed, made no progress
+Initial goal:
+  P Q : Prop
+  h : P
+  ⊢ Q'''
+hint = '''
+The `aesop` tactic ran and failed to close the goal.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+
+[gcongr_did_not_make_progress]
+error = '''
+gcongr did not make progress'''
+hint = '''
+The `gcongr` tactic ran and failed to close the goal.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+
+[simp_all_made_no_progress]
+error = '''
+simp_all made no progress'''
+hint = '''
+The `simp_all` tactic ran and failed to close the goal.
+The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''

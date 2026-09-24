@@ -81,6 +81,14 @@ pub enum HintTableError {
     /// A handler is named by a rule but never configured.
     #[error("{ORIGIN}: no configuration for handler {0}")]
     UnconfiguredHandler(String),
+    /// A pattern that cannot pick the tactic name out of a diagnostic.
+    #[error("{ORIGIN}: tactic pattern {pattern} {reason}")]
+    BadPattern {
+        /// The pattern as written.
+        pattern: String,
+        /// What is wrong with it.
+        reason: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -147,7 +155,21 @@ struct FunctionExpectedLemma {
 struct TacticFailed {
     template: String,
     suffix: String,
+    patterns: Vec<String>,
     tactics: BTreeMap<String, String>,
+    #[serde(skip)]
+    compiled: OnceLock<Vec<Regex>>,
+}
+
+impl TacticFailed {
+    fn compiled(&self) -> &[Regex] {
+        self.compiled.get_or_init(|| {
+            self.patterns
+                .iter()
+                .filter_map(|source| Regex::new(source).ok())
+                .collect()
+        })
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -290,6 +312,21 @@ impl Table {
         }
         if self.fallback.is_empty() {
             return Err(HintTableError::NoFallback);
+        }
+
+        if let Some(config) = &self.handler.tactic_failed {
+            for source in &config.patterns {
+                let bad = |reason: String| HintTableError::BadPattern {
+                    pattern: source.clone(),
+                    reason,
+                };
+                let compiled = Regex::new(source).map_err(|e| bad(e.to_string()))?;
+                if compiled.captures_len() != 2 {
+                    return Err(bad(
+                        "must capture exactly one group, the tactic name".to_string()
+                    ));
+                }
+            }
         }
 
         let mut seen = BTreeSet::new();
@@ -483,7 +520,10 @@ impl Table {
 
     fn tactic_failed(&self, data: &str) -> Option<String> {
         let config = self.handler.tactic_failed.as_ref()?;
-        let found = captured!(data, r"[Tt]actic `([^`]+)` failed")?;
+        let found = config
+            .compiled()
+            .iter()
+            .find_map(|pattern| pattern.captures(data))?;
         let name = &found[1];
         let mut hint = fill(&config.template, &[("name", name)]);
         if let Some(specific) = config.tactics.get(name) {
@@ -563,6 +603,63 @@ mod tests {
         );
     }
 
+    fn with_patterns(patterns: &str) -> Result<Table, HintTableError> {
+        Table::parse(&format!(
+            "version = 1\nfallback = 'x'\n[handler.tactic_failed]\npatterns = {patterns}\n\
+             template = 'The `{{name}}` tactic failed.'\nsuffix = ''\n[handler.tactic_failed.tactics]\n\
+             [[rule]]\nid = 'a'\nhandler = 'tactic_failed'"
+        ))
+    }
+
+    #[test]
+    fn a_tactic_pattern_that_does_not_compile_is_refused() {
+        let error = with_patterns("['(unclosed']").expect_err("it is refused");
+        assert!(
+            error.to_string().contains("tactic pattern (unclosed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_tactic_pattern_must_capture_exactly_the_name() {
+        for patterns in ["['no group']", "['(two) (groups)']"] {
+            let error = with_patterns(patterns).expect_err("it is refused");
+            assert!(
+                error.to_string().contains("must capture exactly one group"),
+                "{patterns}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_pattern_that_matches_names_the_tactic() {
+        let table = with_patterns(r"['^first (\w+)', '(\w+) second']").expect("a valid table");
+        assert_eq!(table.hint_for("first a second"), "The `a` tactic failed.");
+        assert_eq!(table.hint_for("b second"), "The `b` tactic failed.");
+        assert_eq!(table.hint_for("neither"), "x");
+    }
+
+    #[test]
+    fn the_shipped_patterns_name_the_tactic_in_each_wording_lean_uses() {
+        let table = Table::shipped().expect("the shipped table");
+        for (data, name) in [
+            ("Tactic `rfl` failed: The left-hand side", "rfl"),
+            ("tactic 'aesop' failed, made no progress", "aesop"),
+            (
+                "linarith failed to find a contradiction\ncase a",
+                "linarith",
+            ),
+            ("gcongr did not make progress", "gcongr"),
+            ("simp_all made no progress", "simp_all"),
+        ] {
+            let hint = table.hint_for(data);
+            assert!(
+                hint.starts_with(&format!("The `{name}` tactic ran and failed")),
+                "{data}: {hint}"
+            );
+        }
+    }
+
     #[test]
     fn two_rules_under_one_id_are_refused() {
         let error =
@@ -592,7 +689,7 @@ mod tests {
     #[test]
     fn a_rule_that_matches_but_answers_nothing_falls_through_to_the_next() {
         let table = Table::parse(
-            "version = 1\nfallback = 'x'\n[handler.tactic_failed]\ntemplate = 't'\nsuffix = ''\n\
+            "version = 1\nfallback = 'x'\n[handler.tactic_failed]\npatterns = []\ntemplate = 't'\nsuffix = ''\n\
              [handler.tactic_failed.tactics]\n[[rule]]\nid = 'a'\nall = ['boom']\nhandler = 'tactic_failed'\n\
              [[rule]]\nid = 'b'\nall = ['boom']\nhint = 'the next one'",
         )
