@@ -32,6 +32,12 @@ use formal_lean::{
 /// How long an entry survives without being rewritten.
 const DEFAULT_TTL: Duration = Duration::from_hours(24 * 7);
 
+/// Marks an entry accepted after Lean audited the axioms its proof rests on.
+///
+/// Entries saved before the audit are not trusted: one of them may be a proof
+/// that `#exit` or an axiom let through, and nothing in the entry says which.
+const AUDITED: &str = "axioms_audited";
+
 /// Where accepted proofs are kept, and for how long.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProofCache {
@@ -75,7 +81,12 @@ impl ProofCache {
     #[must_use]
     pub fn load(&self, key: &str) -> Option<PropertyResult> {
         let text = fs::read_to_string(self.path(key)).ok()?;
-        serde_json::from_str(&text).ok()
+        let mut entry: serde_json::Value = serde_json::from_str(&text).ok()?;
+        let audited = entry.as_object_mut()?.remove(AUDITED);
+        if audited != Some(serde_json::Value::Bool(true)) {
+            return None;
+        }
+        serde_json::from_value(entry).ok()
     }
 
     /// Record what Lean accepted, or carry on if that is not possible.
@@ -93,7 +104,11 @@ impl ProofCache {
 
     fn try_save(&self, key: &str, result: &PropertyResult) -> std::io::Result<()> {
         fs::create_dir_all(&self.dir)?;
-        let text = serde_json::to_string_pretty(result).map_err(std::io::Error::other)?;
+        let mut entry = serde_json::to_value(result).map_err(std::io::Error::other)?;
+        if let Some(fields) = entry.as_object_mut() {
+            fields.insert(AUDITED.to_string(), serde_json::Value::Bool(true));
+        }
+        let text = serde_json::to_string_pretty(&entry).map_err(std::io::Error::other)?;
         fs::write(self.path(key), text)?;
         self.evict_expired();
         Ok(())
@@ -186,6 +201,16 @@ mod tests {
         let loaded = cache.load("abc").expect("the entry is there");
         assert_eq!(loaded.property_id, "p1");
         assert!(loaded.verified);
+    }
+
+    #[test]
+    fn an_entry_saved_before_the_axiom_audit_is_nothing() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        fs::create_dir_all(&cache.dir).expect("the directory is creatable");
+        let unaudited = serde_json::to_string(&result("p1")).expect("serialisable");
+        fs::write(cache.path("old"), unaudited).expect("the file is writable");
+        assert_eq!(cache.load("old"), None);
     }
 
     #[test]

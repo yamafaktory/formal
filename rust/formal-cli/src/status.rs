@@ -9,19 +9,21 @@ use formal_lean::{
     process::Server,
     sandbox::Sandbox,
     toolchain::Toolchain,
+    warm,
 };
 
 /// Every key formal understands.
 ///
 /// A key outside this set is reported by `formal status`: something in `.env` that
 /// nothing reads is a misconfiguration that otherwise says nothing at all.
-pub(crate) const KNOWN_ENV_KEYS: [&str; 13] = [
+pub(crate) const KNOWN_ENV_KEYS: [&str; 14] = [
     "ELAN_HOME",
     "FORMAL_HOME",
     "FORMAL_HOST",
     "FORMAL_PORT",
     "FORMAL_RESULTS_DIR",
     "FORMAL_SANDBOX",
+    "FORMAL_WARM",
     "LEAN_PROJECT_DIR",
     "LEAN_TIMEOUT",
     "NO_COLOR",
@@ -98,6 +100,7 @@ impl Status {
                 },
             ),
             ("lean sandbox".to_string(), sandbox.describe()),
+            ("warm lean".to_string(), warm_lean(env, &paths)),
             (
                 "server".to_string(),
                 format!(
@@ -140,6 +143,21 @@ impl Status {
     }
 }
 
+fn warm_lean(env: &Env, paths: &Paths) -> String {
+    let processes = warm::processes(env);
+    if processes == 0 {
+        "off (FORMAL_WARM)".to_string()
+    } else if warm::repl_bin(&paths.lean_project_dir).is_file() {
+        if processes == 1 {
+            "on".to_string()
+        } else {
+            format!("on ({processes} processes)")
+        }
+    } else {
+        "REPL not built — run: formal setup".to_string()
+    }
+}
+
 /// Where Mathlib's compiled oleans land once `formal setup` has run.
 #[must_use]
 pub(crate) fn mathlib_lib(paths: &Paths) -> std::path::PathBuf {
@@ -168,7 +186,10 @@ mod tests {
 
     #[test]
     fn every_key_formal_understands_is_accepted() {
-        assert!(unknown_env_keys(&dotenv(&KNOWN_ENV_KEYS)).is_empty());
+        assert_eq!(
+            unknown_env_keys(&dotenv(&KNOWN_ENV_KEYS)),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -192,6 +213,7 @@ mod tests {
                 "lean toolchain",
                 "mathlib oleans",
                 "lean sandbox",
+                "warm lean",
                 "server",
             ]
         );
@@ -205,6 +227,18 @@ mod tests {
         };
         assert_eq!(by_name("home"), "/srv/formal");
         assert_eq!(by_name("lean sandbox"), "off (FORMAL_SANDBOX)");
+        assert_eq!(by_name("warm lean"), "REPL not built — run: formal setup");
+    }
+
+    #[test]
+    fn warm_lean_says_when_it_was_switched_off() {
+        let env = Env::from_pairs([("FORMAL_HOME", "/srv/formal"), ("FORMAL_WARM", "off")]);
+        let status = Status::read(&env, &[]);
+        assert!(
+            status.render().contains("off (FORMAL_WARM)"),
+            "{}",
+            status.render()
+        );
     }
 
     #[test]

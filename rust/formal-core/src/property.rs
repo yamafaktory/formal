@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(result.status, "failed");
         assert_eq!(result.fidelity, "unchecked");
         assert!(!result.cached);
-        assert!(result.assumptions.is_empty());
+        assert_eq!(result.assumptions, Vec::<String>::new());
     }
 
     #[test]

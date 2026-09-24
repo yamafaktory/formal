@@ -13,10 +13,13 @@ use std::{
     },
 };
 
-use formal_core::specs::{
-    self,
-    SPEC_VERSION,
-    SpecError,
+use formal_core::{
+    property::PropertySpec,
+    specs::{
+        self,
+        SPEC_VERSION,
+        SpecError,
+    },
 };
 use serde_json::{
     Value,
@@ -103,7 +106,7 @@ mod loading {
         let path = workspace.spec_file(&[entry(), with(&[("id", json!("fmt_elapsed/format"))])]);
         let loaded = load(&path).expect("the file loads");
         assert_eq!(ids(&loaded), ["fmt_elapsed/bound", "fmt_elapsed/format"]);
-        assert!(loaded.stale_ids().is_empty());
+        assert_eq!(loaded.stale_ids(), Vec::<&str>::new());
     }
 
     #[test]
@@ -192,7 +195,7 @@ mod staleness {
         let workspace = Workspace::new();
         let loaded = load(&workspace.spec_file(&[stale_entry("mod.py")])).expect("the file loads");
         assert_eq!(ids(&loaded), ["fmt_elapsed/bound"]);
-        assert!(loaded.stale_ids().is_empty());
+        assert_eq!(loaded.stale_ids(), Vec::<&str>::new());
     }
 
     #[test]
@@ -204,7 +207,7 @@ mod staleness {
             "def fmt_elapsed(seconds):\n    return 'rewritten'\n",
         );
         let loaded = load(&path).expect("the file loads");
-        assert!(loaded.specs().is_empty());
+        assert_eq!(loaded.specs(), Vec::<&PropertySpec>::new());
         assert_eq!(loaded.stale_ids(), ["fmt_elapsed/bound"]);
     }
 
@@ -214,7 +217,10 @@ mod staleness {
         let path = workspace.spec_file(&[stale_entry("mod.py")]);
         let source = fs::read_to_string(workspace.path("mod.py")).expect("the source is readable");
         workspace.write("mod.py", &source.replace('\n', "   \n"));
-        assert!(load(&path).expect("the file loads").stale_ids().is_empty());
+        assert_eq!(
+            load(&path).expect("the file loads").stale_ids(),
+            Vec::<&str>::new()
+        );
     }
 
     /// Normalising rstrips each line but keeps the indentation in front of it, so a
@@ -246,11 +252,11 @@ mod staleness {
     #[test]
     fn a_spec_without_a_source_reference_cannot_go_stale() {
         let workspace = Workspace::new();
-        assert!(
+        assert_eq!(
             load(&workspace.spec_file(&[entry()]))
                 .expect("the file loads")
-                .stale_ids()
-                .is_empty()
+                .stale_ids(),
+            Vec::<&str>::new()
         );
     }
 

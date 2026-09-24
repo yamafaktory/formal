@@ -18,6 +18,7 @@ use formal_lean::{
     paths::Paths,
     sandbox::Sandbox,
     toolchain::Toolchain,
+    warm::repl_bin,
 };
 
 use crate::status::mathlib_lib;
@@ -31,6 +32,8 @@ const LEAN_INSTALL_DOCS: &str = "https://lean-lang.org/install/";
 
 /// How long the installer download gets.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_mins(2);
+
+const REPL_GIT: &str = "https://github.com/leanprover-community/repl";
 
 /// The Lean project formal ships, for when it is not running from a checkout.
 const TEMPLATE: &[(&str, &str)] = &[
@@ -273,9 +276,91 @@ pub(crate) fn install_lean(paths: &Paths, toolchain: &Toolchain, prompt: &dyn Pr
 
     if mathlib_lib(paths).is_dir() {
         prompt.say("Mathlib already built — skipping.");
+    } else if !fetch_mathlib(paths, toolchain, prompt) {
+        return false;
+    }
+    build_repl(paths, toolchain, prompt);
+    true
+}
+
+/// Whether a `lakefile.toml` already requires the REPL.
+#[must_use]
+pub(crate) fn requires_repl(lakefile: &str) -> bool {
+    toml::from_str::<toml::Table>(lakefile)
+        .ok()
+        .and_then(|table| table.get("require")?.as_array().cloned())
+        .is_some_and(|requires| {
+            requires
+                .iter()
+                .any(|require| require.get("name").and_then(|name| name.as_str()) == Some("REPL"))
+        })
+}
+
+/// The REPL tag built for the Lean a project pins, which shares its version.
+#[must_use]
+pub(crate) fn repl_rev(lean_version: &str) -> Option<&str> {
+    lean_version
+        .split_once(':')
+        .map(|(_, rev)| rev.trim())
+        .filter(|rev| !rev.is_empty())
+}
+
+/// A `[[require]]` for the REPL at `rev`, to append to a `lakefile.toml`.
+#[must_use]
+pub(crate) fn repl_require(rev: &str) -> String {
+    format!("\n[[require]]\nname = \"REPL\"\ngit = \"{REPL_GIT}\"\nrev = \"{rev}\"\n")
+}
+
+fn add_repl_dependency(paths: &Paths, toolchain: &Toolchain, prompt: &dyn Prompt) -> bool {
+    let lakefile = paths.lean_project_dir.join("lakefile.toml");
+    let Ok(current) = fs::read_to_string(&lakefile) else {
+        prompt.say(&format!(
+            "  {} is not readable — add the REPL to the project by hand.",
+            lakefile.display()
+        ));
+        return false;
+    };
+    if requires_repl(&current) {
         return true;
     }
+    let Some(rev) = lean_version(paths).and_then(|version| repl_rev(&version).map(str::to_string))
+    else {
+        prompt.say("  Could not tell which REPL matches the pinned Lean.");
+        return false;
+    };
+    prompt.say(&format!(
+        "  Adding the Lean REPL ({rev}) to {}...",
+        lakefile.display()
+    ));
+    let written = fs::OpenOptions::new()
+        .append(true)
+        .open(&lakefile)
+        .and_then(|mut file| file.write_all(repl_require(&rev).as_bytes()));
+    if written.is_err() {
+        prompt.say(&format!("  Could not write {}.", lakefile.display()));
+        return false;
+    }
+    if !lake(paths, toolchain, &["update", "REPL"]) {
+        prompt.say("  Failed: lake update REPL");
+        return false;
+    }
+    true
+}
 
+fn build_repl(paths: &Paths, toolchain: &Toolchain, prompt: &dyn Prompt) {
+    if repl_bin(&paths.lean_project_dir).is_file() {
+        return;
+    }
+    let built = add_repl_dependency(paths, toolchain, prompt) && {
+        prompt.say("  Building the Lean REPL that keeps Mathlib loaded between checks...");
+        lake(paths, toolchain, &["build", "repl"])
+    };
+    if !built {
+        prompt.say("  The Lean REPL is not built — proofs will be checked cold, which is slower.");
+    }
+}
+
+fn fetch_mathlib(paths: &Paths, toolchain: &Toolchain, prompt: &dyn Prompt) -> bool {
     prompt.say("Fetching Mathlib.");
     prompt.say("This downloads several GB of prebuilt oleans and takes a few minutes.");
     if !prompt.confirm("Continue? [Y/n]: ") {
@@ -414,6 +499,44 @@ mod tests {
                 lean_version(&paths).as_deref(),
                 Some("leanprover/lean4:v4.29.0")
             );
+        }
+    }
+
+    mod the_repl_dependency {
+        use super::*;
+
+        #[test]
+        fn the_bundled_project_already_requires_it() {
+            let (_, lakefile) = TEMPLATE
+                .iter()
+                .find(|(name, _)| *name == "lakefile.toml")
+                .expect("the lakefile is bundled");
+            assert!(requires_repl(lakefile));
+        }
+
+        #[test]
+        fn a_project_from_before_it_does_not() {
+            let older =
+                "name = \"LeanVerifier\"\n\n[[require]]\nname = \"mathlib\"\nrev = \"v4.29.0\"\n";
+            assert!(!requires_repl(older));
+            assert!(!requires_repl("not toml ["));
+        }
+
+        #[test]
+        fn the_appended_require_is_read_back_at_the_pinned_version() {
+            let older = "name = \"LeanVerifier\"\n\n[[lean_lib]]\nname = \"Verify\"\n";
+            let rev = repl_rev("leanprover/lean4:v4.29.0").expect("a tagged version");
+            assert_eq!(rev, "v4.29.0");
+            let updated = format!("{older}{}", repl_require(rev));
+            assert!(requires_repl(&updated));
+            let table: toml::Table = toml::from_str(&updated).expect("still toml");
+            assert_eq!(table["lean_lib"].as_array().map(Vec::len), Some(1));
+        }
+
+        #[test]
+        fn a_version_without_a_tag_names_no_repl() {
+            assert_eq!(repl_rev("stable"), None);
+            assert_eq!(repl_rev("leanprover/lean4:"), None);
         }
     }
 

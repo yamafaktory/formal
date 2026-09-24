@@ -218,7 +218,7 @@ mod outcomes {
         assert_eq!(outcome.status, Status::Failed);
         assert_eq!(outcome.error, "no goals");
         assert_eq!((outcome.line, outcome.col), (Some(4), Some(2)));
-        assert!(!outcome.hint.is_empty());
+        assert_ne!(outcome.hint, "");
     }
 
     #[test]

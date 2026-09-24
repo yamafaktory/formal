@@ -51,6 +51,7 @@ use tempfile::Builder;
 use thiserror::Error;
 
 use crate::{
+    audit::Audit,
     env::Env,
     paths::Paths,
     sandbox::{
@@ -63,6 +64,13 @@ use crate::{
         LeanError,
         LeanResult,
         sweep_stale_temps,
+    },
+    warm::{
+        Launch,
+        Warm,
+        Warmed,
+        repl_bin,
+        warm_command,
     },
 };
 
@@ -230,7 +238,7 @@ fn guard(sink: &Mutex<Vec<u8>>) -> std::sync::MutexGuard<'_, Vec<u8>> {
 ///
 /// Sent here rather than by running `kill`, which asks the host for a binary that
 /// need not be installed and, where it is, need not read `-1234` as a group.
-fn kill_group(pid: u32) {
+pub(crate) fn kill_group(pid: u32) {
     let Ok(raw) = i32::try_from(pid) else {
         return;
     };
@@ -320,6 +328,20 @@ pub enum RunError {
     Unstartable(#[from] std::io::Error),
 }
 
+fn timed_out(after: Duration) -> LeanResult {
+    LeanResult {
+        success: false,
+        output: format!("Lean verification timed out after {}s", after.as_secs()),
+        errors: vec![LeanError {
+            severity: "error".to_string(),
+            data: "timeout".to_string(),
+            line: Some(0),
+            col: Some(0),
+            pos: None,
+        }],
+    }
+}
+
 fn failed(output: impl Into<String>) -> LeanResult {
     LeanResult {
         success: false,
@@ -342,6 +364,7 @@ pub struct Runner {
     /// question could not be answered and every call goes through lake instead.
     lean_env: OnceLock<Option<BTreeMap<OsString, OsString>>>,
     warned: AtomicBool,
+    warm: Warm,
 }
 
 impl Runner {
@@ -360,7 +383,7 @@ impl Runner {
         let timeout = env
             .number("LEAN_TIMEOUT")
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
-        Self::new(paths, toolchain, sandbox, timeout)
+        Self::new(paths, toolchain, sandbox, timeout).with_warm(crate::warm::processes(env))
     }
 
     /// A runner told what to use rather than asked to find it.
@@ -373,6 +396,49 @@ impl Runner {
             timeout,
             lean_env: OnceLock::new(),
             warned: AtomicBool::new(false),
+            warm: Warm::new(0),
+        }
+    }
+
+    /// The same runner, keeping up to `processes` warm Leans for the proofs that
+    /// can use one.
+    #[must_use]
+    pub fn with_warm(mut self, processes: usize) -> Self {
+        self.warm = Warm::new(processes);
+        self
+    }
+
+    /// Start the warm Lean now rather than on the first check.
+    pub fn warm_up(&self) {
+        self.warm.warm_up(|| self.warm_launch());
+    }
+
+    fn warm_launch(&self) -> Result<Launch, String> {
+        let repl = repl_bin(&self.paths.lean_project_dir);
+        if !repl.is_file() {
+            return Err(format!(
+                "{} is not built — run: formal setup",
+                repl.display()
+            ));
+        }
+        let env = self
+            .lean_env()
+            .ok_or("lake could not report the Lean environment")?
+            .clone();
+        let wrapped = self.sandbox.wrap(&[repl]).map_err(|e| e.to_string())?;
+        self.warn_once(wrapped.warning);
+        Ok(Launch {
+            argv: wrapped.argv,
+            cwd: self.paths.lean_project_dir.clone(),
+            env,
+        })
+    }
+
+    fn warn_once(&self, warning: Option<&str>) {
+        if let Some(warning) = warning
+            && !self.warned.swap(true, Ordering::Relaxed)
+        {
+            eprintln!("[LEAN] {warning}");
         }
     }
 
@@ -461,6 +527,21 @@ impl Runner {
             return Ok(failed("Empty Lean code"));
         }
 
+        let audit = Audit::new();
+        let effective = timeout.unwrap_or(self.timeout);
+        if let Some(command) = warm_command(lean_code)
+            && let Some(warmed) = self
+                .warm
+                .check(&audit.called_after(&command), effective, || {
+                    self.warm_launch()
+                })
+        {
+            return Ok(match warmed {
+                Warmed::Replied(captured) => audit.judge(parse_output(&captured)),
+                Warmed::TimedOut => timed_out(effective),
+            });
+        }
+
         let dir = self.paths.verify_dir();
         std::fs::create_dir_all(&dir).map_err(|source| RunError::Unprepared {
             dir: dir.clone(),
@@ -478,34 +559,19 @@ impl Runner {
             .tempfile_in(&dir)
             .map_err(unwritable)?;
         scratch
-            .write_all(lean_code.as_bytes())
+            .write_all(audit.appended_to(lean_code).as_bytes())
             .and_then(|()| scratch.flush())
             .map_err(unwritable)?;
 
         let (cmd, env) = self.lean_command(scratch.path());
         let wrapped = self.sandbox.wrap(&cmd)?;
-        if let Some(warning) = wrapped.warning
-            && !self.warned.swap(true, Ordering::Relaxed)
-        {
-            eprintln!("[LEAN] {warning}");
-        }
+        self.warn_once(wrapped.warning);
 
-        let effective = timeout.unwrap_or(self.timeout);
         let captured = run_command(&wrapped.argv, &self.paths.lean_project_dir, &env, effective)?;
         if captured.timed_out {
-            return Ok(LeanResult {
-                success: false,
-                output: format!("Lean verification timed out after {}s", effective.as_secs()),
-                errors: vec![LeanError {
-                    severity: "error".to_string(),
-                    data: "timeout".to_string(),
-                    line: Some(0),
-                    col: Some(0),
-                    pos: None,
-                }],
-            });
+            return Ok(timed_out(effective));
         }
-        Ok(parse_output(&captured))
+        Ok(audit.judge(parse_output(&captured)))
     }
 
     /// Check several proofs in one invocation, paying one Mathlib import.
@@ -674,7 +740,7 @@ mod tests {
         fn a_clean_run_succeeds() {
             let result = parse_output(&captured(0, ""));
             assert!(result.success);
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
         }
 
         #[test]
@@ -691,7 +757,7 @@ mod tests {
                 0,
                 &message("error", "declaration uses 'sorry'", 1),
             ));
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
             assert!(result.success);
         }
 
@@ -729,7 +795,7 @@ mod tests {
         #[test]
         fn a_json_line_that_is_not_an_object_is_not_a_diagnostic() {
             let result = parse_output(&captured(0, "5\n[1, 2]\n\"a string\""));
-            assert!(result.errors.is_empty());
+            assert_eq!(result.errors, []);
             assert!(result.success);
         }
 

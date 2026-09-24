@@ -267,6 +267,7 @@ dependencies = [
  "formal-server",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -293,6 +294,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]

@@ -48,7 +48,8 @@ const NO_DIAGNOSTIC_HINT: &str = "Lean failed without reporting a position, whic
                                   than removing it.";
 
 /// What a caller is told when the proof never reached Lean.
-const SYNTAX_HINT: &str = "The proof was rejected before Lean ran — fix the syntax first.";
+const SYNTAX_HINT: &str =
+    "The proof was rejected before Lean ran — fix what the error names first.";
 
 /// How much of Lean's output is worth keeping when it named no position.
 const OUTPUT_TAIL_LINES: usize = 12;

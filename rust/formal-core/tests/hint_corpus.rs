@@ -69,7 +69,7 @@ fn table() -> &'static Table {
 
 #[test]
 fn the_corpus_is_the_size_it_was_measured_at() {
-    assert_eq!(corpus().len(), 49);
+    assert_eq!(corpus().len(), 51);
 }
 
 #[test]

@@ -91,6 +91,16 @@ The error prints the goal state after the failure — read it before rewriting t
 "linarith" = '''`linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products.'''
 
 [[rule]]
+id = "foreign_axiom"
+all = ["and formal accepts only"]
+hint = '''Only `propext`, `Classical.choice` and `Quot.sound` are accepted. Remove any `axiom` declaration and prove the fact it stood for, replace every `sorry` with a proof, and replace `native_decide` with `decide`, `norm_num` or `simp`.'''
+
+[[rule]]
+id = "stopped_before_the_end"
+all = ["the axiom check formal appends"]
+hint = '''Lean stopped before the end of the file, so nothing after that point was checked. Remove `#exit`, close every `/-` comment, and do not end the file with `set_option ... in` or `open ... in` without a declaration after it.'''
+
+[[rule]]
 id = "string_literal_length"
 all = ["unsolved goals", ".length", "< \""]
 hint = '''Each case has a remaining goal of the form `0 < "literal".length` — these are closed concrete propositions (no free variables), so use `decide` or `norm_num` to close them. Add `· decide` (or `· norm_num`) after each case branch, or add `all_goals decide` at the end to close all such goals at once. Do NOT use `omega` — it cannot evaluate un-reduced string literal lengths.'''

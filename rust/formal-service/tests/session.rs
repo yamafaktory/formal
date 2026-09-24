@@ -135,7 +135,7 @@ mod opening {
         let session = sessions.open(&cache(&dir), specs(), Vec::new());
         let session = session.lock().expect("a fresh session");
         assert_eq!(session.work_ids(), ["p1", "p2"]);
-        assert!(session.cached_ids().is_empty());
+        assert_eq!(session.cached_ids(), Vec::<&str>::new());
         assert!(!session.complete());
     }
 
@@ -265,7 +265,7 @@ mod checking {
         let outcomes = session
             .check(&Checker::new(&fake, table()), &cache, &[])
             .expect("nothing is unregistered");
-        assert!(outcomes.is_empty());
+        assert_eq!(outcomes, []);
         assert_eq!(*fake.calls.borrow(), 0);
     }
 
@@ -352,12 +352,9 @@ mod cache_round_trip {
             .expect("p1 is registered");
 
         let second = sessions.open(&cache, specs(), Vec::new());
-        assert!(
-            second
-                .lock()
-                .expect("a fresh session")
-                .cached_ids()
-                .is_empty()
+        assert_eq!(
+            second.lock().expect("a fresh session").cached_ids(),
+            Vec::<&str>::new()
         );
     }
 

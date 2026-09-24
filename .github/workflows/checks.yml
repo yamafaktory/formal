@@ -2,6 +2,7 @@ name: Checks
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_call:
 
@@ -16,14 +17,14 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install nightly --profile minimal --component rustfmt
       - run: cargo +nightly fmt --all --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install stable --profile minimal --component clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -33,21 +34,52 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
       # The tests that need Lean do nothing when there is none, so this is the rest:
       # the frozen cache keys, the hint corpus, the guide digests, and the HTTP
-      # surface against tests/conformance/golden/responses.json. Installing Mathlib
-      # here would cost several GB and minutes per run for four tests.
+      # surface against tests/conformance/golden/responses.json. The lean job runs
+      # the ones that need Lean.
       - run: cargo +stable test --workspace --locked
+
+  lean:
+    runs-on: ubuntu-latest
+    env:
+      FORMAL_SANDBOX: bwrap
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --unshare-net --unshare-pid true
+      - uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          use-mathlib-cache: true
+          lake-package-directory: lean_project
+      - run: lake build repl
+        working-directory: lean_project
+      - run: |
+          test -d lean_project/.lake/packages/mathlib/.lake/build/lib
+          test -x lean_project/.lake/packages/REPL/.lake/build/bin/repl
+        working-directory: .
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: >-
+          cargo +stable test --locked -p formal-lean
+          --test lean --test warm --test audit --test guide_lemmas --test confinement
+          -- --test-threads=1
 
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install 1.95 --profile minimal
       - uses: Swatinem/rust-cache@v2
         with:
