@@ -39,3 +39,6 @@ unused_imports = "deny"
 
 [workspace.lints.clippy]
 pedantic = { level = "deny", priority = -1 }
+
+[profile.release]
+strip = true

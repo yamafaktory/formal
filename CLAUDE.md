@@ -95,9 +95,10 @@ the REPL is missing, so none of them can pass by skipping.
 ## Releases
 
 `scripts/release.sh <version>` bumps the workspace version when it differs,
-commits, tags `v<version>`, and asks before pushing. The tag runs
-`release.yml`, which builds the binaries `install.sh` downloads and refuses a
-tag that does not match `rust/Cargo.toml`.
+commits, tags `v<version>`, and asks before pushing. `--yes` pushes without
+asking, which a shell with no input needs. The tag runs `release.yml`, which
+builds the binaries `install.sh` downloads and refuses a tag that does not
+match `rust/Cargo.toml`.
 
 ## Commits and pull requests
 
