@@ -62,7 +62,7 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
-      - run: shellcheck install.sh
+      - run: shellcheck install.sh scripts/release.sh
 
   lean:
     runs-on: ubuntu-latest
