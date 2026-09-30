@@ -92,6 +92,13 @@ cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names sti
 CI runs all five in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
+## Releases
+
+`scripts/release.sh <version>` bumps the workspace version when it differs,
+commits, tags `v<version>`, and asks before pushing. The tag runs
+`release.yml`, which builds the binaries `install.sh` downloads and refuses a
+tag that does not match `rust/Cargo.toml`.
+
 ## Commits and pull requests
 
 No `Co-Authored-By` trailer on commits, and no "Generated with Claude Code" line
