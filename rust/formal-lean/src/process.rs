@@ -254,9 +254,17 @@ impl Server {
 
     /// Guard against a stale pid file naming a process the system has since reused.
     fn is_ours(pid: u32) -> bool {
-        fs::read(format!("/proc/{pid}/cmdline")).map_or(true, |cmdline| {
-            String::from_utf8_lossy(&cmdline).contains("formal")
-        })
+        fs::read(format!("/proc/{pid}/cmdline"))
+            .ok()
+            .or_else(|| {
+                Command::new("ps")
+                    .args(["-p", &pid.to_string(), "-o", "command="])
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .map(|output| output.stdout)
+            })
+            .is_none_or(|cmdline| String::from_utf8_lossy(&cmdline).contains("formal"))
     }
 
     /// Stop a server we started. False when there was nothing of ours to stop.
