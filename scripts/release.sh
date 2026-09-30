@@ -43,24 +43,7 @@ confirm() {
 }
 
 current=$(sed -n 's/^version = "\(.*\)"$/\1/p' rust/Cargo.toml)
-if [ "$current" != "$version" ]; then
-    branch="release-$tag"
-    git switch -q -c "$branch"
-    sed -i.bak "s/^version = \"$current\"$/version = \"$version\"/" rust/Cargo.toml
-    rm rust/Cargo.toml.bak
-    (cd rust && cargo update -q --workspace --offline)
-    git add rust/Cargo.toml rust/Cargo.lock
-    git commit -q -m "Release $tag"
-    echo "release: bumped $current -> $version on $branch"
-    if ! confirm "push $branch and open a pull request"; then
-        echo "release: nothing pushed. To undo: git switch main && git branch -D $branch"
-        exit 0
-    fi
-    git push -q -u origin "$branch"
-    gh pr create --title "Release $tag" --body "Bumps the workspace version to $version. Once merged, run scripts/release.sh $version on main to tag it."
-    echo "release: once it merges, run scripts/release.sh $version on main to tag it"
-    exit 0
-fi
+[ "$current" = "$version" ] || fail "rust/Cargo.toml is at $current, not $version; bump it in a pull request first"
 
 git tag -a "$tag" -m "formal $version"
 echo "release: tagged $tag at $(git rev-parse --short HEAD)"
