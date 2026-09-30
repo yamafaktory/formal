@@ -94,12 +94,25 @@ the REPL is missing, so none of them can pass by skipping.
 
 ## Releases
 
-`scripts/release.sh <version>` releases from a clean `main`. `main` only takes
-commits through a pull request, so it runs twice. When the workspace version
-differs, it commits the bump on `release-v<version>` and opens a pull request.
-Once that merges, the same command on `main` tags `v<version>` and pushes the
-tag. It asks before each push; `--yes` does not, which a shell with no input
-needs. The tag runs `release.yml`, which builds the binaries `install.sh`
+Every pull request is a release. It bumps `version` in `rust/Cargo.toml` (and
+so `Cargo.lock`) as one of its own commits, following semver:
+
+- major — something that worked stops working: a route, a body field or a
+  status code in `responses.json`, a CLI command or flag, or a configuration
+  variable is removed or changes meaning.
+- minor — something new: a route, a command, a flag, a variable, a hint rule.
+- patch — everything else: fixes, docs, CI, refactors.
+
+Two pull requests open at once both bump from the same base; whichever merges
+second rebases and bumps again. Once a pull request merges, run
+`scripts/release.sh <version>` on `main` to tag it.
+
+The script runs from a clean `main` that matches `origin/main`. When the
+version already matches, it tags `v<version>` and pushes the tag. When it does
+not, because a merged pull request skipped its bump, it commits the bump on
+`release-v<version>` and opens a pull request, since `main` only takes commits
+through one; run it again once that merges. It asks before each push; `--yes`
+does not, which a shell with no input needs. The tag runs `release.yml`, which builds the binaries `install.sh`
 downloads and refuses a tag that does not match `rust/Cargo.toml`.
 
 ## Commits and pull requests
