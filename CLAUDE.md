@@ -94,11 +94,13 @@ the REPL is missing, so none of them can pass by skipping.
 
 ## Releases
 
-`scripts/release.sh <version>` bumps the workspace version when it differs,
-commits, tags `v<version>`, and asks before pushing. `--yes` pushes without
-asking, which a shell with no input needs. The tag runs `release.yml`, which
-builds the binaries `install.sh` downloads and refuses a tag that does not
-match `rust/Cargo.toml`.
+`scripts/release.sh <version>` releases from a clean `main`. `main` only takes
+commits through a pull request, so it runs twice. When the workspace version
+differs, it commits the bump on `release-v<version>` and opens a pull request.
+Once that merges, the same command on `main` tags `v<version>` and pushes the
+tag. It asks before each push; `--yes` does not, which a shell with no input
+needs. The tag runs `release.yml`, which builds the binaries `install.sh`
+downloads and refuses a tag that does not match `rust/Cargo.toml`.
 
 ## Commits and pull requests
 
