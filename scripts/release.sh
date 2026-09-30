@@ -6,8 +6,17 @@ fail() {
     exit 1
 }
 
-[ $# -eq 1 ] || fail "usage: scripts/release.sh <version>, e.g. 1.1.0"
-version="${1#v}"
+usage="usage: scripts/release.sh [--yes] <version>, e.g. 1.1.0"
+yes=
+version=
+for arg in "$@"; do
+    case "$arg" in
+        -y | --yes) yes=1 ;;
+        -*) fail "$usage" ;;
+        *) [ -z "$version" ] || fail "$usage"; version="${arg#v}" ;;
+    esac
+done
+[ -n "$version" ] || fail "$usage"
 tag="v$version"
 echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "$version is not MAJOR.MINOR.PATCH"
 
@@ -33,8 +42,13 @@ fi
 git tag -a "$tag" -m "formal $version"
 echo "release: tagged $tag at $(git rev-parse --short HEAD)"
 
-printf 'release: push main and %s to origin? [y/N] ' "$tag"
-read -r answer
+if [ -n "$yes" ]; then
+    answer=y
+else
+    printf 'release: push main and %s to origin? [y/N] ' "$tag"
+    read -r answer || answer=
+    [ -n "$answer" ] || echo
+fi
 case "$answer" in
     y | Y) ;;
     *)
