@@ -45,6 +45,25 @@ jobs:
       # the ones that need Lean.
       - run: cargo +stable test --workspace --locked
 
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo +stable test --workspace --locked
+
+  installer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck install.sh
+
   lean:
     runs-on: ubuntu-latest
     env:

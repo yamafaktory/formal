@@ -38,12 +38,22 @@ misreads the function, Lean proves a true theorem about a different function. Re
 
 ## Quick start
 
-You need a Rust toolchain.
+On Linux and macOS (x86_64 or arm64), install the prebuilt binary:
+
+```sh
+curl -fsSL https://github.com/yamafaktory/formal/releases/latest/download/install.sh | sh
+formal setup
+formal status
+```
+
+The script checks the SHA-256 of the download and puts `formal` in `~/.local/bin`.
+Set `FORMAL_INSTALL_DIR` to install somewhere else, and `FORMAL_VERSION=v1.0.0` to pin a
+release. The Linux binary is static, so it runs on any distribution.
+
+On another platform, or to build from source, you need a Rust toolchain:
 
 ```sh
 cargo install --git https://github.com/yamafaktory/formal formal-cli
-formal setup
-formal status
 ```
 
 `formal setup` installs [elan](https://github.com/leanprover/elan) and the pinned Lean
@@ -502,6 +512,10 @@ Install bubblewrap (`pacman -S bubblewrap`, `apt install bubblewrap`) to turn it
 Without it, Lean runs outside a sandbox and formal warns once per run.
 `FORMAL_SANDBOX=bwrap` makes a missing bubblewrap an error, and `off` turns the sandbox
 off without a warning. `formal status` shows which one applies.
+
+bubblewrap exists only on Linux. On macOS, Lean always runs outside a sandbox, formal
+warns once per run, and `FORMAL_SANDBOX=bwrap` refuses to start Lean. Do not let an
+untrusted agent send proofs to formal on macOS.
 
 The sandbox costs nothing measurable: 3.19 s with it and 3.31 s without, for a cold proof
 that imports Mathlib.

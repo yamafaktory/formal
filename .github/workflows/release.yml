@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          manifest=$(sed -n 's/^version = "\(.*\)"$/\1/p' rust/Cargo.toml)
+          test "v$manifest" = "$GITHUB_REF_NAME" || {
+            echo "tag $GITHUB_REF_NAME does not match rust/Cargo.toml version $manifest"
+            exit 1
+          }
+
+  build:
+    needs: [checks, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - run: cargo +stable build --release --locked -p formal-cli --target ${{ matrix.target }}
+      - run: |
+          archive=formal-${{ matrix.target }}.tar.gz
+          tar -C target/${{ matrix.target }}/release -czf "$archive" formal
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formal-${{ matrix.target }}
+          path: |
+            rust/formal-${{ matrix.target }}.tar.gz
+            rust/formal-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/* install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
