@@ -557,13 +557,14 @@ mod tests {
         use super::*;
 
         const FAKE_REPL: &str = r#"
+            answer='{"env": 0}'
             while IFS= read -r line; do
               case "$line" in
                 *slow*) sleep 30 ;;
                 *crash*) exit 1 ;;
                 *broken*) pending='{"message": "Unknown environment."}' ;;
                 *fail*) pending='{"messages": [{"severity": "error", "data": "boom"}], "env": 1}' ;;
-                '') printf '%s\n\n' "${pending:-{\"env\": 0\}}"; pending= ;;
+                '') printf '%s\n\n' "${pending:-$answer}"; pending= ;;
               esac
             done
         "#;
