@@ -82,7 +82,7 @@ patterns = [
   '''[Tt]actic `([^`]+)` failed''',
   '''^tactic '([^']+)' failed''',
   '''^([a-z_]+) failed to ''',
-  '''^([a-z_]+) (?:did not make|made no) progress''',
+  '''^`?([a-z_]+)`? (?:did not make|made no) progress''',
 ]
 template = '''The `{name}` tactic ran and failed to close the goal.'''
 suffix = '''
@@ -156,7 +156,7 @@ hint = '''The goal is an arithmetic equation — `constructor` does not apply he
 
 [[rule]]
 id = "simp_made_no_progress"
-all = ["simp made no progress"]
+any = [["simp made no progress"], ["`simp` made no progress"]]
 hint = '''simp cannot simplify the target. Common causes and fixes: (1) Branch order after `split_ifs` depends on the guard shape: for `if !boolField then none else body`, the FIRST branch has `hGuard: !boolField = true` (meaning bool is FALSE, function returns none) — `simp at h` closes `h: none = some _` THERE, and the SECOND branch is the real-content branch. For a plain `if cond then body else none`, it is the opposite: first branch is real content. Check which branch you are in and move `simp at h` accordingly. (2) For list length contradictions: `simp [List.length_cons] at h` then `omega`. (3) `unfold f at h` or `delta f at h` to expand a definition simp cannot see through. (4) If `simp` makes no progress after `generalize`, the hypothesis still contains an unsimplified `if`-expression — use `split_ifs at h` BEFORE `generalize` to eliminate the guard first.'''
 
 [[rule]]
