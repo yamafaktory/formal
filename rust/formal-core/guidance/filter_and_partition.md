@@ -2,7 +2,7 @@ Filtering and partitioning.
 
 Selecting, rejecting and splitting a collection is the commonest shape of pure logic
 there is, and the lemmas below are the ones that close those goals. Signatures are
-from Lean v4.29 with Mathlib, checked rather than recalled — if you need something not
+from Lean v4.35 with Mathlib, checked rather than recalled — if you need something not
 listed, reach for a tactic (`simp`, `induction`, `omega`) rather than guessing a name.
 
   List.filter_append   : filter p (l₁ ++ l₂) = filter p l₁ ++ filter p l₂
