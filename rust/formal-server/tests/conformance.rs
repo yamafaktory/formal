@@ -28,6 +28,7 @@ use std::{
     time::Duration,
 };
 
+use formal_core::proof_cache::sha256_hex;
 use formal_lean::{
     paths::Paths,
     run::Runner,
@@ -48,10 +49,6 @@ use formal_service::{
 use serde_json::{
     Value,
     json,
-};
-use sha2::{
-    Digest,
-    Sha256,
 };
 use tempfile::TempDir;
 use tokio::{
@@ -124,7 +121,7 @@ const SOURCE_FILE: &str = "def identity(x): return x\n";
 
 fn digest(text: &str) -> Value {
     json!({
-        "sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+        "sha256": sha256_hex(text),
         "chars": text.chars().count(),
     })
 }

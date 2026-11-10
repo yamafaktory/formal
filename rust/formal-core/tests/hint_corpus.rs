@@ -35,7 +35,7 @@ const FALLBACK: &str = "unmatched";
 /// branches have an internal fallback for the shape they could not parse.
 /// Anything else sharing a hint means a sample is being answered by the wrong
 /// branch, which is how a reordering hides a bug.
-const EXPECTED_GROUPS: [&[&str]; 4] = [
+const EXPECTED_GROUPS: [&[&str]; 6] = [
     &["app_mismatch_bare", "app_mismatch_option_same_inner"],
     &[
         "forward_pattern",
@@ -44,7 +44,12 @@ const EXPECTED_GROUPS: [&[&str]; 4] = [
         "prefix_unsolved_append",
     ],
     &["function_expected_field", "function_expected_field_word"],
+    &[
+        "gcongr_did_not_make_progress",
+        "gcongr_did_not_make_progress_in_backticks",
+    ],
     &["guessed_lemma", "unknown_identifier_unquoted"],
+    &["simp_no_progress", "simp_no_progress_in_backticks"],
 ];
 
 #[derive(Deserialize)]
@@ -69,7 +74,7 @@ fn table() -> &'static Table {
 
 #[test]
 fn the_corpus_is_the_size_it_was_measured_at() {
-    assert_eq!(corpus().len(), 55);
+    assert_eq!(corpus().len(), 58);
 }
 
 #[test]

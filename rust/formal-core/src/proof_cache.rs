@@ -132,7 +132,18 @@ pub fn cache_key(function_code: &str, kind: &str, formal: &str) -> String {
         &pystr::strip(kind).to_lowercase(),
         &normalise_formal(formal),
     ]);
-    format!("{:x}", Sha256::digest(payload.as_bytes()))
+    sha256_hex(&payload)
+}
+
+/// The SHA-256 digest of `text`, in lowercase hex.
+#[must_use]
+pub fn sha256_hex(text: &str) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .flat_map(|byte| [byte >> 4, byte & 0xf])
+        .map(|nibble| char::from(DIGITS[usize::from(nibble)]))
+        .collect()
 }
 
 #[cfg(test)]

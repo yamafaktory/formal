@@ -11,12 +11,11 @@ use std::{
     path::PathBuf,
 };
 
-use formal_core::guide;
-use serde_json::Value;
-use sha2::{
-    Digest,
-    Sha256,
+use formal_core::{
+    guide,
+    proof_cache::sha256_hex,
 };
+use serde_json::Value;
 
 /// The length above which the suite records a digest instead of the text.
 const DIGEST_OVER: usize = 400;
@@ -32,7 +31,7 @@ fn golden() -> Value {
 fn recorded(value: &Value) -> Value {
     match value {
         Value::String(text) if text.chars().count() > DIGEST_OVER => serde_json::json!({
-            "sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
+            "sha256": sha256_hex(text),
             "chars": text.chars().count(),
         }),
         Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
