@@ -107,6 +107,80 @@ fn a_sorry_hidden_from_the_messages_is_still_found() {
 }
 
 #[test]
+fn a_notation_in_the_proof_cannot_blind_the_audit() {
+    for (name, runner) in runners() {
+        let result = runner.verify(
+            "import Mathlib\n\ninfixl:65 (priority := high) \" ++ \" => fun _ b => b\nset_option warn.sorry false\n\ntheorem g : (1 : Nat) = 2 := sorry\n",
+            None,
+        );
+        assert!(refused(&result, "`sorryAx`"), "{name}: {result:?}");
+    }
+}
+
+#[test]
+fn a_notation_on_the_import_line_cannot_blind_the_audit() {
+    for (name, runner) in runners() {
+        let result = runner.verify(
+            "import Mathlib infixl:65 (priority := high) \" ++ \" => fun _ b => b\nset_option warn.sorry false\n\ntheorem g : (1 : Nat) = 2 := sorry\n",
+            None,
+        );
+        assert!(refused(&result, "`sorryAx`"), "{name}: {result:?}");
+    }
+}
+
+#[test]
+fn a_declaration_added_without_the_kernel_is_refused_however_the_option_is_spelled() {
+    for (name, runner) in runners() {
+        for option in [
+            "debug.skipKernelTC",
+            "«debug».skipKernelTC",
+            "debug.«skipKernelTC»",
+        ] {
+            let result = runner.verify(
+                &format!(
+                    "import Mathlib\n\nset_option {option} true in\ntheorem g : (1 : Nat) = 2 := by decide +kernel\n"
+                ),
+                None,
+            );
+            assert!(
+                refused(&result, "does not pass the kernel's check"),
+                "{name} {option}: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_example_is_audited_though_lean_discards_it() {
+    for (name, runner) in runners() {
+        for (code, needle) in [
+            (
+                "import Mathlib\n\nset_option warn.sorry false\nexample : (1 : Nat) = 2 := sorry\n",
+                "`sorryAx`",
+            ),
+            (
+                "import Mathlib\n\nset_option debug.skipKernelTC true in\nexample : (1 : Nat) = 2 := by decide +kernel\n",
+                "does not pass the kernel's check",
+            ),
+        ] {
+            let result = runner.verify(code, None);
+            assert!(refused(&result, needle), "{name}: {code:?} {result:?}");
+        }
+    }
+}
+
+#[test]
+fn honest_declarations_of_every_kind_pass_the_kernel_again() {
+    for (name, runner) in runners() {
+        let result = runner.verify(
+            "import Mathlib\n\nstructure P where\n  a : Nat\n\nclass C (n : Nat) : Prop where\n  ok : n = n\n\ninductive T\n  | leaf\n  | node (l r : T)\n\nmutual\n  inductive Even' : Nat → Prop\n    | zero : Even' 0\n    | succ (n : Nat) : Odd' n → Even' (n + 1)\n  inductive Odd' : Nat → Prop\n    | succ (n : Nat) : Even' n → Odd' (n + 1)\nend\n\ndef size : T → Nat\n  | .leaf => 1\n  | .node l r => size l + size r\n\ndef ack' : Nat → Nat → Nat\n  | 0, n => n + 1\n  | m + 1, 0 => ack' m 1\n  | m + 1, n + 1 => ack' m (ack' (m + 1) n)\ntermination_by m n => (m, n)\n\ninstance : C 3 := ⟨rfl⟩\n\nexample (a b : Nat) : a + b = b + a := by exact?\n\ntheorem t : size (.node .leaf .leaf) = 2 := by decide\n",
+            None,
+        );
+        assert!(result.success, "{name}: {result:?}");
+    }
+}
+
+#[test]
 fn native_decide_is_refused() {
     for (name, runner) in runners() {
         let result = runner.verify(

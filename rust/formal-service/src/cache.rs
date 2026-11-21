@@ -21,6 +21,7 @@ use std::{
 
 use formal_core::property::PropertyResult;
 use formal_lean::{
+    audit,
     env::Env,
     logger::{
         Tag,
@@ -83,7 +84,7 @@ impl ProofCache {
         let text = fs::read_to_string(self.path(key)).ok()?;
         let mut entry: serde_json::Value = serde_json::from_str(&text).ok()?;
         let audited = entry.as_object_mut()?.remove(AUDITED);
-        if audited != Some(serde_json::Value::Bool(true)) {
+        if audited != Some(serde_json::Value::String(audit::module_digest())) {
             return None;
         }
         serde_json::from_value(entry).ok()
@@ -106,7 +107,10 @@ impl ProofCache {
         fs::create_dir_all(&self.dir)?;
         let mut entry = serde_json::to_value(result).map_err(std::io::Error::other)?;
         if let Some(fields) = entry.as_object_mut() {
-            fields.insert(AUDITED.to_string(), serde_json::Value::Bool(true));
+            fields.insert(
+                AUDITED.to_string(),
+                serde_json::Value::String(audit::module_digest()),
+            );
         }
         let text = serde_json::to_string_pretty(&entry).map_err(std::io::Error::other)?;
         fs::write(self.path(key), text)?;
@@ -210,6 +214,17 @@ mod tests {
         fs::create_dir_all(&cache.dir).expect("the directory is creatable");
         let unaudited = serde_json::to_string(&result("p1")).expect("serialisable");
         fs::write(cache.path("old"), unaudited).expect("the file is writable");
+        assert_eq!(cache.load("old"), None);
+    }
+
+    #[test]
+    fn an_entry_an_older_audit_accepted_is_nothing() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        fs::create_dir_all(&cache.dir).expect("the directory is creatable");
+        let mut entry = serde_json::to_value(result("p1")).expect("serialisable");
+        entry["axioms_audited"] = serde_json::Value::Bool(true);
+        fs::write(cache.path("old"), entry.to_string()).expect("the file is writable");
         assert_eq!(cache.load("old"), None);
     }
 

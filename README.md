@@ -328,18 +328,27 @@ checked. formal closes both gaps:
   fake verdict. formal refuses `#eval`, `#exit`, `#guard_msgs`, `run_cmd` and the other
   `run_` commands, `elab`, `macro`, `syntax`, `initialize`, `unsafe`, `implemented_by`,
   `extern`, and the `IO` and `Lean` namespaces. It ignores these words inside comments.
-- **It audits the axiomatic dependencies of every declaration.** formal appends a command
-  to the proof. The command lists every declaration that depends, directly or through
-  other declarations in the file, on an axiom other than `propext`, `Classical.choice`
-  and `Quot.sound`. A declared axiom, a `sorry` (`sorryAx`) or `native_decide` fails the
-  check at the line of that declaration. This also catches a `sorry` whose warning
-  `#guard_msgs` suppresses.
+- **It audits the axiomatic dependencies of every declaration.** The audit is a Lean
+  module, `FormalAudit`, that formal compiles on first use. Each check imports it, so
+  Lean elaborates the audit before it reads the proof, and nothing the proof declares,
+  a notation included, can change what the audit does. The audit lists every
+  declaration that depends, directly or through other declarations in the file, on an
+  axiom other than `propext`, `Classical.choice` and `Quot.sound`. That includes an
+  `example`, which Lean checks and then discards. A declared axiom, a
+  `sorry` (`sorryAx`) or `native_decide` fails the check at the line of that
+  declaration. This also catches a `sorry` whose warning `#guard_msgs` suppresses.
+- **It checks every declaration with the kernel again.** The audit adds a copy of each
+  declaration in the file under a new name, and the kernel checks the copy. An option
+  such as `debug.skipKernelTC` lets a declaration skip the kernel, but its copy cannot,
+  so the check fails however the option is spelled.
 - **It requires the audit to report.** The report carries a random nonce that the proof
   cannot know. If no report comes back, the check fails. This happens when elaboration
-  stops before the end of the file, for example at an unclosed comment.
+  stops before the end of the file, for example at an unclosed comment. A file that ends
+  in `... in` fails before Lean runs, because the `in` would apply to the audit.
 
 The audit takes imported Mathlib declarations as built, the same trust Lean extends to
-them. It costs about 0.27 s on a cold check, and nothing measurable on a warm one.
+them. formal compiles the audit once for each version of formal and of Lean, which takes about
+a second.
 
 ### Check the statement yourself
 

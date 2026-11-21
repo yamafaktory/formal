@@ -254,10 +254,9 @@ impl Session {
 
     fn start(launch: &Launch, spawner: &Spawner) -> Result<Self, String> {
         let mut session = Self::spawn(launch, spawner).map_err(|e| e.to_string())?;
-        let imported = session.prepare(&json!({ "cmd": WARM_IMPORT }), "importing Mathlib")?;
         session.base = session.prepare(
-            &json!({ "cmd": audit::definition(), "env": imported }),
-            "defining the axiom audit",
+            &json!({ "cmd": format!("{WARM_IMPORT}\nimport {}", audit::MODULE) }),
+            "importing Mathlib and the axiom audit",
         )?;
         Ok(session)
     }

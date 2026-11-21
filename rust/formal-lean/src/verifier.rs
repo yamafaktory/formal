@@ -149,7 +149,7 @@ fn runs_code_pattern() -> &'static Regex {
     })
 }
 
-fn without_comments(lean_code: &str) -> String {
+pub(crate) fn without_comments(lean_code: &str) -> String {
     let mut kept = String::with_capacity(lean_code.len());
     let mut rest = lean_code;
     while let Some(c) = rest.chars().next() {
