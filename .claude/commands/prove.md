@@ -1,6 +1,6 @@
 ---
 description: Prove properties about formal's own pure functions, using formal
-argument-hint: "[target, e.g. pystr | verifier | parse_output | hints]"
+argument-hint: "[target, e.g. verifier | parse_output | hints]"
 ---
 
 Point formal at its own Rust and come back with proved properties. You are not here to
@@ -55,9 +55,8 @@ POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
 
 Pure, total, no I/O — in order of value:
 
-1. **`rust/formal-core/src/pystr.rs`** — `splitlines`, `strip`, `rstrip`, `is_space`.
-   `CLAUDE.md` calls this the *specification* for anything the cache key touches: Python's
-   idea of a line boundary, not Rust's. Highest value in the workspace, no properties yet.
+1. **`rust/formal-core/src/pystr.rs`** — done differently: `spec/Pystr.lean` holds its
+   properties and `proofs/Pystr/` their proofs. See `CLAUDE.md` §"Specs". Not a target here.
 2. **`rust/formal-lean/src/verifier.rs`** — `split_imports`, `build_batch`, `rebase`.
    Batching is where a wrong answer gets attributed to the wrong proof: `rebase` maps a
    Lean error's line back into its entry, and "a rebased line lands inside the entry it is
@@ -80,7 +79,8 @@ filesystem; the sandbox; the server wiring. Not pure, not provable, not the poin
   property comes back `stale` and is never proved. Copy from the working tree.
 - Append to `formal.properties.json` (`version: 1` stays). Save each proof as
   `proofs/<function>_<short>.lean`, matching the three already there. Nothing reads
-  `proofs/` — it is the committed record.
+  the top level of `proofs/` — it is the committed record. `proofs/Pystr/` belongs to the
+  spec, and `formal-lean/tests/spec.rs` reads it.
 - **Do not touch the four judging files**: `tests/conformance/golden/responses.json`,
   `tests/fixtures/cache_keys.toml`, `tests/fixtures/hint_corpus.toml`,
   `rust/formal-core/guidance/`.

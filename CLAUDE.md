@@ -75,6 +75,15 @@ failure to the generic fallback without any test failing. When Lean rewords a
 failure, add the new wording there, and record the corpus sample from a real Lean
 run, never from memory.
 
+## Specs
+
+`spec/Pystr.lean` says in Lean what `formal_core::pystr` must do. Each `def … : Prop`
+in it is a property. Its proof is `proofs/Pystr/<property>.lean`, which declares
+`theorem Pystr.<property>.holds`. The proof sees the spec but cannot redefine it.
+`formal-lean/tests/spec.rs` checks every proof, and compares the Rust with the spec on
+every character and on every short string over an alphabet of space and line breaks.
+The spec uses core Lean only.
+
 ## Lean
 
 The tests that need Lean do nothing when there is none, so `cargo test` is safe
@@ -87,9 +96,10 @@ cargo test -p formal-lean --test audit         # the false theorems Lean accepts
 cargo test -p formal-lean --test warm          # a warm Lean gives the verdict a cold one gives
 cargo test -p formal-lean --test confinement   # bubblewrap confines what it claims to
 cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
+cargo test -p formal-lean --test spec          # the spec holds, and the Rust answers what it answers
 ```
 
-CI runs all five in the `lean` job, sandboxed, and fails before them if Lean or
+CI runs all six in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
 ## Releases

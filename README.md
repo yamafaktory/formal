@@ -283,6 +283,10 @@ with the proofs in `proofs/`. Two of its properties guard against collisions tha
 happened in formal's cache key: an operator spelled as a word counts only at a word
 boundary, and no field of the key can imitate the boundary between two others.
 
+The Python string rules the cache key depends on have a spec instead: `spec/Pystr.lean`.
+Their proofs are in `proofs/Pystr/`. The test `formal-lean/tests/spec.rs` checks each proof,
+and compares the Rust with the spec.
+
 ## What a result means
 
 ### What "verified" means
