@@ -12,8 +12,12 @@ use std::time::{
     Instant,
 };
 
-use formal_core::hints::Table;
+use formal_core::{
+    hints::Table,
+    lean_spec::LeanSpec,
+};
 use formal_lean::{
+    audit,
     logger::{
         Tag,
         log,
@@ -205,11 +209,56 @@ pub struct Checker<'a, V: Verifier> {
     table: &'a Table,
 }
 
+struct Composing<'a, V: Verifier> {
+    inner: &'a V,
+    spec: &'a LeanSpec,
+    id: &'a str,
+}
+
+impl<V: Verifier> Verifier for Composing<'_, V> {
+    fn verify(&self, lean_code: &str, timeout: Option<Duration>) -> LeanResult {
+        if audit::leaves_an_in_open(lean_code) {
+            return audit::unaudited();
+        }
+        let composed = self.spec.compose(self.id, lean_code);
+        self.inner
+            .verify(&composed.lean_code, timeout)
+            .map_lines(|line| composed.proof_line(line))
+    }
+
+    fn verify_batch(
+        &self,
+        _entries: &mut [BatchEntry],
+        _timeout: Option<Duration>,
+    ) -> Option<Vec<(String, LeanResult)>> {
+        None
+    }
+}
+
 impl<'a, V: Verifier> Checker<'a, V> {
     /// A checker over a given verifier and hint table.
     #[must_use]
     pub fn new(verifier: &'a V, table: &'a Table) -> Self {
         Self { verifier, table }
+    }
+
+    /// Check one proof of a property of `spec`, with the spec put before it for Lean.
+    ///
+    /// The screen, the recovery chain and the outcome all see the proof alone,
+    /// and a line in the outcome is a line of the proof.
+    #[must_use]
+    pub fn check_against(
+        &self,
+        spec: &LeanSpec,
+        submission: &Submission,
+        timeout: Option<Duration>,
+    ) -> Vec<Outcome> {
+        let composing = Composing {
+            inner: self.verifier,
+            spec,
+            id: &submission.id,
+        };
+        Checker::new(&composing, self.table).check_batch(std::slice::from_ref(submission), timeout)
     }
 
     /// Try the tactic chain, then Mathlib premise search, before paying for a retry.

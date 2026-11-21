@@ -51,6 +51,12 @@
  },
  "guide_index": {
   "body": {
+   "lean_spec": [
+    "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
+    "Each property is registered as <Namespace>.<name>. Its proof declares `theorem <Namespace>.<name>.holds : <Namespace>.<name>` and leaves the spec out: formal puts the spec before the proof, and holds the proof to the spec's own statement. A proof that redefines a name of the spec is rejected.",
+    "The cache key covers the whole spec, so an edit to it sends every property back as work.",
+    "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof."
+   ],
    "openapi": "GET /openapi.json is the full schema of every endpoint and response, including field types. Read it rather than guessing at a shape.",
    "sessions": "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by default), and it is lost if the server restarts. Once it is gone, POST /session again with the same spec file: anything already proved comes straight back as a cache hit, so you never reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on.",
    "spec_file": {
@@ -183,6 +189,19 @@
   },
   "status": 400
  },
+ "session_open_from_lean_spec": {
+  "body": {
+   "cached": [],
+   "complete": false,
+   "session_id": "<lean-spec-session>",
+   "stale": [],
+   "work": [
+    "Demo.double_even",
+    "Demo.double_mono"
+   ]
+  },
+  "status": 200
+ },
  "session_open_from_spec": {
   "body": {
    "cached": [],
@@ -197,6 +216,24 @@
   },
   "status": 200
  },
+ "session_open_lean_spec_that_runs_code": {
+  "body": {
+   "detail": "<workspace>/Loud.lean contains `#eval`, which can run code while Lean checks it, and formal does not check a spec that can"
+  },
+  "status": 400
+ },
+ "session_open_lean_spec_without_property": {
+  "body": {
+   "detail": "<workspace>/Empty.lean states no property, which formal finds as `def <name> : Prop :=`"
+  },
+  "status": 400
+ },
+ "session_open_relative_lean_spec": {
+  "body": {
+   "detail": "spec path must be absolute, got Demo.lean — it is resolved by the server, whose working directory is not the caller's, so a relative path may find a different file or none at all"
+  },
+  "status": 400
+ },
  "session_open_relative_spec": {
   "body": {
    "detail": "spec file path must be absolute, got relative.properties.json — it is resolved by the server, whose working directory is not the caller's, so a relative path may find a different file or none at all"
@@ -205,13 +242,19 @@
  },
  "session_open_with_both": {
   "body": {
-   "detail": "Provide either 'properties' or 'spec_file', not both"
+   "detail": "Provide exactly one of 'properties', 'spec_file' or 'spec'"
   },
   "status": 400
  },
  "session_open_with_neither": {
   "body": {
-   "detail": "Provide either 'properties' or 'spec_file', not both"
+   "detail": "Provide exactly one of 'properties', 'spec_file' or 'spec'"
+  },
+  "status": 400
+ },
+ "session_open_with_spec_and_spec_file": {
+  "body": {
+   "detail": "Provide exactly one of 'properties', 'spec_file' or 'spec'"
   },
   "status": 400
  },

@@ -80,7 +80,7 @@ filesystem; the sandbox; the server wiring. Not pure, not provable, not the poin
 - Append to `formal.properties.json` (`version: 1` stays). Save each proof as
   `proofs/<function>_<short>.lean`, matching the three already there. Nothing reads
   the top level of `proofs/` — it is the committed record. `proofs/Pystr/` belongs to the
-  spec, and `formal-lean/tests/spec.rs` reads it.
+  spec, and `formal-service/tests/spec_sessions.rs` reads it.
 - **Do not touch the four judging files**: `tests/conformance/golden/responses.json`,
   `tests/fixtures/cache_keys.toml`, `tests/fixtures/hint_corpus.toml`,
   `rust/formal-core/guidance/`.

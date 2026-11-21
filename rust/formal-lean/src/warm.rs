@@ -36,6 +36,7 @@ use std::{
     time::Duration,
 };
 
+use formal_core::lean_text::runs_code;
 use serde::Deserialize;
 use serde_json::{
     Value,
@@ -49,7 +50,6 @@ use crate::{
         Captured,
         kill_group,
     },
-    verifier::runs_code,
 };
 
 /// The only header a proof can have and still be checked warm.

@@ -117,6 +117,45 @@ pub enum SpecError {
         path: PathBuf,
     },
 
+    /// A Lean spec names no namespace to hold its properties.
+    #[error("{0} opens no namespace, and formal names each property after it")]
+    NoNamespace(PathBuf),
+
+    /// A Lean spec states nothing to prove.
+    #[error("{0} states no property, which formal finds as `def <name> : Prop :=`")]
+    NoLeanProperties(PathBuf),
+
+    /// A Lean spec opens more than one namespace, so a property's id is ambiguous.
+    #[error("{path} opens more than one namespace ({}), and formal names each property after the one", found.join(", "))]
+    Namespaces {
+        /// The spec.
+        path: PathBuf,
+        /// The namespaces it opens, in order.
+        found: Vec<String>,
+    },
+
+    /// A Lean spec states a property in a form formal does not register.
+    #[error(
+        "{path} states `{line}`, and formal registers a property only as `def <name> : Prop :=` inside the spec's namespace"
+    )]
+    UnregisteredProperty {
+        /// The spec.
+        path: PathBuf,
+        /// The line that states it.
+        line: String,
+    },
+
+    /// A Lean spec contains something that runs code while Lean checks it.
+    #[error(
+        "{path} contains `{found}`, which can run code while Lean checks it, and formal does not check a spec that can"
+    )]
+    RunsCode {
+        /// The spec.
+        path: PathBuf,
+        /// What was found.
+        found: String,
+    },
+
     /// A proof file named by the caller could not be read.
     #[error("cannot read the proof for {property_id} at {path}: {reason}")]
     UnreadableProof {
@@ -170,7 +209,7 @@ impl SpecFile {
 }
 
 /// `Path.expanduser()`.
-fn expanduser(raw: &str) -> PathBuf {
+pub(crate) fn expanduser(raw: &str) -> PathBuf {
     if let Some(home) = std::env::var_os("HOME").filter(|_| raw == "~" || raw.starts_with("~/")) {
         let home = PathBuf::from(home);
         return if raw == "~" {
@@ -182,7 +221,7 @@ fn expanduser(raw: &str) -> PathBuf {
     PathBuf::from(raw)
 }
 
-fn require_absolute(path: &Path, what: &str) -> Result<(), SpecError> {
+pub(crate) fn require_absolute(path: &Path, what: &str) -> Result<(), SpecError> {
     if path.is_absolute() {
         return Ok(());
     }
