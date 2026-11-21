@@ -41,7 +41,10 @@ use std::{
     },
 };
 
-use formal_core::pystr;
+use formal_core::{
+    proof_cache::sha256_hex,
+    pystr,
+};
 use rustix::process::{
     Pid,
     Signal,
@@ -51,7 +54,10 @@ use tempfile::Builder;
 use thiserror::Error;
 
 use crate::{
-    audit::Audit,
+    audit::{
+        self,
+        Audit,
+    },
     env::Env,
     paths::Paths,
     sandbox::{
@@ -79,6 +85,8 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// How long `lake env env` gets to report the environment it manages.
 const LEAN_ENV_TIMEOUT: Duration = Duration::from_secs(30);
+
+const AUDIT_BUILD_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// How often a running Lean is asked whether it has finished.
 const POLL: Duration = Duration::from_millis(20);
@@ -326,6 +334,29 @@ pub enum RunError {
     /// Lean itself could not be started.
     #[error("Could not run Lean: {0}")]
     Unstartable(#[from] std::io::Error),
+
+    /// The axiom audit could not be compiled, so no verdict could be trusted.
+    #[error("formal could not prepare its axiom audit, so it checks nothing: {0}")]
+    NoAudit(String),
+}
+
+fn audit_dir(project: &Path, lean_version: &str) -> PathBuf {
+    let digest = sha256_hex(&format!("{lean_version}\n{}", audit::MODULE_SOURCE));
+    project.join(".formal_audit").join(&digest[..16])
+}
+
+fn with_audit_on_lean_path(
+    mut env: BTreeMap<OsString, OsString>,
+    dir: &Path,
+) -> BTreeMap<OsString, OsString> {
+    let key = OsString::from("LEAN_PATH");
+    let mut path = env.remove(&key).unwrap_or_default();
+    if !path.is_empty() {
+        path.push(":");
+    }
+    path.push(dir.as_os_str());
+    env.insert(key, path);
+    env
 }
 
 fn timed_out(after: Duration) -> LeanResult {
@@ -363,6 +394,7 @@ pub struct Runner {
     /// once and calling `lean` directly saves about 100ms a run. Absent means the
     /// question could not be answered and every call goes through lake instead.
     lean_env: OnceLock<Option<BTreeMap<OsString, OsString>>>,
+    audit: Mutex<Option<PathBuf>>,
     warned: AtomicBool,
     warm: Warm,
 }
@@ -395,6 +427,7 @@ impl Runner {
             sandbox,
             timeout,
             lean_env: OnceLock::new(),
+            audit: Mutex::new(None),
             warned: AtomicBool::new(false),
             warm: Warm::new(0),
         }
@@ -421,10 +454,7 @@ impl Runner {
                 repl.display()
             ));
         }
-        let env = self
-            .lean_env()
-            .ok_or("lake could not report the Lean environment")?
-            .clone();
+        let env = self.audited_env().map_err(|e| e.to_string())?;
         let wrapped = self.sandbox.wrap(&[repl]).map_err(|e| e.to_string())?;
         self.warn_once(wrapped.warning);
         Ok(Launch {
@@ -480,25 +510,91 @@ impl Runner {
             .as_ref()
     }
 
-    /// The command that checks `path`, going straight to `lean` when lake has
-    /// already been asked what it would have set.
-    fn lean_command(&self, path: &Path) -> (Vec<OsString>, BTreeMap<OsString, OsString>) {
-        let json = OsString::from("--json");
-        if let Some(env) = self.lean_env() {
-            let lean = self
-                .toolchain
-                .which("lean")
-                .map_or_else(|| OsString::from("lean"), Into::into);
-            return (vec![lean, json, path.into()], env.clone());
+    fn audited_env(&self) -> Result<BTreeMap<OsString, OsString>, RunError> {
+        if self.toolchain.which("lake").is_none() {
+            return Err(RunError::Unstartable(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "the toolchain has no lake",
+            )));
         }
-        let lake = self
+        let env = self.lean_env().ok_or_else(|| {
+            RunError::NoAudit("lake could not report the Lean environment".into())
+        })?;
+        let mut compiled = self.audit.lock().unwrap_or_else(PoisonError::into_inner);
+        let dir = if let Some(dir) = &*compiled {
+            dir.clone()
+        } else {
+            let dir = self.compile_audit(env)?;
+            *compiled = Some(dir.clone());
+            dir
+        };
+        Ok(with_audit_on_lean_path(env.clone(), &dir))
+    }
+
+    fn compile_audit(&self, env: &BTreeMap<OsString, OsString>) -> Result<PathBuf, RunError> {
+        let project = &self.paths.lean_project_dir;
+        let lean: OsString = self
             .toolchain
-            .which("lake")
-            .map_or_else(|| OsString::from("lake"), Into::into);
-        (
-            vec![lake, "env".into(), "lean".into(), json, path.into()],
-            self.toolchain.env(),
-        )
+            .which("lean")
+            .ok_or_else(|| RunError::NoAudit("no lean to compile it with".into()))?
+            .into();
+        let version = run_command(
+            &[lean.clone(), "--version".into()],
+            project,
+            env,
+            LEAN_ENV_TIMEOUT,
+        )?;
+        let dir = audit_dir(project, &version.stdout);
+        let olean = |dir: &Path| dir.join(format!("{}.olean", audit::MODULE));
+        if olean(&dir).is_file() {
+            return Ok(dir);
+        }
+        let unwritable = |source| RunError::Unwritable {
+            dir: dir.clone(),
+            source,
+        };
+        let root = dir.parent().unwrap_or(project);
+        std::fs::create_dir_all(root).map_err(unwritable)?;
+        let building = Builder::new()
+            .prefix(".building-")
+            .tempdir_in(root)
+            .map_err(unwritable)?;
+        let source = building.path().join(format!("{}.lean", audit::MODULE));
+        std::fs::write(&source, audit::MODULE_SOURCE).map_err(unwritable)?;
+        let argv: Vec<OsString> = vec![
+            lean,
+            format!("--root={}", building.path().display()).into(),
+            "-o".into(),
+            olean(building.path()).into(),
+            "-i".into(),
+            building
+                .path()
+                .join(format!("{}.ilean", audit::MODULE))
+                .into(),
+            source.into(),
+        ];
+        let captured = run_command(&argv, project, env, AUDIT_BUILD_TIMEOUT)?;
+        if captured.code != Some(0) {
+            return Err(RunError::NoAudit(format!(
+                "Lean could not compile it: {}{}",
+                captured.stdout, captured.stderr
+            )));
+        }
+        if std::fs::rename(building.path(), &dir).is_err() && !olean(&dir).is_file() {
+            return Err(RunError::NoAudit(format!(
+                "could not move it to {}",
+                dir.display()
+            )));
+        }
+        Ok(dir)
+    }
+
+    fn lean_command(&self, path: &Path) -> Vec<OsString> {
+        let lean = self
+            .toolchain
+            .which("lean")
+            .map_or_else(|| OsString::from("lean"), Into::into);
+        vec![lean, OsString::from("--json"), path.into()]
     }
 
     /// Write `lean_code` to a scratch file and check it.
@@ -525,6 +621,9 @@ impl Runner {
     ) -> Result<LeanResult, RunError> {
         if lean_code.trim().is_empty() {
             return Ok(failed("Empty Lean code"));
+        }
+        if audit::leaves_an_in_open(lean_code) {
+            return Ok(audit::unaudited());
         }
 
         let audit = Audit::new();
@@ -559,19 +658,19 @@ impl Runner {
             .tempfile_in(&dir)
             .map_err(unwritable)?;
         scratch
-            .write_all(audit.appended_to(lean_code).as_bytes())
+            .write_all(audit.cold_file(lean_code).as_bytes())
             .and_then(|()| scratch.flush())
             .map_err(unwritable)?;
 
-        let (cmd, env) = self.lean_command(scratch.path());
-        let wrapped = self.sandbox.wrap(&cmd)?;
+        let wrapped = self.sandbox.wrap(&self.lean_command(scratch.path()))?;
         self.warn_once(wrapped.warning);
+        let env = self.audited_env()?;
 
         let captured = run_command(&wrapped.argv, &self.paths.lean_project_dir, &env, effective)?;
         if captured.timed_out {
             return Ok(timed_out(effective));
         }
-        Ok(audit.judge(parse_output(&captured)))
+        Ok(Audit::from_cold_file(audit.judge(parse_output(&captured))))
     }
 
     /// Check several proofs in one invocation, paying one Mathlib import.
@@ -590,6 +689,28 @@ impl Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_audit_is_compiled_once_per_lean_under_the_project() {
+        let project = Path::new("/lean_project");
+        let one = audit_dir(project, "Lean (version 4.35.0)");
+        assert!(one.starts_with("/lean_project/.formal_audit"));
+        assert_eq!(one, audit_dir(project, "Lean (version 4.35.0)"));
+        assert_ne!(one, audit_dir(project, "Lean (version 4.36.0)"));
+    }
+
+    #[test]
+    fn the_audit_joins_the_lean_path_lake_reported() {
+        let dir = Path::new("/audit");
+        let key = OsString::from("LEAN_PATH");
+        let with = with_audit_on_lean_path(
+            BTreeMap::from([(key.clone(), OsString::from("/mathlib"))]),
+            dir,
+        );
+        assert_eq!(with[&key], OsString::from("/mathlib:/audit"));
+        let without = with_audit_on_lean_path(BTreeMap::new(), dir);
+        assert_eq!(without[&key], OsString::from("/audit"));
+    }
 
     fn env() -> BTreeMap<OsString, OsString> {
         BTreeMap::from([(OsString::from("PATH"), OsString::from("/usr/bin:/bin"))])

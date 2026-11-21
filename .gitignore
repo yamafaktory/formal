@@ -6,5 +6,6 @@ server.pid
 __pycache__/
 rust/target/
 lean_project/.lake/
+lean_project/.formal_audit/
 lean_project/Verify/*.lean
 lean_project/Scratch_*.lean
