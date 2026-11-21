@@ -21,9 +21,12 @@ use std::{
     },
 };
 
-use formal_core::property::{
-    PropertyResult,
-    PropertySpec,
+use formal_core::{
+    lean_spec::LeanSpec,
+    property::{
+        PropertyResult,
+        PropertySpec,
+    },
 };
 use formal_lean::{
     env::Env,
@@ -125,6 +128,8 @@ pub struct Session {
     /// Without this a caller cannot tell whether its own tactic worked, and the
     /// proof that gets cached is the accepted one, not the submitted one.
     pub recovered: Vec<String>,
+    /// The Lean spec every proof is checked against, when the session opened on one.
+    pub lean_spec: Option<LeanSpec>,
 }
 
 impl Session {
@@ -215,7 +220,13 @@ impl Session {
             return Ok(Vec::new());
         }
 
-        let outcomes = checker.check_batch(&submissions, None);
+        let outcomes: Vec<Outcome> = match &self.lean_spec {
+            Some(spec) => submissions
+                .iter()
+                .flat_map(|submission| checker.check_against(spec, submission, None))
+                .collect(),
+            None => checker.check_batch(&submissions, None),
+        };
         for outcome in &outcomes {
             if !outcome.verified() {
                 continue;
@@ -327,6 +338,23 @@ impl Sessions {
         self.open_as(Uuid::new_v4().simple().to_string(), cache, specs, stale)
     }
 
+    /// Open a session on a Lean spec, with one property per `def … : Prop` in it.
+    pub fn open_spec(&self, cache: &ProofCache, spec: LeanSpec) -> Arc<Mutex<Session>> {
+        let keys = spec
+            .properties
+            .iter()
+            .map(|id| (id.clone(), spec.key(id)))
+            .collect();
+        self.register(
+            Uuid::new_v4().simple().to_string(),
+            cache,
+            spec.property_specs(),
+            keys,
+            Vec::new(),
+            Some(spec),
+        )
+    }
+
     /// The same, under an id chosen by the caller rather than generated.
     pub fn open_as(
         &self,
@@ -335,12 +363,24 @@ impl Sessions {
         specs: Vec<PropertySpec>,
         stale: Vec<String>,
     ) -> Arc<Mutex<Session>> {
-        self.evict_expired();
-
         let keys = specs
             .iter()
             .map(|spec| (spec.id.clone(), spec.cache_key()))
-            .collect::<HashMap<_, _>>();
+            .collect();
+        self.register(id, cache, specs, keys, stale, None)
+    }
+
+    fn register(
+        &self,
+        id: String,
+        cache: &ProofCache,
+        specs: Vec<PropertySpec>,
+        keys: HashMap<String, String>,
+        stale: Vec<String>,
+        spec: Option<LeanSpec>,
+    ) -> Arc<Mutex<Session>> {
+        self.evict_expired();
+
         let mut session = Session {
             id,
             created_at: Instant::now(),
@@ -351,6 +391,7 @@ impl Sessions {
             hits: HashMap::new(),
             stale,
             recovered: Vec::new(),
+            lean_spec: spec,
         };
 
         for spec in session.specs.clone() {

@@ -277,14 +277,30 @@ mod opening_a_session {
         for body in [
             json!({}),
             json!({ "properties": properties(), "spec_file": "/tmp/x.json" }),
+            json!({ "properties": properties(), "spec": "/tmp/X.lean" }),
+            json!({ "spec_file": "/tmp/x.json", "spec": "/tmp/X.lean" }),
         ] {
             let (status, answer) = call(&app, "POST", "/session", Some(body)).await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
             assert_eq!(
                 answer["detail"],
-                "Provide either 'properties' or 'spec_file', not both"
+                "Provide exactly one of 'properties', 'spec_file' or 'spec'"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_root_without_a_spec_file_is_refused() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let (status, answer) = call(
+            &app(&dir),
+            "POST",
+            "/session",
+            Some(json!({ "spec": "/tmp/X.lean", "root": "/tmp" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(answer["detail"], "'root' applies only to 'spec_file'");
     }
 
     #[tokio::test]

@@ -135,6 +135,17 @@ pub fn cache_key(function_code: &str, kind: &str, formal: &str) -> String {
     sha256_hex(&payload)
 }
 
+/// The cache key of one property of a Lean spec.
+///
+/// A key from [`cache_key`] digests a framed payload, which starts with a
+/// digit. This payload starts with a word, so no inline property can claim the
+/// key of a spec property. The spec is digested as written, since a space
+/// inside a Lean string is meaning.
+#[must_use]
+pub fn lean_spec_key(spec: &str, id: &str) -> String {
+    sha256_hex(&format!("lean-spec:{}", framed(&[spec, id])))
+}
+
 /// The SHA-256 digest of `text`, in lowercase hex.
 #[must_use]
 pub fn sha256_hex(text: &str) -> String {

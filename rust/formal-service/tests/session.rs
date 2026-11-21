@@ -12,12 +12,14 @@ use std::{
 
 use formal_core::{
     hints::Table,
+    lean_spec::LeanSpec,
     property::PropertySpec,
 };
 use formal_lean::verifier::{
     BatchEntry,
     LeanError,
     LeanResult,
+    Pos,
 };
 use formal_service::{
     cache::ProofCache,
@@ -69,6 +71,7 @@ fn proofs(ids: &[&str]) -> Vec<(String, String)> {
 struct Fake {
     result: Option<LeanResult>,
     calls: RefCell<usize>,
+    seen: RefCell<Vec<String>>,
 }
 
 impl Fake {
@@ -100,8 +103,9 @@ impl Fake {
 }
 
 impl Verifier for Fake {
-    fn verify(&self, _lean_code: &str, _timeout: Option<Duration>) -> LeanResult {
+    fn verify(&self, lean_code: &str, _timeout: Option<Duration>) -> LeanResult {
         *self.calls.borrow_mut() += 1;
+        self.seen.borrow_mut().push(lean_code.to_string());
         self.result.clone().unwrap_or_default()
     }
 
@@ -111,6 +115,9 @@ impl Verifier for Fake {
         _timeout: Option<Duration>,
     ) -> Option<Vec<(String, LeanResult)>> {
         *self.calls.borrow_mut() += 1;
+        self.seen
+            .borrow_mut()
+            .extend(entries.iter().map(|entry| entry.lean_code.clone()));
         let result = self.result.clone().unwrap_or_default();
         Some(
             entries
@@ -533,6 +540,139 @@ mod origins {
         assert_eq!(
             session.lock().expect("a fresh session").origin("p1"),
             Origin::Submitted
+        );
+    }
+}
+
+mod on_a_lean_spec {
+    use std::fs;
+
+    use super::*;
+
+    const SPEC: &str = include_str!("../../../tests/fixtures/lean_spec/Demo.lean");
+
+    const PROOF: &str = "import Mathlib\n\nnamespace Demo\n\ntheorem double_even.holds : double_even := by\n  intro n\n  omega\n\nend Demo\n";
+
+    fn lean_spec(dir: &TempDir, text: &str) -> LeanSpec {
+        let path = dir.path().join("Demo.lean");
+        fs::write(&path, text).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn proof() -> Vec<(String, String)> {
+        vec![("Demo.double_even".to_string(), PROOF.to_string())]
+    }
+
+    fn rejecting_at(line: u32) -> Fake {
+        Fake {
+            result: Some(LeanResult {
+                success: false,
+                output: String::new(),
+                errors: vec![LeanError {
+                    severity: "error".to_string(),
+                    data: "omega could not prove the goal".to_string(),
+                    pos: Some(Pos {
+                        line: Some(line),
+                        column: Some(2),
+                    }),
+                    ..LeanError::default()
+                }],
+            }),
+            ..Fake::default()
+        }
+    }
+
+    #[test]
+    fn every_property_of_the_spec_is_work() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let session = Sessions::default().open_spec(&cache(&dir), lean_spec(&dir, SPEC));
+        let session = session.lock().expect("a fresh session");
+        assert_eq!(session.work_ids(), ["Demo.double_even", "Demo.double_mono"]);
+    }
+
+    #[test]
+    fn lean_sees_the_proof_after_the_spec_and_held_to_its_statement() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::accepting();
+        let session = Sessions::default().open_spec(&cache, lean_spec(&dir, SPEC));
+        session
+            .lock()
+            .expect("a fresh session")
+            .check(&Checker::new(&fake, table()), &cache, &proof())
+            .expect("the property is registered");
+
+        let seen = fake.seen.borrow();
+        let code = seen.first().expect("Lean was asked");
+        assert!(
+            code.starts_with("import Mathlib\nnamespace Demo\n"),
+            "{code}"
+        );
+        assert!(
+            code.ends_with("\n#formal_holds \"Demo.double_even\"\n"),
+            "{code}"
+        );
+    }
+
+    #[test]
+    fn an_error_in_the_proof_names_the_proof_line() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let spec = lean_spec(&dir, SPEC);
+        let omega = spec
+            .compose("Demo.double_even", PROOF)
+            .lean_code
+            .split('\n')
+            .position(|line| line == "  omega")
+            .expect("the proof is in the file");
+        let fake = rejecting_at(u32::try_from(omega + 1).expect("it fits"));
+        let session = Sessions::default().open_spec(&cache, spec);
+        let outcomes = session
+            .lock()
+            .expect("a fresh session")
+            .check(&Checker::new(&fake, table()), &cache, &proof())
+            .expect("the property is registered");
+        let outcome = outcomes.first().expect("one outcome");
+        assert_eq!((outcome.line, outcome.col), (Some(7), Some(2)));
+    }
+
+    #[test]
+    fn an_error_in_the_spec_names_no_line() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = rejecting_at(3);
+        let session = Sessions::default().open_spec(&cache, lean_spec(&dir, SPEC));
+        let outcomes = session
+            .lock()
+            .expect("a fresh session")
+            .check(&Checker::new(&fake, table()), &cache, &proof())
+            .expect("the property is registered");
+        let outcome = outcomes.first().expect("one outcome");
+        assert_eq!((outcome.line, outcome.col), (None, None));
+    }
+
+    #[test]
+    fn a_proof_stays_cached_until_the_spec_changes() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::accepting();
+        let sessions = Sessions::default();
+        sessions
+            .open_spec(&cache, lean_spec(&dir, SPEC))
+            .lock()
+            .expect("a fresh session")
+            .check(&Checker::new(&fake, table()), &cache, &proof())
+            .expect("the property is registered");
+
+        let same = sessions.open_spec(&cache, lean_spec(&dir, SPEC));
+        assert_eq!(
+            same.lock().expect("a fresh session").cached_ids(),
+            ["Demo.double_even"]
+        );
+        let edited = sessions.open_spec(&cache, lean_spec(&dir, &SPEC.replace("n + n", "2 * n")));
+        assert_eq!(
+            edited.lock().expect("a fresh session").cached_ids(),
+            Vec::<&str>::new()
         );
     }
 }

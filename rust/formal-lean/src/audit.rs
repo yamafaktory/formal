@@ -2,6 +2,7 @@
 
 use std::sync::OnceLock;
 
+use formal_core::lean_text::without_comments;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -56,7 +57,9 @@ fn unaudited_error() -> LeanError {
     }
 }
 
-pub(crate) fn unaudited() -> LeanResult {
+/// The verdict on a file whose audit could not have run.
+#[must_use]
+pub fn unaudited() -> LeanResult {
     LeanResult {
         success: false,
         output: UNAUDITED.to_string(),
@@ -72,8 +75,10 @@ fn last_word_pattern() -> &'static Regex {
     })
 }
 
-pub(crate) fn leaves_an_in_open(lean_code: &str) -> bool {
-    last_word_pattern().is_match(crate::verifier::without_comments(lean_code).trim_end())
+/// Whether `lean_code` ends in a `... in` that would take the next command as its own.
+#[must_use]
+pub fn leaves_an_in_open(lean_code: &str) -> bool {
+    last_word_pattern().is_match(without_comments(lean_code).trim_end())
 }
 
 #[derive(Deserialize)]
@@ -147,20 +152,7 @@ impl Audit {
     /// A cold result with each line moved back by the import formal put first.
     #[must_use]
     pub fn from_cold_file(result: LeanResult) -> LeanResult {
-        let mut result = result;
-        for error in &mut result.errors {
-            let (line, column) = error.position();
-            let line = line
-                .and_then(|line| line.checked_sub(1))
-                .filter(|&line| line > 0);
-            error.pos = Some(Pos {
-                line,
-                column: column.filter(|_| line.is_some()),
-            });
-            error.line = None;
-            error.col = None;
-        }
-        result
+        result.map_lines(|line| line.checked_sub(1).filter(|&line| line > 0))
     }
 
     /// The verdict once the audit has been read: a failure when it never
@@ -354,6 +346,14 @@ mod tests {
                 .cold_file("\u{feff}import Mathlib\n")
                 .starts_with("import FormalAudit\nimport Mathlib\n")
         );
+    }
+
+    #[test]
+    fn the_module_defines_the_check_a_spec_composes_its_proofs_with() {
+        assert!(MODULE_SOURCE.contains(&format!(
+            "elab \"{} \" target:str : command",
+            formal_core::lean_spec::HOLDS_COMMAND
+        )));
     }
 
     #[test]

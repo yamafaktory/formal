@@ -117,4 +117,12 @@ elab "#formal_audit " nonce:str : command => do
       found := found.push report
   logInfo m!"formal-audit {nonce.getString} {(Json.arr found).compress}"
 
+elab "#formal_holds " target:str : command => do
+  let name := target.getString.toName
+  let stated ← getConstInfo name
+  let info ← getConstInfo (name.str "holds")
+  unless info.levelParams.length == stated.levelParams.length &&
+      info.type == mkConst name (info.levelParams.map mkLevelParam) do
+    throwError m!"`{name}.holds` does not state `{name}`"
+
 end FormalAudit

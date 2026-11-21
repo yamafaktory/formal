@@ -6,6 +6,8 @@
 
 pub mod guide;
 pub mod hints;
+pub mod lean_spec;
+pub mod lean_text;
 pub mod prompts;
 pub mod proof_cache;
 pub mod property;

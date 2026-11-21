@@ -127,6 +127,17 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
+const LEAN_SPEC: [&str; 4] = [
+    "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
+     of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
+    "Each property is registered as <Namespace>.<name>. Its proof declares \
+     `theorem <Namespace>.<name>.holds : <Namespace>.<name>` and leaves the spec out: formal puts the spec \
+     before the proof, and holds the proof to the spec's own statement. A proof that redefines a name of the \
+     spec is rejected.",
+    "The cache key covers the whole spec, so an edit to it sends every property back as work.",
+    "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof.",
+];
+
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \
                        Read it rather than guessing at a shape.";
 
@@ -323,6 +334,7 @@ pub fn index() -> Value {
     json!({
         "workflow": WORKFLOW,
         "spec_file": spec_file(),
+        "lean_spec": LEAN_SPEC,
         "stale": STALE_ADVICE,
         "sessions": SESSION_LIFETIME,
         "openapi": OPENAPI,

@@ -1,22 +1,18 @@
-//! The spec against its proofs, and against the Rust it describes.
+//! The spec against the Rust it describes.
 
 use std::{
-    fs,
     path::PathBuf,
     time::Duration,
 };
 
-use formal_core::pystr;
+use formal_core::{
+    lean_spec::LeanSpec,
+    pystr,
+};
 use formal_lean::{
     run::Runner,
-    verifier::{
-        LeanResult,
-        check_syntax,
-    },
+    verifier::LeanResult,
 };
-use regex::Regex;
-
-const SPEC: &str = "Pystr";
 
 const ALPHABET: [char; 15] = [
     'a', ' ', '\t', '\u{a0}', '\u{1f}', '\n', '\u{b}', '\u{c}', '\u{1c}', '\u{1d}', '\u{1e}', '\r',
@@ -35,32 +31,9 @@ fn repository() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn spec() -> String {
-    fs::read_to_string(repository().join(format!("spec/{SPEC}.lean")))
-        .expect("the spec is readable")
-}
-
-fn proofs_dir() -> PathBuf {
-    repository().join(format!("proofs/{SPEC}"))
-}
-
-fn properties(spec: &str) -> Vec<String> {
-    Regex::new(r"(?m)^def (\w+) : Prop :=")
-        .expect("the pattern is a literal")
-        .captures_iter(spec)
-        .map(|found| found[1].to_string())
-        .collect()
-}
-
-fn proved(spec: &str, property: &str, proof: &str) -> String {
-    let (imports, body): (Vec<&str>, Vec<&str>) = pystr::splitlines(proof)
-        .into_iter()
-        .partition(|line| line.starts_with("import "));
-    format!(
-        "{}\n{spec}\n{}\nexample : _root_.{SPEC}.{property} := _root_.{SPEC}.{property}.holds\n",
-        imports.join("\n"),
-        body.join("\n"),
-    )
+fn spec() -> LeanSpec {
+    let path = repository().join("spec/Pystr.lean");
+    LeanSpec::load(&path.to_string_lossy()).expect("the spec loads")
 }
 
 fn printed(result: &LeanResult) -> Vec<String> {
@@ -151,70 +124,11 @@ fn first_difference(name: &str, spec: &str, rust: &[(String, String)]) -> Option
 }
 
 #[test]
-fn every_property_in_the_spec_holds() {
-    let Some(runner) = runner() else {
-        return;
-    };
-    let spec = spec();
-    let properties = properties(&spec);
-    assert!(
-        !properties.is_empty(),
-        "no property found in the spec — the extraction pattern has drifted"
-    );
-
-    let mut failures = Vec::new();
-    for property in &properties {
-        let path = proofs_dir().join(format!("{property}.lean"));
-        let Ok(proof) = fs::read_to_string(&path) else {
-            failures.push(format!("{property}: no proof at {}", path.display()));
-            continue;
-        };
-        let (screened, refusal) = check_syntax(&proof);
-        if !screened {
-            failures.push(format!("{property}: {refusal}"));
-            continue;
-        }
-        let result = runner.verify(
-            &proved(&spec, property, &proof),
-            Some(Duration::from_mins(5)),
-        );
-        if !result.success {
-            let error = result
-                .first_error()
-                .map_or(result.output.as_str(), |error| error.data.as_str());
-            failures.push(format!("{property}: {error}"));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
-}
-
-#[test]
-fn every_proof_answers_a_property_of_the_spec() {
-    let properties = properties(&spec());
-    let orphans: Vec<String> = fs::read_dir(proofs_dir())
-        .expect("the proofs are listable")
-        .map(|entry| entry.expect("the entry is readable").path())
-        .filter(|path| {
-            path.extension().is_none_or(|extension| extension != "lean")
-                || path
-                    .file_stem()
-                    .is_none_or(|stem| !properties.iter().any(|property| stem == property.as_str()))
-        })
-        .map(|path| path.display().to_string())
-        .collect();
-    assert!(
-        orphans.is_empty(),
-        "these proofs answer no property of the spec: {}",
-        orphans.join(", ")
-    );
-}
-
-#[test]
 fn the_rust_answers_what_the_spec_answers() {
     let Some(runner) = runner() else {
         return;
     };
-    let result = runner.verify(&evaluation(&spec()), Some(Duration::from_mins(5)));
+    let result = runner.verify(&evaluation(&spec().text), Some(Duration::from_mins(5)));
     assert!(result.success, "{:?}", result.errors);
     let printed = printed(&result);
     let [space, strip, rstrip, splitlines] = printed.as_slice() else {

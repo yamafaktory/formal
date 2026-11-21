@@ -35,7 +35,7 @@ anything the cache key touches — reaching for `str::lines` or
 Four things outside `rust/` decide whether a change is allowed to land. All are
 data, and none of them mention an implementation.
 
-- `tests/conformance/golden/responses.json` — the HTTP surface. 27 steps, status
+- `tests/conformance/golden/responses.json` — the HTTP surface. 32 steps, status
   codes everywhere including the refusals, bodies where formal writes them.
   Driven by `formal-server/tests/conformance.rs`, which can also judge an
   already-running server:
@@ -77,12 +77,24 @@ run, never from memory.
 
 ## Specs
 
-`spec/Pystr.lean` says in Lean what `formal_core::pystr` must do. Each `def … : Prop`
-in it is a property. Its proof is `proofs/Pystr/<property>.lean`, which declares
-`theorem Pystr.<property>.holds`. The proof sees the spec but cannot redefine it.
-`formal-lean/tests/spec.rs` checks every proof, and compares the Rust with the spec on
-every character and on every short string over an alphabet of space and line breaks.
-The spec uses core Lean only.
+A Lean spec says what code must do. `spec/Pystr.lean` is the one for
+`formal_core::pystr`. Each `def <name> : Prop :=` in it is a property, and its proof
+is `proofs/Pystr/<name>.lean`, which declares `theorem Pystr.<name>.holds`.
+
+formal checks a spec itself: `POST /session` with `{"spec": path}`.
+`formal-core/src/lean_spec.rs` reads the spec and composes each proof after it. The
+composed file ends with `#formal_holds "<id>"`, which finds `<id>.holds` by name and
+requires its type to be the property. Like `#formal_audit`, it is defined in the
+`FormalAudit` module (`formal-lean/lean/FormalAudit.lean`), which every check imports
+before the proof, so no notation or variable in the proof can change what it does.
+`Checker::check_against` composes at the Lean boundary, so the screen, the recovery
+chain and the cache all see the proof alone. Each proof of a spec costs its own Lean
+run: one file cannot hold the spec once per proof, so spec proofs are never batched.
+
+`formal-service/tests/spec_sessions.rs` checks every proof of `spec/Pystr.lean` through
+a session, and holds the check to proofs that try to cheat. `formal-lean/tests/spec.rs`
+compares the Rust with the spec on every character and on every short string over an
+alphabet of space and line breaks. The spec uses core Lean only.
 
 ## Lean
 
@@ -96,10 +108,11 @@ cargo test -p formal-lean --test audit         # the false theorems Lean accepts
 cargo test -p formal-lean --test warm          # a warm Lean gives the verdict a cold one gives
 cargo test -p formal-lean --test confinement   # bubblewrap confines what it claims to
 cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
-cargo test -p formal-lean --test spec          # the spec holds, and the Rust answers what it answers
+cargo test -p formal-lean --test spec          # the Rust answers what the spec answers
+cargo test -p formal-service --test spec_sessions  # every proof of the spec holds, and no cheat does
 ```
 
-CI runs all six in the `lean` job, sandboxed, and fails before them if Lean or
+CI runs all seven in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
 ## Releases

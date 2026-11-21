@@ -26,6 +26,7 @@ use axum::{
 use formal_core::{
     guide,
     hints::Table,
+    lean_spec::LeanSpec,
     property::PropertySpec,
     specs,
 };
@@ -321,17 +322,31 @@ fn describe(session: &Session) -> SessionResponse {
     request_body = SessionRequest,
     responses(
         (status = 200, description = "The session, and what it already knows", body = SessionResponse),
-        (status = 400, description = "Neither or both sources given, a duplicate id, or an unreadable spec file", body = Detail),
+        (status = 400, description = "No source or more than one given, a duplicate id, an unreadable spec file, or a spec that runs code", body = Detail),
     ),
 )]
 async fn open_session(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SessionRequest>,
 ) -> ApiResult<SessionResponse> {
-    if req.properties.is_empty() == req.spec_file.is_none() {
+    let sources = usize::from(!req.properties.is_empty())
+        + usize::from(req.spec_file.is_some())
+        + usize::from(req.spec.is_some());
+    if sources != 1 {
         return Err(ApiError::bad_request(
-            "Provide either 'properties' or 'spec_file', not both",
+            "Provide exactly one of 'properties', 'spec_file' or 'spec'",
         ));
+    }
+
+    if req.root.is_some() && req.spec_file.is_none() {
+        return Err(ApiError::bad_request("'root' applies only to 'spec_file'"));
+    }
+
+    if let Some(path) = &req.spec {
+        let spec = LeanSpec::load(path).map_err(|e| ApiError::bad_request(e.to_string()))?;
+        let session = state.sessions.open_spec(&state.cache, spec);
+        let session = session.lock().map_err(|_| poisoned())?;
+        return Ok(Json(describe(&session)));
     }
 
     let (specs, stale_ids) = if let Some(spec_file) = &req.spec_file {

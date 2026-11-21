@@ -18,6 +18,7 @@ use std::{
 
 use formal_core::{
     hints::Table,
+    lean_text::runs_code,
     pystr,
 };
 use regex::Regex;
@@ -125,6 +126,22 @@ pub struct LeanResult {
 }
 
 impl LeanResult {
+    /// The same verdict with each line moved by `map`, and a column kept only with its line.
+    #[must_use]
+    pub fn map_lines(mut self, map: impl Fn(u32) -> Option<u32>) -> Self {
+        for error in &mut self.errors {
+            let (line, column) = error.position();
+            let line = line.and_then(&map);
+            error.pos = Some(Pos {
+                line,
+                column: column.filter(|_| line.is_some()),
+            });
+            error.line = None;
+            error.col = None;
+        }
+        self
+    }
+
     /// The diagnostic to answer, which is always the first.
     #[must_use]
     pub fn first_error(&self) -> Option<&LeanError> {
@@ -137,80 +154,6 @@ impl LeanResult {
         self.first_error()
             .map_or_else(String::new, |error| table.hint_for(&error.data))
     }
-}
-
-fn runs_code_pattern() -> &'static Regex {
-    static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| {
-        Regex::new(
-            r"#(?:eval|exit|guard)\w*|\b(?:run_\w+|by_elab|elab|elab_rules|macro|macro_rules|syntax|declare_syntax_cat|\w*initialize|unsafe\w*|implemented_by|extern|(?:command|term|tactic)_elab|delab|(?:E|Base)?IO|Lean)\b",
-        )
-        .expect("the pattern is a literal")
-    })
-}
-
-pub(crate) fn without_comments(lean_code: &str) -> String {
-    let mut kept = String::with_capacity(lean_code.len());
-    let mut rest = lean_code;
-    while let Some(c) = rest.chars().next() {
-        if rest.starts_with("--") {
-            let end = rest.find('\n').unwrap_or(rest.len());
-            kept.push(' ');
-            rest = &rest[end..];
-        } else if rest.starts_with("/-") {
-            let mut depth = 0usize;
-            let mut index = 0;
-            while index < rest.len() {
-                if rest[index..].starts_with("/-") {
-                    depth += 1;
-                    index += 2;
-                } else if rest[index..].starts_with("-/") {
-                    depth -= 1;
-                    index += 2;
-                    if depth == 0 {
-                        break;
-                    }
-                } else {
-                    index += rest[index..].chars().next().map_or(1, char::len_utf8);
-                }
-            }
-            kept.push(' ');
-            rest = &rest[index.min(rest.len())..];
-        } else if c == '"' {
-            let mut index = 1;
-            let mut escaped = false;
-            for (offset, next) in rest[1..].char_indices() {
-                index = 1 + offset + next.len_utf8();
-                if escaped {
-                    escaped = false;
-                } else if next == '\\' {
-                    escaped = true;
-                } else if next == '"' {
-                    break;
-                }
-            }
-            kept.push_str(&rest[..index]);
-            rest = &rest[index..];
-        } else if rest.starts_with("'\"'") {
-            kept.push_str("'\"'");
-            rest = &rest[3..];
-        } else {
-            kept.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    kept
-}
-
-/// The first thing in `lean_code` that could run code while Lean elaborates it.
-///
-/// Such code could print what formal reads as Lean's verdict, so a proof that
-/// contains any of it is refused rather than checked. Comments are ignored.
-#[must_use]
-pub fn runs_code(lean_code: &str) -> Option<String> {
-    runs_code_pattern()
-        .find(&without_comments(lean_code))
-        .map(|found| found.as_str().to_string())
 }
 
 /// Fast pre-check before invoking the full Lean verifier.

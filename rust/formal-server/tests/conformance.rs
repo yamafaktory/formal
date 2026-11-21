@@ -418,6 +418,56 @@ impl Run {
         .await;
     }
 
+    /// Opening a session on a Lean spec, and every way of doing it wrongly.
+    async fn lean_specs(&mut self, spec_path: &str) {
+        let write = |name: &str, text: &str| {
+            let path = self.workspace.join(name);
+            fs::write(&path, text).expect("writable");
+            path.to_string_lossy().to_string()
+        };
+        let lean_spec = write("Demo.lean", LEAN_SPEC);
+        let no_property = write(
+            "Empty.lean",
+            "namespace Empty\n\ndef one : Nat := 1\n\nend Empty\n",
+        );
+        let runs_code = write("Loud.lean", &format!("{LEAN_SPEC}\n#eval 1\n"));
+
+        self.open_session(
+            "session_open_from_lean_spec",
+            json!({ "spec": lean_spec }),
+            "<lean-spec-session>",
+        )
+        .await;
+        self.step(
+            "session_open_lean_spec_without_property",
+            "POST",
+            "/session",
+            Some(json!({ "spec": no_property })),
+        )
+        .await;
+        self.step(
+            "session_open_lean_spec_that_runs_code",
+            "POST",
+            "/session",
+            Some(json!({ "spec": runs_code })),
+        )
+        .await;
+        self.step(
+            "session_open_relative_lean_spec",
+            "POST",
+            "/session",
+            Some(json!({ "spec": "Demo.lean" })),
+        )
+        .await;
+        self.step(
+            "session_open_with_spec_and_spec_file",
+            "POST",
+            "/session",
+            Some(json!({ "spec": lean_spec, "spec_file": spec_path })),
+        )
+        .await;
+    }
+
     /// Drive one server through the whole surface and return what it answered.
     async fn all(&mut self) {
         let spec_path = self.workspace.join("conformance.properties.json");
@@ -436,11 +486,14 @@ impl Run {
 
         self.guide().await;
         let (session, spec_session) = self.sessions(&spec_path, &missing_path).await;
+        self.lean_specs(&spec_path).await;
         self.checks(&session).await;
         self.proofs(&session).await;
         self.closing(&session, &spec_session).await;
     }
 }
+
+const LEAN_SPEC: &str = include_str!("../../../tests/fixtures/lean_spec/Demo.lean");
 
 fn golden() -> BTreeMap<String, Value> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -536,7 +589,7 @@ async fn the_http_surface_still_answers_what_was_recorded() {
     );
     assert_eq!(
         run.recorded.len(),
-        27,
+        32,
         "every step the golden file records was exercised"
     );
 }
@@ -578,7 +631,7 @@ fn a_missing_step_and_an_unexpected_one_are_both_reported() {
 
 #[test]
 fn the_golden_file_still_names_the_whole_surface() {
-    assert_eq!(golden().len(), 27);
+    assert_eq!(golden().len(), 32);
 }
 
 /// The golden file lives outside the crate, so nothing rebuilds when it changes.

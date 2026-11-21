@@ -60,7 +60,7 @@ impl PropertySpecIn {
     }
 }
 
-/// What to open a session over: properties inline, or a spec file on disk.
+/// What to open a session over: properties inline, a spec file, or a Lean spec.
 #[derive(Clone, Debug, Default, Deserialize, ToSchema)]
 pub struct SessionRequest {
     /// The properties, stated inline.
@@ -69,6 +69,9 @@ pub struct SessionRequest {
     /// An absolute path to a spec file instead.
     #[serde(default)]
     pub spec_file: Option<String>,
+    /// An absolute path to a Lean spec instead, with one property per `def … : Prop`.
+    #[serde(default)]
+    pub spec: Option<String>,
     /// What each spec's `source_file` resolves against; the spec file's own
     /// directory by default.
     #[serde(default)]
