@@ -92,7 +92,7 @@ jobs:
           workspaces: rust
       - run: >-
           cargo +stable test --locked -p formal-lean
-          --test lean --test warm --test audit --test guide_lemmas --test confinement
+          --test lean --test warm --test audit --test guide_lemmas --test confinement --test spec
           -- --test-threads=1
 
   msrv:
