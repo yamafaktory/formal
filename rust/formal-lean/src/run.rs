@@ -96,9 +96,6 @@ const POLL: Duration = Duration::from_millis(20);
 /// matter to a caller that asked for a bound.
 const DRAIN_GRACE: Duration = Duration::from_millis(500);
 
-/// The pseudo-error that means the proof is incomplete rather than wrong.
-const SORRY_DECLARATION: &str = "declaration uses 'sorry'";
-
 /// What a finished, killed or unstartable process left behind.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Captured {
@@ -270,7 +267,7 @@ pub fn parse_output(captured: &Captured) -> LeanResult {
 
     let mut errors: Vec<LeanError> = messages
         .iter()
-        .filter(|message| message.severity == "error" && !message.data.contains(SORRY_DECLARATION))
+        .filter(|message| message.severity == "error")
         .cloned()
         .collect();
 
@@ -873,13 +870,12 @@ mod tests {
         }
 
         #[test]
-        fn the_sorry_pseudo_error_is_not_an_error() {
-            let result = parse_output(&captured(
-                0,
-                &message("error", "declaration uses 'sorry'", 1),
-            ));
-            assert_eq!(result.errors, []);
-            assert!(result.success);
+        fn a_sorry_lean_reports_as_an_error_fails_and_keeps_its_error() {
+            let stdout = r#"{"caption":"","data":"declaration uses `sorry`","endPos":{"column":14,"line":4},"fileName":"Verify/SorryProbe.lean","isSilent":false,"keepFullRange":false,"kind":"hasSorry","pos":{"column":8,"line":4},"severity":"error"}"#;
+            let result = parse_output(&captured(1, stdout));
+            assert!(!result.success);
+            assert_eq!(result.errors.len(), 1);
+            assert_eq!(result.errors[0].data, "declaration uses `sorry`");
         }
 
         #[test]

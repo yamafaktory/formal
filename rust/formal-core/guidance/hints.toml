@@ -290,7 +290,7 @@ Rename the local model with a prefix that cannot clash — `MyPath`, `SrcOption`
 
 [[rule]]
 id = "proof_uses_sorry"
-all = ["declaration uses 'sorry'"]
+all = ['declaration uses `sorry`']
 hint = '''Replace sorry with a real proof. Try omega, simp, decide, or rfl.'''
 
 [[rule]]
