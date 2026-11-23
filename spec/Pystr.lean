@@ -1,26 +1,47 @@
 namespace Pystr
 
+def alphabet : List Char :=
+  ['a', ' ', '\t', '\u00a0', '\x1f', '\n', '\x0b', '\x0c', '\x1c', '\x1d', '\x1e', '\r', '\x85',
+    '\u2028', '\u2029']
+
+def words : Nat → List (List Char)
+  | 0 => [[]]
+  | n + 1 => [] :: alphabet.flatMap fun c => (words n).map (c :: ·)
+
+/-- code: rust/formal-core/src/pystr.rs is_space -/
 def isSpace (c : Char) : Bool :=
   [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0, 0x1680,
     0x2028, 0x2029, 0x202f, 0x205f, 0x3000].contains c.toNat ||
     (0x2000 ≤ c.toNat && c.toNat ≤ 0x200a)
 
+def isSpace.inputs : List Char :=
+  ((List.range 0x110000).filter Nat.isValidChar).map Char.ofNat
+
 def isBreak (c : Char) : Bool :=
   [0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x85, 0x2028, 0x2029].contains c.toNat
 
+/-- code: rust/formal-core/src/pystr.rs rstrip -/
 def rstrip (s : List Char) : List Char :=
   (s.reverse.dropWhile isSpace).reverse
 
+def rstrip.inputs : List (List Char) := words 4
+
+/-- code: rust/formal-core/src/pystr.rs strip -/
 def strip (s : List Char) : List Char :=
   rstrip (s.dropWhile isSpace)
+
+def strip.inputs : List (List Char) := words 4
 
 def splitlines.go (line : List Char) : List Char → List (List Char)
   | [] => if line.isEmpty then [] else [line]
   | '\r' :: '\n' :: rest => line :: go [] rest
   | c :: rest => if isBreak c then line :: go [] rest else go (line ++ [c]) rest
 
+/-- code: rust/formal-core/src/pystr.rs splitlines -/
 def splitlines (s : List Char) : List (List Char) :=
   splitlines.go [] s
+
+def splitlines.inputs : List (List Char) := words 4
 
 def is_space_the_separator_control_range_is_space : Prop :=
   ∀ c : Char, 0x1c ≤ c.toNat → c.toNat ≤ 0x1f → isSpace c = true

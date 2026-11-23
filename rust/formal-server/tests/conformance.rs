@@ -431,11 +431,40 @@ impl Run {
             "namespace Empty\n\ndef one : Nat := 1\n\nend Empty\n",
         );
         let runs_code = write("Loud.lean", &format!("{LEAN_SPEC}\n#eval 1\n"));
+        let no_inputs = write(
+            "Uncompared.lean",
+            &LEAN_SPEC.replace(
+                "def double",
+                "/-- code: src/double.rs double -/\ndef double",
+            ),
+        );
 
-        self.open_session(
-            "session_open_from_lean_spec",
-            json!({ "spec": lean_spec }),
-            "<lean-spec-session>",
+        let lean_spec_session = self
+            .open_session(
+                "session_open_from_lean_spec",
+                json!({ "spec": lean_spec }),
+                "<lean-spec-session>",
+            )
+            .await;
+        self.step(
+            "session_open_lean_spec_without_inputs",
+            "POST",
+            "/session",
+            Some(json!({ "spec": no_inputs })),
+        )
+        .await;
+        self.step(
+            "compare_unknown_function",
+            "POST",
+            &format!("/session/{lean_spec_session}/compare"),
+            Some(json!({ "answers": { "Demo.double": [0] } })),
+        )
+        .await;
+        self.step(
+            "compare_on_unknown_session",
+            "POST",
+            &format!("/session/{UNKNOWN_SESSION}/compare"),
+            Some(json!({ "answers": {} })),
         )
         .await;
         self.step(
@@ -589,7 +618,7 @@ async fn the_http_surface_still_answers_what_was_recorded() {
     );
     assert_eq!(
         run.recorded.len(),
-        32,
+        35,
         "every step the golden file records was exercised"
     );
 }
@@ -631,7 +660,7 @@ fn a_missing_step_and_an_unexpected_one_are_both_reported() {
 
 #[test]
 fn the_golden_file_still_names_the_whole_surface() {
-    assert_eq!(golden().len(), 32);
+    assert_eq!(golden().len(), 35);
 }
 
 /// The golden file lives outside the crate, so nothing rebuilds when it changes.

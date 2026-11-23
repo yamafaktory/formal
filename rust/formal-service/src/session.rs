@@ -22,7 +22,13 @@ use std::{
 };
 
 use formal_core::{
-    lean_spec::LeanSpec,
+    lean_spec::{
+        Compared,
+        Difference,
+        Evaluated,
+        LeanSpec,
+        read_evaluation,
+    },
     property::{
         PropertyResult,
         PropertySpec,
@@ -61,6 +67,39 @@ const MINIMUM_TTL: Duration = Duration::from_mins(1);
 pub struct UnknownProperty {
     /// The ids that are not in the session, sorted.
     pub ids: Vec<String>,
+}
+
+/// Why the code's answers could not be compared with the spec's.
+#[derive(Clone, Debug, Error)]
+pub enum CompareError {
+    /// The session compares no function under these names.
+    #[error("Not compared in this session: {}", .0.join(", "))]
+    Unknown(Vec<String>),
+    /// The code gave a different number of answers than the spec has inputs.
+    #[error("{function}: {answers} answers for {inputs} inputs")]
+    Count {
+        /// The function.
+        function: String,
+        /// How many answers the code gave.
+        answers: usize,
+        /// How many inputs the spec has.
+        inputs: usize,
+    },
+    /// Lean did not print the spec's answers.
+    #[error("Lean could not evaluate the inputs of the spec: {0}")]
+    Evaluation(String),
+    /// Lean gave no verdict on the spec, because formal could not run it.
+    #[error("formal could not run Lean on the spec: {0}")]
+    Unrun(String),
+}
+
+/// What came of comparing the code's answers with the spec's.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Comparison {
+    /// The functions whose code answers what the spec answers on every input.
+    pub matched: Vec<String>,
+    /// The functions whose code differs, with the first input where it does.
+    pub differed: Vec<Difference>,
 }
 
 /// What a cached proof actually established, so a caller can reject a mismatch.
@@ -130,6 +169,8 @@ pub struct Session {
     pub recovered: Vec<String>,
     /// The Lean spec every proof is checked against, when the session opened on one.
     pub lean_spec: Option<LeanSpec>,
+    /// The inputs and the spec's answers for each compared function, once Lean printed them.
+    pub evaluated: Vec<Evaluated>,
 }
 
 impl Session {
@@ -251,6 +292,48 @@ impl Session {
         Ok(outcomes)
     }
 
+    /// Compare the code's answers, by function, with the spec's answers.
+    ///
+    /// # Errors
+    ///
+    /// [`CompareError`] when the session compares no such function, or when the
+    /// code gave a different number of answers than the spec has inputs.
+    pub fn compare(
+        &self,
+        answers: &[(String, Vec<serde_json::Value>)],
+    ) -> Result<Comparison, CompareError> {
+        let mut paired = Vec::new();
+        let mut unknown = Vec::new();
+        for (function, code) in answers {
+            match self
+                .evaluated
+                .iter()
+                .find(|spec| spec.function == *function)
+            {
+                Some(spec) => paired.push((spec, code)),
+                None => unknown.push(function.clone()),
+            }
+        }
+        if !unknown.is_empty() {
+            return Err(CompareError::Unknown(unknown));
+        }
+        let mut comparison = Comparison::default();
+        for (spec, code) in paired {
+            if code.len() != spec.inputs.len() {
+                return Err(CompareError::Count {
+                    function: spec.function.clone(),
+                    answers: code.len(),
+                    inputs: spec.inputs.len(),
+                });
+            }
+            match spec.first_difference(code) {
+                Some(difference) => comparison.differed.push(difference),
+                None => comparison.matched.push(spec.function.clone()),
+            }
+        }
+        Ok(comparison)
+    }
+
     fn remember(&self, cache: &ProofCache, outcome: &Outcome) {
         let (Some(spec), Some(key)) = (self.spec(&outcome.id), self.keys.get(&outcome.id)) else {
             return;
@@ -279,6 +362,59 @@ impl Session {
             },
         );
     }
+}
+
+/// The inputs of each function `spec` compares, and the spec's answer to each.
+///
+/// The cache answers for a spec text it has seen; Lean evaluates the rest, in
+/// one run.
+///
+/// # Errors
+///
+/// [`CompareError::Evaluation`] when Lean did not print the answers, and
+/// [`CompareError::Unrun`] when formal could not run Lean.
+pub fn evaluate<V: Verifier>(
+    verifier: &V,
+    cache: &ProofCache,
+    spec: &LeanSpec,
+) -> Result<Vec<Evaluated>, CompareError> {
+    let found: Vec<Option<Evaluated>> = spec
+        .compared
+        .iter()
+        .map(|compared| cache.load(&spec.answers_key(&compared.function)))
+        .collect();
+    let missing: Vec<&Compared> = spec
+        .compared
+        .iter()
+        .zip(&found)
+        .filter(|(_, found)| found.is_none())
+        .map(|(compared, _)| compared)
+        .collect();
+    if missing.is_empty() {
+        return Ok(found.into_iter().flatten().collect());
+    }
+    let functions: Vec<&str> = missing
+        .iter()
+        .map(|compared| compared.function.as_str())
+        .collect();
+    let result = verifier.verify(&spec.evaluation(&functions), None);
+    if !result.success {
+        return Err(result.first_error().map_or_else(
+            || CompareError::Unrun(result.output.clone()),
+            |error| CompareError::Evaluation(error.data.clone()),
+        ));
+    }
+    let printed = result.printed();
+    let printed: Vec<&str> = printed.iter().map(String::as_str).collect();
+    let read = read_evaluation(&missing, &printed).map_err(CompareError::Evaluation)?;
+    for evaluated in &read {
+        cache.save(&spec.answers_key(&evaluated.function), evaluated);
+    }
+    let mut read = read.into_iter();
+    Ok(found
+        .into_iter()
+        .filter_map(|found| found.or_else(|| read.next()))
+        .collect())
 }
 
 /// The open sessions.
@@ -339,20 +475,34 @@ impl Sessions {
     }
 
     /// Open a session on a Lean spec, with one property per `def … : Prop` in it.
-    pub fn open_spec(&self, cache: &ProofCache, spec: LeanSpec) -> Arc<Mutex<Session>> {
+    ///
+    /// Lean evaluates the inputs of each function the spec compares, unless the
+    /// cache already holds them.
+    ///
+    /// # Errors
+    ///
+    /// [`CompareError::Evaluation`] when Lean did not print the spec's answers, and
+    /// [`CompareError::Unrun`] when formal could not run Lean.
+    pub fn open_spec<V: Verifier>(
+        &self,
+        verifier: &V,
+        cache: &ProofCache,
+        spec: LeanSpec,
+    ) -> Result<Arc<Mutex<Session>>, CompareError> {
+        let evaluated = evaluate(verifier, cache, &spec)?;
         let keys = spec
             .properties
             .iter()
             .map(|id| (id.clone(), spec.key(id)))
             .collect();
-        self.register(
+        Ok(self.register(
             Uuid::new_v4().simple().to_string(),
             cache,
             spec.property_specs(),
             keys,
             Vec::new(),
-            Some(spec),
-        )
+            Some((spec, evaluated)),
+        ))
     }
 
     /// The same, under an id chosen by the caller rather than generated.
@@ -377,9 +527,12 @@ impl Sessions {
         specs: Vec<PropertySpec>,
         keys: HashMap<String, String>,
         stale: Vec<String>,
-        spec: Option<LeanSpec>,
+        spec: Option<(LeanSpec, Vec<Evaluated>)>,
     ) -> Arc<Mutex<Session>> {
         self.evict_expired();
+        let (lean_spec, evaluated) = spec.map_or((None, Vec::new()), |(spec, evaluated)| {
+            (Some(spec), evaluated)
+        });
 
         let mut session = Session {
             id,
@@ -391,14 +544,18 @@ impl Sessions {
             hits: HashMap::new(),
             stale,
             recovered: Vec::new(),
-            lean_spec: spec,
+            lean_spec,
+            evaluated,
         };
 
         for spec in session.specs.clone() {
             let Some(key) = session.keys.get(&spec.id) else {
                 continue;
             };
-            let Some(cached) = cache.load(key).filter(|cached| cached.verified) else {
+            let Some(cached) = cache
+                .load::<PropertyResult>(key)
+                .filter(|cached| cached.verified)
+            else {
                 continue;
             };
             session.verified.insert(spec.id.clone(), cached.lean_code);

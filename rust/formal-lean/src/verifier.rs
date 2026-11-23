@@ -142,6 +142,17 @@ impl LeanResult {
         self
     }
 
+    /// What the checked file printed, one entry per information message.
+    #[must_use]
+    pub fn printed(&self) -> Vec<String> {
+        self.output
+            .lines()
+            .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())
+            .filter(|message| message.severity == "information")
+            .map(|message| message.data)
+            .collect()
+    }
+
     /// The diagnostic to answer, which is always the first.
     #[must_use]
     pub fn first_error(&self) -> Option<&LeanError> {
@@ -245,7 +256,7 @@ fn suggestion_pattern() -> &'static Regex {
 /// Pull the tactic out of Lean's `Try this:` suggestion.
 #[must_use]
 pub fn suggested_tactic(output: &str) -> Option<String> {
-    for line in pystr::splitlines(output) {
+    for line in output.lines() {
         let data = serde_json::from_str::<serde_json::Value>(line)
             .ok()
             .and_then(|parsed| {
@@ -470,6 +481,21 @@ mod tests {
 
     fn table() -> &'static Table {
         Table::shipped().expect("the shipped table is valid")
+    }
+
+    #[test]
+    fn only_information_messages_are_printed() {
+        let result = LeanResult {
+            output: [
+                r#"{"severity":"information","data":"one\n"}"#,
+                r#"{"severity":"warning","data":"unused"}"#,
+                "not json",
+                r#"{"severity":"information","data":"two"}"#,
+            ]
+            .join("\n"),
+            ..LeanResult::default()
+        };
+        assert_eq!(result.printed(), ["one\n", "two"]);
     }
 
     fn failure(data: &str) -> LeanResult {
@@ -743,6 +769,12 @@ mod tests {
                 line("Try this: exact second")
             );
             assert_eq!(suggested_tactic(&out).as_deref(), Some("exact first"));
+        }
+
+        #[test]
+        fn a_unicode_line_separator_before_a_suggestion_keeps_the_message_whole() {
+            let out = line("the goal\u{2028}Try this: exact h");
+            assert_eq!(suggested_tactic(&out).as_deref(), Some("exact h"));
         }
 
         #[test]

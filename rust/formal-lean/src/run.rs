@@ -262,7 +262,7 @@ pub(crate) fn kill_group(pid: u32) {
 /// plenty of those, and Python read one as a diagnostic and raised.
 #[must_use]
 pub fn parse_output(captured: &Captured) -> LeanResult {
-    let lines = pystr::splitlines(&captured.stdout);
+    let lines: Vec<&str> = captured.stdout.lines().collect();
     let messages: Vec<LeanError> = lines
         .iter()
         .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())
@@ -911,6 +911,16 @@ mod tests {
             let result = parse_output(&captured(1, &stdout));
             assert_eq!(result.errors.len(), 1);
             assert!(result.output.starts_with("some prose Lean printed\n"));
+        }
+
+        #[test]
+        fn a_message_holding_a_unicode_line_separator_stays_one_message() {
+            for separator in ['\u{85}', '\u{2028}', '\u{2029}'] {
+                let data = format!("before{separator}after");
+                let result = parse_output(&captured(1, &message("error", &data, 3)));
+                assert_eq!(result.errors.len(), 1, "{separator:?}");
+                assert_eq!(result.errors[0].data, data, "{separator:?}");
+            }
         }
 
         #[test]

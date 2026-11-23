@@ -29,6 +29,18 @@
   },
   "status": 400
  },
+ "compare_on_unknown_session": {
+  "body": {
+   "detail": "No such session: 0000000000000000"
+  },
+  "status": 404
+ },
+ "compare_unknown_function": {
+  "body": {
+   "detail": "Not compared in this session: Demo.double"
+  },
+  "status": 400
+ },
  "guide_extract": {
   "body": {
    "instructions": {
@@ -55,7 +67,9 @@
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares `theorem <Namespace>.<name>.holds : <Namespace>.<name>` and leaves the spec out: formal puts the spec before the proof, and holds the proof to the spec's own statement. A proof that redefines a name of the spec is rejected.",
     "The cache key covers the whole spec, so an edit to it sends every property back as work.",
-    "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof."
+    "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof.",
+    "A function of the spec names the code it describes with a `code: <path> <name>` line in its doc comment. `def <name>.inputs` then lists the inputs to compare the two on. The session lists each such function under compare, with its inputs.",
+    "Run the code on each input. Then POST /session/{session_id}/compare with {\"answers\": {\"<Namespace>.<name>\": [...]}}, one answer per input, in the order of the inputs. A List Char crosses as a JSON string."
    ],
    "openapi": "GET /openapi.json is the full schema of every endpoint and response, including field types. Read it rather than guessing at a shape.",
    "sessions": "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by default), and it is lost if the server restarts. Once it is gone, POST /session again with the same spec file: anything already proved comes straight back as a cache hit, so you never reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on.",
@@ -167,6 +181,7 @@
  "session_open": {
   "body": {
    "cached": [],
+   "compare": [],
    "complete": false,
    "session_id": "<session>",
    "stale": [],
@@ -192,6 +207,7 @@
  "session_open_from_lean_spec": {
   "body": {
    "cached": [],
+   "compare": [],
    "complete": false,
    "session_id": "<lean-spec-session>",
    "stale": [],
@@ -205,6 +221,7 @@
  "session_open_from_spec": {
   "body": {
    "cached": [],
+   "compare": [],
    "complete": false,
    "session_id": "<spec-session>",
    "stale": [
@@ -219,6 +236,12 @@
  "session_open_lean_spec_that_runs_code": {
   "body": {
    "detail": "<workspace>/Loud.lean contains `#eval`, which can run code while Lean checks it, and formal does not check a spec that can"
+  },
+  "status": 400
+ },
+ "session_open_lean_spec_without_inputs": {
+  "body": {
+   "detail": "<workspace>/Uncompared.lean names the code of `Demo.double`, and defines no `Demo.double.inputs` to compare the two on"
   },
   "status": 400
  },
@@ -261,6 +284,7 @@
  "session_read": {
   "body": {
    "cached": [],
+   "compare": [],
    "complete": false,
    "session_id": "<session>",
    "stale": [],

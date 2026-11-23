@@ -7,7 +7,10 @@
 use formal_core::property::PropertySpec;
 use formal_service::{
     checker::Outcome,
-    session::Session,
+    session::{
+        Comparison,
+        Session,
+    },
 };
 use indexmap::IndexMap;
 use serde::{
@@ -104,6 +107,67 @@ pub struct SessionResponse {
     pub complete: bool,
     /// Properties reported rather than proved, because their source moved.
     pub stale: Vec<String>,
+    /// The functions of the Lean spec whose code to compare with the spec.
+    pub compare: Vec<CompareOut>,
+}
+
+/// A function of the Lean spec, and the inputs its code must answer.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CompareOut {
+    /// The function, as `<namespace>.<name>`.
+    pub function: String,
+    /// What the `code:` line of its doc comment names.
+    pub code: String,
+    /// The inputs, as JSON, in the order the answers must follow.
+    pub inputs: Vec<serde_json::Value>,
+}
+
+/// The code's answers to the inputs of each function, by function.
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
+pub struct CompareRequest {
+    /// The answers, as JSON, in the order of the inputs.
+    #[serde(default)]
+    pub answers: IndexMap<String, Vec<serde_json::Value>>,
+}
+
+/// The first input on which the code and the spec disagree.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct DifferenceOut {
+    /// The function.
+    pub function: String,
+    /// The input.
+    pub input: serde_json::Value,
+    /// What the spec answers.
+    pub spec: serde_json::Value,
+    /// What the code answers.
+    pub code: serde_json::Value,
+}
+
+/// What came of comparing the code's answers with the spec's.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CompareResponse {
+    /// The functions whose code answers what the spec answers on every input.
+    pub matched: Vec<String>,
+    /// The functions whose code differs, with the first input where it does.
+    pub differed: Vec<DifferenceOut>,
+}
+
+impl From<Comparison> for CompareResponse {
+    fn from(comparison: Comparison) -> Self {
+        Self {
+            matched: comparison.matched,
+            differed: comparison
+                .differed
+                .into_iter()
+                .map(|difference| DifferenceOut {
+                    function: difference.function,
+                    input: difference.input,
+                    spec: difference.spec,
+                    code: difference.code,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Proofs to check: inline, or as paths the server reads.

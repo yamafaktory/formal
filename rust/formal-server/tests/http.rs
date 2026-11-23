@@ -554,3 +554,21 @@ mod fetching_a_proof {
         );
     }
 }
+
+mod comparing {
+    use super::*;
+
+    #[tokio::test]
+    async fn answers_to_every_code_point_reach_the_session() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let answers = vec![Value::Bool(false); 1_112_064];
+        let (status, body) = call(
+            &app(&dir),
+            "POST",
+            &format!("/session/{UNKNOWN_SESSION}/compare"),
+            Some(json!({ "answers": { "Pystr.isSpace": answers } })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+}

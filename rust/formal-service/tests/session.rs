@@ -13,7 +13,10 @@ use std::{
 use formal_core::{
     hints::Table,
     lean_spec::LeanSpec,
-    property::PropertySpec,
+    property::{
+        PropertyResult,
+        PropertySpec,
+    },
 };
 use formal_lean::verifier::{
     BatchEntry,
@@ -385,7 +388,9 @@ mod cache_round_trip {
                 .expect("p1 is registered");
         }
 
-        let entry = cache.load(&key).expect("the third attempt was cached");
+        let entry = cache
+            .load::<PropertyResult>(&key)
+            .expect("the third attempt was cached");
         assert_eq!(entry.retries, 2);
         assert_eq!(entry.status, "verified");
         assert_eq!(entry.preconditions, ["n > 0"]);
@@ -412,7 +417,11 @@ mod cache_round_trip {
             outcomes[0].verified(),
             "the session still reports what it was told"
         );
-        assert_eq!(cache.load(&key), None, "but nothing durable was written");
+        assert_eq!(
+            cache.load::<PropertyResult>(&key),
+            None,
+            "but nothing durable was written"
+        );
     }
 }
 
@@ -585,7 +594,9 @@ mod on_a_lean_spec {
     #[test]
     fn every_property_of_the_spec_is_work() {
         let dir = TempDir::new().expect("a temporary directory");
-        let session = Sessions::default().open_spec(&cache(&dir), lean_spec(&dir, SPEC));
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), &cache(&dir), lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec");
         let session = session.lock().expect("a fresh session");
         assert_eq!(session.work_ids(), ["Demo.double_even", "Demo.double_mono"]);
     }
@@ -595,7 +606,9 @@ mod on_a_lean_spec {
         let dir = TempDir::new().expect("a temporary directory");
         let cache = cache(&dir);
         let fake = Fake::accepting();
-        let session = Sessions::default().open_spec(&cache, lean_spec(&dir, SPEC));
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), &cache, lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec");
         session
             .lock()
             .expect("a fresh session")
@@ -626,7 +639,9 @@ mod on_a_lean_spec {
             .position(|line| line == "  omega")
             .expect("the proof is in the file");
         let fake = rejecting_at(u32::try_from(omega + 1).expect("it fits"));
-        let session = Sessions::default().open_spec(&cache, spec);
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), &cache, spec)
+            .expect("Lean evaluates the spec");
         let outcomes = session
             .lock()
             .expect("a fresh session")
@@ -641,7 +656,9 @@ mod on_a_lean_spec {
         let dir = TempDir::new().expect("a temporary directory");
         let cache = cache(&dir);
         let fake = rejecting_at(3);
-        let session = Sessions::default().open_spec(&cache, lean_spec(&dir, SPEC));
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), &cache, lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec");
         let outcomes = session
             .lock()
             .expect("a fresh session")
@@ -658,21 +675,178 @@ mod on_a_lean_spec {
         let fake = Fake::accepting();
         let sessions = Sessions::default();
         sessions
-            .open_spec(&cache, lean_spec(&dir, SPEC))
+            .open_spec(&Fake::default(), &cache, lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec")
             .lock()
             .expect("a fresh session")
             .check(&Checker::new(&fake, table()), &cache, &proof())
             .expect("the property is registered");
 
-        let same = sessions.open_spec(&cache, lean_spec(&dir, SPEC));
+        let same = sessions
+            .open_spec(&Fake::default(), &cache, lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec");
         assert_eq!(
             same.lock().expect("a fresh session").cached_ids(),
             ["Demo.double_even"]
         );
-        let edited = sessions.open_spec(&cache, lean_spec(&dir, &SPEC.replace("n + n", "2 * n")));
+        let edited = sessions
+            .open_spec(
+                &Fake::default(),
+                &cache,
+                lean_spec(&dir, &SPEC.replace("n + n", "2 * n")),
+            )
+            .expect("Lean evaluates the spec");
         assert_eq!(
             edited.lock().expect("a fresh session").cached_ids(),
             Vec::<&str>::new()
+        );
+    }
+}
+
+mod comparing {
+    use std::fs;
+
+    use formal_service::session::CompareError;
+    use serde_json::{
+        Value,
+        json,
+    };
+
+    use super::*;
+
+    const SPEC: &str = "namespace Demo\n\n/-- code: src/double.rs double -/\ndef double (n : Nat) : Nat := n + n\n\ndef double.inputs : List Nat := [0, 1, 2]\n\ndef double_even : Prop := ∀ n, double n % 2 = 0\n\nend Demo\n";
+
+    fn lean_spec(dir: &TempDir) -> LeanSpec {
+        let path = dir.path().join("Demo.lean");
+        fs::write(&path, SPEC).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn printing(data: &str) -> Fake {
+        Fake {
+            result: Some(LeanResult {
+                success: true,
+                output: json!({ "severity": "information", "data": data }).to_string(),
+                errors: Vec::new(),
+            }),
+            ..Fake::default()
+        }
+    }
+
+    fn evaluating() -> Fake {
+        printing("formal-compare Demo.double [[0,0],[1,2],[2,4]]\n")
+    }
+
+    fn answers(code: &[Value]) -> Vec<(String, Vec<Value>)> {
+        vec![("Demo.double".to_string(), code.to_vec())]
+    }
+
+    #[test]
+    fn a_session_on_a_spec_that_compares_holds_the_inputs_lean_printed() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let fake = evaluating();
+        let session = Sessions::default()
+            .open_spec(&fake, &cache(&dir), lean_spec(&dir))
+            .expect("Lean evaluates the spec");
+        let session = session.lock().expect("a fresh session");
+        assert_eq!(session.evaluated.len(), 1);
+        assert_eq!(session.evaluated[0].inputs, [json!(0), json!(1), json!(2)]);
+        let seen = fake.seen.borrow();
+        assert!(
+            seen[0].contains("#eval IO.println (\"formal-compare Demo.double \""),
+            "{}",
+            seen[0]
+        );
+    }
+
+    #[test]
+    fn the_spec_is_evaluated_once_per_text() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = evaluating();
+        let sessions = Sessions::default();
+        sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("Lean evaluates the spec");
+        let again = sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("the cache answers");
+        assert_eq!(*fake.calls.borrow(), 1);
+        assert_eq!(
+            again.lock().expect("a fresh session").evaluated[0].answers,
+            [json!(0), json!(2), json!(4)]
+        );
+    }
+
+    #[test]
+    fn a_spec_lean_cannot_evaluate_opens_no_session() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let refused =
+            Sessions::default().open_spec(&Fake::rejecting(), &cache(&dir), lean_spec(&dir));
+        assert!(
+            matches!(refused, Err(CompareError::Evaluation(ref why)) if why == "unsolved goals"),
+            "{:?}",
+            refused.map(|_| ())
+        );
+        let silent =
+            Sessions::default().open_spec(&printing("nothing"), &cache(&dir), lean_spec(&dir));
+        assert!(matches!(silent, Err(CompareError::Evaluation(_))));
+    }
+
+    #[test]
+    fn code_that_answers_what_the_spec_answers_matches_and_other_code_differs() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let session = Sessions::default()
+            .open_spec(&evaluating(), &cache(&dir), lean_spec(&dir))
+            .expect("Lean evaluates the spec");
+        let session = session.lock().expect("a fresh session");
+
+        let same = session
+            .compare(&answers(&[json!(0), json!(2), json!(4)]))
+            .expect("the function is compared");
+        assert_eq!(same.matched, ["Demo.double"]);
+        assert_eq!(same.differed, []);
+
+        let other = session
+            .compare(&answers(&[json!(0), json!(1), json!(4)]))
+            .expect("the function is compared");
+        assert_eq!(other.matched, Vec::<String>::new());
+        let [difference] = other.differed.as_slice() else {
+            panic!("one difference, got {:?}", other.differed);
+        };
+        assert_eq!(
+            (&difference.input, &difference.spec, &difference.code),
+            (&json!(1), &json!(2), &json!(1))
+        );
+    }
+
+    #[test]
+    fn an_unknown_function_or_a_wrong_count_of_answers_is_refused() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let session = Sessions::default()
+            .open_spec(&evaluating(), &cache(&dir), lean_spec(&dir))
+            .expect("Lean evaluates the spec");
+        let session = session.lock().expect("a fresh session");
+
+        let unknown = session.compare(&[
+            ("Demo.triple".to_string(), Vec::new()),
+            ("Demo.double".to_string(), vec![json!(0)]),
+        ]);
+        assert!(
+            matches!(unknown, Err(CompareError::Unknown(ref names)) if names == &["Demo.triple"]),
+            "{unknown:?}"
+        );
+        let short = session.compare(&answers(&[json!(0)]));
+        assert!(
+            matches!(
+                short,
+                Err(CompareError::Count {
+                    answers: 1,
+                    inputs: 3,
+                    ..
+                })
+            ),
+            "{short:?}"
         );
     }
 }
