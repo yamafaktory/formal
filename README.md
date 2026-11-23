@@ -323,7 +323,22 @@ def count_at_most_two : State → Prop := fun s => s.count ≤ 2
 
 In a spec with the namespace `Bounded`, formal registers `Bounded.count_at_most_two.always`,
 which states `∀ actions, count_at_most_two (run actions)`. Its proof declares
-`theorem Bounded.count_at_most_two.always.holds : Bounded.count_at_most_two.always`. The search derives generators for
+`theorem Bounded.count_at_most_two.always.holds : Bounded.count_at_most_two.always`.
+
+When the actions are known, formal also explores every reachable state up to a depth,
+10 unless the spec defines `def depth : Nat`. The actions are the constructors of the
+action type when none takes an argument, else `<Action>.samples`. formal visits each
+state once, so a violation comes back under `refuted` with a shortest trace. An invariant
+that held comes back under `bounded`, with the depth and the number of states:
+
+```json
+"bounded": [{"id": "Bounded.count_at_most_two.always", "depth": 10, "states": 3}]
+```
+
+The check stops after 100,000 states, and `bounded` then gives the last depth it explored
+in full. Lean proves the list of constructors complete before the check uses it, so a
+missed action can only skip the check, never claim a bound. An invariant Lean cannot
+decide is left out of the check. Only a proof settles it. The search derives generators for
 the spec's types, so a broken invariant comes back with the list of actions that breaks it.
 
 When the session opens, formal also searches each property for a counterexample with

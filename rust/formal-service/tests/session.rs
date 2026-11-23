@@ -963,3 +963,109 @@ mod searching {
         assert_eq!(*fake.calls.borrow(), 2);
     }
 }
+
+mod exploring {
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::*;
+
+    const SPEC: &str = "namespace Bounded\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_below_two : State → Prop := fun s => s.count < 2\n\nend Bounded\n";
+
+    fn lean_spec(dir: &TempDir) -> LeanSpec {
+        let path = dir.path().join("Bounded.lean");
+        fs::write(&path, SPEC).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn printing(data: &[&str]) -> Fake {
+        let output: Vec<String> = data
+            .iter()
+            .map(|data| json!({ "severity": "information", "data": data }).to_string())
+            .collect();
+        Fake {
+            result: Some(LeanResult {
+                success: true,
+                output: output.join("\n"),
+                errors: Vec::new(),
+            }),
+            ..Fake::default()
+        }
+    }
+
+    fn explorations(fake: &Fake) -> usize {
+        fake.seen
+            .borrow()
+            .iter()
+            .filter(|code| code.contains("FormalBounded.explore"))
+            .count()
+    }
+
+    #[test]
+    fn an_invariant_that_held_to_the_depth_is_a_bound_and_is_not_explored_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = printing(&[
+            "formal-bounded Bounded.count_at_most_two.always bounded 10 3\n",
+            "formal-bounded Bounded.count_below_two.always falsified [Bounded.Action.inc, Bounded.Action.inc]\n",
+        ]);
+        let sessions = Sessions::default();
+        let session = sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("the spec compares nothing");
+        let bounded = session.lock().expect("a fresh session").bounded.clone();
+        assert_eq!(bounded.len(), 1);
+        assert_eq!(
+            (bounded[0].id.as_str(), bounded[0].depth, bounded[0].states),
+            ("Bounded.count_at_most_two.always", 10, 3)
+        );
+        sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("the spec compares nothing");
+        assert_eq!(explorations(&fake), 1);
+    }
+
+    #[test]
+    fn a_violation_the_exploration_found_is_a_refutation_with_its_trace() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let fake = printing(&[
+            "formal-bounded Bounded.count_below_two.always falsified [Bounded.Action.inc, Bounded.Action.inc]\n",
+        ]);
+        let session = Sessions::default()
+            .open_spec(&fake, &cache(&dir), lean_spec(&dir))
+            .expect("the spec compares nothing");
+        let session = session.lock().expect("a fresh session");
+        let [refutation] = session.refuted.as_slice() else {
+            panic!("one refutation, got {:?}", session.refuted);
+        };
+        assert_eq!(refutation.id, "Bounded.count_below_two.always");
+        assert_eq!(
+            refutation.counterexample,
+            ["actions := [Bounded.Action.inc, Bounded.Action.inc]"]
+        );
+        assert_eq!(session.bounded, []);
+        assert_eq!(
+            session.work_ids(),
+            [
+                "Bounded.count_at_most_two.always",
+                "Bounded.count_below_two.always"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_lean_that_printed_nothing_bounds_nothing_and_is_asked_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::default();
+        let sessions = Sessions::default();
+        for _ in 0..2 {
+            let session = sessions
+                .open_spec(&fake, &cache, lean_spec(&dir))
+                .expect("the spec compares nothing");
+            assert_eq!(session.lock().expect("a fresh session").bounded, []);
+        }
+        assert_eq!(explorations(&fake), 2);
+    }
+}

@@ -54,6 +54,7 @@ use utoipa::{
 mod wire;
 
 pub use wire::{
+    BoundOut,
     CacheHitOut,
     CheckRequest,
     CheckResponse,
@@ -243,7 +244,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     info(title = "formal", version = env!("CARGO_PKG_VERSION")),
     paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, compare_session, read_proof, close_session),
     components(schemas(
-        CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut, RefutationOut,
+        BoundOut, CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut, RefutationOut,
         ProofOut, PropertySpecIn, SessionRequest, SessionResponse, Status, TopicOut,
     )),
 )]
@@ -334,6 +335,15 @@ fn describe(session: &Session) -> SessionResponse {
                 function: evaluated.function.clone(),
                 code: evaluated.code.clone(),
                 inputs: evaluated.inputs.clone(),
+            })
+            .collect(),
+        bounded: session
+            .bounded
+            .iter()
+            .map(|bound| BoundOut {
+                id: bound.id.clone(),
+                depth: bound.depth,
+                states: bound.states,
             })
             .collect(),
         refuted: session

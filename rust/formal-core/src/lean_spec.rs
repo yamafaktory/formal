@@ -49,6 +49,44 @@ const SEARCH_IMPORT: &str = "Plausible";
 
 const ALWAYS: &str = "always";
 
+const EXPLORATION_IMPORT: &str = "Std.Data.HashSet";
+
+const EXPLORATION_MARK: &str = "formal-bounded";
+
+const STATE_BUDGET: u32 = 100_000;
+
+const DEFAULT_DEPTH: &str = "10";
+
+const EXPLORATION_HELPERS: &str = "namespace FormalBounded
+
+def complete {α : Type} (actions : List α) (_ : ∀ a, a ∈ actions) : List α := actions
+
+def explore {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
+    (holds : σ → Bool) (depth budget : Nat) : Option (List α) × Nat × Nat := Id.run do
+  if !holds init then return (some [], 1, 0)
+  let mut seen : Std.HashSet σ := (∅ : Std.HashSet σ).insert init
+  let mut frontier : Array (σ × List α) := #[(init, [])]
+  let mut completed := 0
+  for _ in [0:depth] do
+    let mut next : Array (σ × List α) := #[]
+    for (s, trace) in frontier do
+      for a in actions do
+        let t := step s a
+        if !seen.contains t then
+          seen := seen.insert t
+          if !holds t then return (some (trace ++ [a]), seen.size, completed)
+          if seen.size > budget then return (none, seen.size, completed)
+          next := next.push (t, trace ++ [a])
+    frontier := next
+    completed := completed + 1
+  return (none, seen.size, completed)
+
+def report {α : Type} [Repr α] (mark id : String) : Option (List α) × Nat × Nat → String
+  | (some trace, _, _) => s!\"{mark} {id} falsified {reprStr trace}\"
+  | (none, states, completed) => s!\"{mark} {id} bounded {completed} {states}\"
+
+end FormalBounded";
+
 const SEARCH_HELPERS: &str = "namespace FormalRefute
 open Plausible
 
@@ -112,6 +150,66 @@ pub struct Machine {
     pub invariants: Vec<String>,
     /// Each `inductive` and `structure` the spec defines, in the spec's order.
     pub types: Vec<String>,
+    /// The actions the bounded check tries at each step. Nothing when there is neither
+    /// a list of constructors nor samples.
+    pub actions: Option<Actions>,
+    /// How deep the bounded check explores: the spec's `depth`, or the default.
+    pub depth: String,
+}
+
+/// Where the bounded check takes its actions from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Actions {
+    /// Every constructor of the action type, none taking an argument, as a Lean list.
+    /// Lean proves the list complete before the check uses it.
+    Constructors(String),
+    /// The spec's `<Action>.samples`.
+    Samples(String),
+}
+
+impl Actions {
+    fn expression(&self) -> String {
+        match self {
+            Self::Constructors(list) => {
+                format!("(FormalBounded.complete {list} (by intro a; cases a <;> simp))")
+            }
+            Self::Samples(samples) => samples.clone(),
+        }
+    }
+}
+
+/// What the bounded check found for one invariant.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum Explored {
+    /// A shortest list of actions after which the invariant does not hold.
+    Falsified(String),
+    /// The invariant holds in every state reached within `depth` actions.
+    Bounded {
+        /// How deep the check explored.
+        depth: u32,
+        /// How many distinct states it reached.
+        states: u32,
+    },
+}
+
+/// An invariant the bounded check found to hold in every state up to its depth.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct Bound {
+    /// The property, as `<namespace>.<name>.always`.
+    pub id: String,
+    /// How deep the check explored.
+    pub depth: u32,
+    /// How many distinct states it reached.
+    pub states: u32,
+}
+
+/// The file that explores a machine to a bound, and the id each of its lines answers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Exploration {
+    /// The file, ready for Lean.
+    pub lean_code: String,
+    /// The property each exploration answers, in order.
+    pub ids: Vec<String>,
 }
 
 impl Machine {
@@ -325,6 +423,12 @@ fn declared_type_pattern() -> &'static Regex {
     })
 }
 
+fn found_in_block(pattern: &Regex, code: &str, blocks: &[(String, usize, usize)]) -> bool {
+    pattern
+        .find_iter(code)
+        .any(|whole| in_block(blocks, whole.start()))
+}
+
 fn captured_in_block(
     pattern: &Regex,
     code: &str,
@@ -341,10 +445,75 @@ fn captured_in_block(
         .collect()
 }
 
+fn constructors(code: &str, action: &str) -> Option<Vec<String>> {
+    let header = Regex::new(&format!(
+        r"(?m)^[ \t]*inductive\s+{}(?:\s+where)?[ \t]*(.*)$",
+        regex::escape(action)
+    ))
+    .expect("the pattern is built from literals");
+    let found = header.captures(code)?;
+    let mut cases = found[1].to_string();
+    for line in code[found.get(0)?.end()..].lines().skip(1) {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !line.starts_with('|') {
+            break;
+        }
+        cases.push(' ');
+        cases.push_str(line);
+    }
+    let cases = cases.split(" deriving ").next().unwrap_or_default();
+    let names: Vec<String> = cases
+        .split('|')
+        .map(str::trim)
+        .filter(|case| !case.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    let all_plain = names.iter().all(|name| identifier_pattern().is_match(name));
+    (all_plain && !names.is_empty()).then_some(names)
+}
+
+fn action_type(
+    code: &str,
+    blocks: &[(String, usize, usize)],
+    state: &str,
+    namespace: &str,
+) -> Option<String> {
+    let qualified = format!(r"((?:{IDENTIFIER}\.)*{IDENTIFIER})");
+    let arrow = Regex::new(&format!(
+        r"(?m)^[ \t]*{DEFINITION}step\s*(?:\(\s*{IDENTIFIER}\s*:\s*{state}\s*\)\s*)?:\s*(?:{state}\s*→\s*)?{qualified}\s*→\s*{state}"
+    ))
+    .expect("the pattern is built from literals");
+    let binders = Regex::new(&format!(
+        r"(?m)^[ \t]*{DEFINITION}step\s*\(\s*{IDENTIFIER}\s*:\s*{state}\s*\)\s*\(\s*{IDENTIFIER}\s*:\s*{qualified}\s*\)\s*:\s*{state}"
+    ))
+    .expect("the pattern is built from literals");
+    let action = captured_in_block(&arrow, code, blocks)
+        .into_iter()
+        .chain(captured_in_block(&binders, code, blocks))
+        .next()?;
+    let prefix = format!("{namespace}.");
+    Some(
+        action
+            .strip_prefix(&prefix)
+            .map_or(action.clone(), ToString::to_string),
+    )
+}
+
+fn depth_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        format!(r"(?m)^[ \t]*{DEFINITION}depth\s*:\s*Nat\s*:=")
+    })
+}
+
 fn machine(
     code: &str,
     blocks: &[(String, usize, usize)],
     defined: &HashMap<&str, bool>,
+    namespace: &str,
 ) -> Option<Machine> {
     if defined.get("step") != Some(&true) {
         return None;
@@ -353,6 +522,25 @@ fn machine(
         .into_iter()
         .next()?;
     let state = regex::escape(&state);
+    let actions = action_type(code, blocks, &state, namespace).and_then(|action| {
+        constructors(code, &action)
+            .map(|names| {
+                let names: Vec<String> = names
+                    .iter()
+                    .map(|name| format!("{namespace}.{action}.{name}"))
+                    .collect();
+                Actions::Constructors(format!("[{}]", names.join(", ")))
+            })
+            .or_else(|| {
+                (defined.get(format!("{action}.samples").as_str()) == Some(&true))
+                    .then(|| Actions::Samples(format!("{namespace}.{action}.samples")))
+            })
+    });
+    let depth = if found_in_block(depth_pattern(), code, blocks) {
+        format!("{namespace}.depth")
+    } else {
+        DEFAULT_DEPTH.to_string()
+    };
     let invariant = Regex::new(&format!(
         r"(?m)^[ \t]*{DEFINITION}({IDENTIFIER})\s*(?::\s*{state}\s*→|\(\s*{IDENTIFIER}\s*:\s*{state}\s*\)\s*:)\s*Prop\s*:="
     ))
@@ -364,6 +552,8 @@ fn machine(
     Some(Machine {
         invariants,
         types: captured_in_block(declared_type_pattern(), code, blocks),
+        actions,
+        depth,
     })
 }
 
@@ -616,7 +806,7 @@ impl LeanSpec {
             }
         };
         let defined = definitions(&code, &blocks);
-        let machine = machine(&code, &blocks, &defined);
+        let machine = machine(&code, &blocks, &defined, &namespace);
         if let Some(machine) = &machine {
             if defined.contains_key("run") {
                 return Err(SpecError::MachineRun(path.to_path_buf()));
@@ -704,15 +894,7 @@ impl LeanSpec {
     }
 
     fn search_line(&self, id: &str) -> String {
-        let invariant = id
-            .strip_prefix(&format!("{}.", self.namespace))
-            .and_then(|name| name.strip_suffix(&format!(".{ALWAYS}")))
-            .filter(|name| {
-                self.machine.as_ref().is_some_and(|machine| {
-                    machine.invariants.iter().any(|invariant| invariant == name)
-                })
-            });
-        match invariant {
+        match self.invariant_of(id) {
             Some(invariant) => format!(
                 "open FormalRefute in example : _root_.{id} := by \
                  unfold _root_.{id} _root_.{}.{invariant}; plausible",
@@ -732,6 +914,100 @@ impl LeanSpec {
                     .map(|class| format!("deriving instance {class} for {namespace}.{derived}"))
             })
             .collect()
+    }
+
+    fn exploration_of(&self, machine: &Machine, actions: &Actions, invariant: &str) -> String {
+        let namespace = &self.namespace;
+        let depth = &machine.depth;
+        format!(
+            "instance : DecidablePred {namespace}.{invariant} := fun s => by unfold {namespace}.{invariant}; infer_instance\n\
+             #eval IO.println (FormalBounded.report \"{EXPLORATION_MARK}\" \"{namespace}.{invariant}.{ALWAYS}\" \
+             (FormalBounded.explore {namespace}.init {namespace}.step {} \
+             (fun s => decide ({namespace}.{invariant} s)) {depth} {STATE_BUDGET}))",
+            actions.expression()
+        )
+    }
+
+    fn explored(&self) -> Option<(&Machine, &Actions)> {
+        let machine = self.machine.as_ref()?;
+        Some((machine, machine.actions.as_ref()?))
+    }
+
+    fn explored_types(&self) -> Vec<String> {
+        let namespace = &self.namespace;
+        self.machine
+            .iter()
+            .flat_map(|machine| &machine.types)
+            .map(|declared| {
+                format!("deriving instance Repr, BEq, Hashable for {namespace}.{declared}")
+            })
+            .collect()
+    }
+
+    /// The cache key of the bounded check of the property `id`.
+    #[must_use]
+    pub fn exploration_key(&self, id: &str) -> String {
+        let line = self
+            .explored()
+            .zip(self.invariant_of(id))
+            .map(|((machine, actions), invariant)| self.exploration_of(machine, actions, invariant))
+            .unwrap_or_default();
+        let helpers = std::iter::once(EXPLORATION_HELPERS.to_string())
+            .chain(self.explored_types())
+            .collect::<Vec<_>>()
+            .join("\n");
+        lean_spec_search_key(&self.source, &helpers, &format!("bounded:{line}"))
+    }
+
+    fn invariant_of<'a>(&self, id: &'a str) -> Option<&'a str> {
+        id.strip_prefix(&format!("{}.", self.namespace))
+            .and_then(|name| name.strip_suffix(&format!(".{ALWAYS}")))
+            .filter(|name| {
+                self.machine.as_ref().is_some_and(|machine| {
+                    machine.invariants.iter().any(|invariant| invariant == name)
+                })
+            })
+    }
+
+    /// The invariants the bounded check can explore: those of a machine whose actions are known.
+    #[must_use]
+    pub fn explorable(&self) -> Vec<String> {
+        self.explored()
+            .map(|(machine, _)| {
+                machine
+                    .invariants
+                    .iter()
+                    .map(|invariant| format!("{}.{invariant}.{ALWAYS}", self.namespace))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The file that explores the machine to its depth, once for each property in `ids`.
+    #[must_use]
+    pub fn exploration(&self, ids: &[&str]) -> Exploration {
+        let spec = self.source.trim_start_matches('\u{feff}');
+        let spec_imports = imports(spec);
+        let mut lines = import_lines(
+            std::iter::once(EXPLORATION_IMPORT)
+                .chain(spec_imports.iter().map(|import| import.module.as_str())),
+        );
+        lines.push(blanked(spec, &spec_imports));
+        lines.push(EXPLORATION_HELPERS.to_string());
+        lines.extend(self.explored_types());
+        let mut explored = Vec::new();
+        if let Some((machine, actions)) = self.explored() {
+            for id in ids {
+                if let Some(invariant) = self.invariant_of(id) {
+                    lines.push(self.exploration_of(machine, actions, invariant));
+                    explored.push((*id).to_string());
+                }
+            }
+        }
+        Exploration {
+            lean_code: format!("{}\n", lines.join("\n")),
+            ids: explored,
+        }
     }
 
     /// The file that searches each property in `ids` for a counterexample.
@@ -802,6 +1078,33 @@ impl LeanSpec {
             proof_lines: u32::try_from(body.split('\n').count()).unwrap_or(u32::MAX),
         }
     }
+}
+
+/// What the bounded check printed for each property of `exploration`, in order.
+///
+/// A property is left out when Lean printed nothing for it: its invariant was
+/// not decidable, or Lean never ran.
+#[must_use]
+pub fn read_exploration(exploration: &Exploration, printed: &[&str]) -> Vec<(String, Explored)> {
+    exploration
+        .ids
+        .iter()
+        .filter_map(|id| {
+            let mark = format!("{EXPLORATION_MARK} {id} ");
+            let line = printed.iter().find_map(|line| line.strip_prefix(&mark))?;
+            let line = line.trim_end();
+            let explored = if let Some(trace) = line.strip_prefix("falsified ") {
+                Explored::Falsified(trace.to_string())
+            } else {
+                let mut words = line.strip_prefix("bounded ")?.split(' ');
+                Explored::Bounded {
+                    depth: words.next()?.parse().ok()?,
+                    states: words.next()?.parse().ok()?,
+                }
+            };
+            Some((id.clone(), explored))
+        })
+        .collect()
 }
 
 /// What Lean said on each line of `search`, one answer per line, in order.
@@ -1438,6 +1741,10 @@ mod tests {
             Some(Machine {
                 invariants: vec!["count_below_three".to_string()],
                 types: vec!["Action".to_string(), "State".to_string()],
+                actions: Some(Actions::Constructors(
+                    "[Counter.Action.inc, Counter.Action.reset]".to_string()
+                )),
+                depth: "10".to_string(),
             })
         );
         assert_eq!(
@@ -1498,6 +1805,142 @@ mod tests {
             spec.properties,
             ["Counter.init_is_zero", "Counter.count_below_three.always"]
         );
+    }
+
+    #[test]
+    fn actions_with_arguments_come_from_samples_and_a_spec_may_set_the_depth() {
+        let with_samples = parse(
+            &COUNTER
+                .replace("  | inc\n", "  | add (n : Nat)\n")
+                .replace("  | .inc => ⟨s.count + 1⟩", "  | .add n => ⟨s.count + n⟩")
+                .replace(
+                    "end Counter",
+                    "def Action.samples : List Action := [.add 1, .reset]\n\ndef depth : Nat := 4\n\nend Counter",
+                ),
+        )
+        .expect("it parses");
+        let machine = with_samples.machine.expect("a machine");
+        assert_eq!(
+            machine.actions,
+            Some(Actions::Samples("Counter.Action.samples".to_string()))
+        );
+        assert_eq!(machine.depth, "Counter.depth");
+        let without = parse(
+            &COUNTER
+                .replace("  | inc\n", "  | add (n : Nat)\n")
+                .replace("  | .inc => ⟨s.count + 1⟩", "  | .add n => ⟨s.count + n⟩"),
+        )
+        .expect("it parses");
+        assert_eq!(without.machine.as_ref().expect("a machine").actions, None);
+        assert_eq!(without.explorable(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn every_constructor_counts_across_blank_lines_comments_and_one_line_headers() {
+        let with_jump = |actions: &str| {
+            parse(
+                &COUNTER
+                    .replace("inductive Action where\n  | inc\n  | reset\n", actions)
+                    .replace("  | .reset => ⟨0⟩", "  | .reset => ⟨0⟩\n  | .jump => ⟨5⟩"),
+            )
+            .expect("it parses")
+            .machine
+            .expect("a machine")
+            .actions
+        };
+        let all = Some(Actions::Constructors(
+            "[Counter.Action.inc, Counter.Action.reset, Counter.Action.jump]".to_string(),
+        ));
+        for actions in [
+            "inductive Action where\n  | inc\n  | reset\n\n  | jump\n",
+            "inductive Action where\n  | inc\n  | reset\n  -- the jump\n  | jump\n",
+            "inductive Action where\n  | inc\n  | reset\n  /-- the jump -/\n  | jump\n",
+            "inductive Action where | inc | reset | jump\n",
+            "inductive Action\n  | inc\n  | reset\n  | jump\n  deriving Repr\n",
+        ] {
+            assert_eq!(with_jump(actions), all, "{actions}");
+        }
+    }
+
+    #[test]
+    fn a_step_with_two_binders_or_a_qualified_action_names_its_actions() {
+        for step in [
+            "def step (s : State) (a : Action) : State :=\n  match a with",
+            "def step (s : State) : Counter.Action → State",
+            "def step : State → Action → State",
+        ] {
+            let spec = parse(&COUNTER.replace("def step (s : State) : Action → State", step))
+                .expect("it parses");
+            assert_eq!(
+                spec.machine.expect("a machine").actions,
+                Some(Actions::Constructors(
+                    "[Counter.Action.inc, Counter.Action.reset]".to_string()
+                )),
+                "{step}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_depth_of_type_nat_is_the_depth() {
+        let helper = parse(&COUNTER.replace(
+            "end Counter",
+            "def depth (s : State) : Nat := s.count\n\nend Counter",
+        ))
+        .expect("it parses");
+        assert_eq!(helper.machine.expect("a machine").depth, "10");
+        let set = parse(&COUNTER.replace("end Counter", "def depth : Nat := 4\n\nend Counter"))
+            .expect("it parses");
+        assert_eq!(set.machine.expect("a machine").depth, "Counter.depth");
+    }
+
+    #[test]
+    fn the_exploration_walks_the_machine_once_per_invariant_and_reads_back() {
+        let spec = parse(COUNTER).expect("it parses");
+        assert_eq!(spec.explorable(), ["Counter.count_below_three.always"]);
+        let exploration =
+            spec.exploration(&["Counter.count_below_three.always", "Counter.init_is_zero"]);
+        assert_eq!(exploration.ids, ["Counter.count_below_three.always"]);
+        assert!(
+            exploration
+                .lean_code
+                .starts_with("import Std.Data.HashSet\n")
+        );
+        assert!(
+            exploration
+                .lean_code
+                .contains("deriving instance Repr, BEq, Hashable for Counter.State")
+        );
+        assert!(exploration.lean_code.contains(
+            "(FormalBounded.explore Counter.init Counter.step (FormalBounded.complete [Counter.Action.inc, Counter.Action.reset] (by intro a; cases a <;> simp)) (fun s => decide (Counter.count_below_three s)) 10 100000))"
+        ));
+        let read = read_exploration(
+            &exploration,
+            &[
+                "formal-bounded Counter.count_below_three.always falsified [Counter.Action.inc, Counter.Action.inc, Counter.Action.inc]\n",
+            ],
+        );
+        assert_eq!(
+            read,
+            [(
+                "Counter.count_below_three.always".to_string(),
+                Explored::Falsified(
+                    "[Counter.Action.inc, Counter.Action.inc, Counter.Action.inc]".to_string()
+                )
+            )]
+        );
+        let bounded = read_exploration(
+            &exploration,
+            &["formal-bounded Counter.count_below_three.always bounded 10 3\n"],
+        );
+        assert_eq!(
+            bounded[0].1,
+            Explored::Bounded {
+                depth: 10,
+                states: 3
+            }
+        );
+        assert_eq!(read_exploration(&exploration, &[]), []);
     }
 
     #[test]

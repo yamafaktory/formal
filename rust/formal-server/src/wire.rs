@@ -111,6 +111,19 @@ pub struct SessionResponse {
     pub compare: Vec<CompareOut>,
     /// The properties of the Lean spec the search found a counterexample to.
     pub refuted: Vec<RefutationOut>,
+    /// The invariants that held in every state the bounded check reached.
+    pub bounded: Vec<BoundOut>,
+}
+
+/// An invariant that held in every state the bounded check reached.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct BoundOut {
+    /// The property, as `<Namespace>.<name>.always`.
+    pub id: String,
+    /// How many actions deep the check explored.
+    pub depth: u32,
+    /// How many distinct states it reached.
+    pub states: u32,
 }
 
 /// A property of the Lean spec, and the values for which it does not hold.
