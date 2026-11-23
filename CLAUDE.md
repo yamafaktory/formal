@@ -129,6 +129,11 @@ checks did not refute, then all of them together. A broken step becomes a `not_i
 entry, and a conjunction that holds while one of its parts does not becomes
 `inductive_together`. Each answer Lean gave is cached.
 
+`import Formal.Temporal` resolves to `rust/formal-core/lean/Temporal.lean`, which formal
+puts before the spec as it does a spec import. It is part of formal's trusted base: core
+Lean, with its rules proved in the file, and every proof that uses it is checked against it.
+A `Formal.` import formal does not ship is refused.
+
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file
 defines a `Testable` instance for `∀ x ∈ l`, and draws half of the values of each type

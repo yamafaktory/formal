@@ -127,7 +127,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 16] = [
+const LEAN_SPEC: [&str; 17] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -175,6 +175,11 @@ const LEAN_SPEC: [&str; 16] = [
      holds and an action whose next state breaks it come back under not_inductive, so its proof needs a \
      stronger invariant. When such invariants are kept by every step together, inductive_together names \
      them: prove them in one induction. `<State>.samples` steers the states.",
+    "`import Formal.Temporal` gives a spec `Temporal.always`, `eventually` and `leadsTo` over `init` \
+     and `step`, and `Temporal.fair a`. Fairness holds only where a property states it, and some run must \
+     satisfy it: `fair_constant` or `fair_cycle` gives one. The rules are `always_of_inductive`, \
+     `leadsTo_of_measure`, `leadsTo_of_fair_step`, `leadsTo_trans`, `leadsTo_or` and \
+     `eventually_of_leadsTo`.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \

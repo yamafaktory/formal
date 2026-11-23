@@ -684,6 +684,14 @@ fn compared_functions(
 
 const SPEC_IMPORT: &str = "Spec.";
 
+const LIBRARY_IMPORT: &str = "Formal.";
+
+fn resolved_by_formal(module: &str) -> bool {
+    module.starts_with(SPEC_IMPORT) || module.starts_with(LIBRARY_IMPORT)
+}
+
+const LIBRARIES: [(&str, &str); 1] = [("Temporal", include_str!("../lean/Temporal.lean"))];
+
 fn imported_specs(path: &Path, text: &str) -> Result<Vec<String>, SpecError> {
     let root = path.parent().unwrap_or(path);
     let mut read = Vec::new();
@@ -699,10 +707,30 @@ fn visit(
     read: &mut Vec<(PathBuf, String)>,
 ) -> Result<(), SpecError> {
     for import in imports(text.trim_start_matches('\u{feff}')) {
-        let Some(name) = import.module.strip_prefix(SPEC_IMPORT) else {
-            continue;
+        let library = import.module.strip_prefix(LIBRARY_IMPORT);
+        let imported = match (library, import.module.strip_prefix(SPEC_IMPORT)) {
+            (Some(name), _) => PathBuf::from(format!("<formal>/{name}.lean")),
+            (None, Some(name)) => root.join(format!("{}.lean", name.replace('.', "/"))),
+            (None, None) => continue,
         };
-        let imported = root.join(format!("{}.lean", name.replace('.', "/")));
+        if read.iter().any(|(done, _)| *done == imported) {
+            continue;
+        }
+        if let Some(name) = library {
+            let Some((_, library_text)) = LIBRARIES.iter().find(|(known, _)| *known == name) else {
+                let known: Vec<String> = LIBRARIES
+                    .iter()
+                    .map(|(known, _)| format!("`{LIBRARY_IMPORT}{known}`"))
+                    .collect();
+                return Err(SpecError::NoSuchLibrary {
+                    spec: path.to_path_buf(),
+                    import: import.module.clone(),
+                    known: known.join(", "),
+                });
+            };
+            read.push((imported, (*library_text).to_string()));
+            continue;
+        }
         if let Some(start) = importing.iter().position(|seen| *seen == imported) {
             let chain: Vec<String> = importing[start..]
                 .iter()
@@ -712,9 +740,6 @@ fn visit(
             return Err(SpecError::ImportCycle {
                 chain: chain.join(" → "),
             });
-        }
-        if read.iter().any(|(done, _)| *done == imported) {
-            continue;
         }
         let imported_text = fs::read_to_string(&imported).map_err(|_| SpecError::NoSuchImport {
             spec: path.to_path_buf(),
@@ -749,7 +774,7 @@ fn source(text: String, imported: &[String]) -> String {
         .iter()
         .flat_map(|file| imports(file))
         .map(|import| import.module)
-        .filter(|module| !module.starts_with(SPEC_IMPORT))
+        .filter(|module| !resolved_by_formal(module))
         .collect();
     let mut lines = import_lines(modules.iter().map(String::as_str));
     lines.extend(files.iter().map(|file| blanked(file, &imports(file))));
@@ -1249,7 +1274,8 @@ impl LeanSpec {
             spec_imports
                 .iter()
                 .chain(&proof_imports)
-                .map(|import| import.module.as_str()),
+                .map(|import| import.module.as_str())
+                .filter(|module| !resolved_by_formal(module)),
         );
         lines.extend(blanked(spec, &spec_imports).split('\n').map(str::to_string));
         lines.push(format!("#check _root_.{id}"));
@@ -2259,6 +2285,73 @@ mod tests {
             []
         );
         assert_ne!(spec.induction_key(&ids[..1]), spec.induction_key(&ids));
+    }
+
+    #[test]
+    fn importing_formal_temporal_brings_formal_s_library_once_and_an_unknown_library_is_refused() {
+        let dir = TempDir::new().expect("a temporary directory");
+        write(
+            &dir,
+            "Base.lean",
+            "import Formal.Temporal\n\nnamespace Base\n\ndef q : Prop := True\n\nend Base\n",
+        );
+        let path = write(
+            &dir,
+            "Live.lean",
+            "import Formal.Temporal\nimport Spec.Base\n\nnamespace Live\n\ndef p : Prop := Temporal.always (0 : Nat) (fun n (_ : Unit) => n) (fun n => n = 0)\n\nend Live\n",
+        );
+        let spec = LeanSpec::load(&path).expect("it loads");
+        assert_eq!(
+            spec.source.matches("namespace Temporal").count(),
+            1,
+            "{}",
+            spec.source
+        );
+        assert!(
+            spec.source.contains("theorem leadsTo_of_measure"),
+            "{}",
+            spec.source
+        );
+        assert!(!spec.source.contains("import Formal"), "{}", spec.source);
+        assert!(spec.source.find("namespace Temporal") < spec.source.find("namespace Base"));
+        assert!(spec.source.find("namespace Base") < spec.source.find("namespace Live"));
+        let unknown = write(
+            &dir,
+            "Unknown.lean",
+            "import Formal.Missing\n\nnamespace Unknown\n\ndef p : Prop := True\n\nend Unknown\n",
+        );
+        assert_eq!(
+            LeanSpec::load(&unknown)
+                .map(|spec| spec.source)
+                .map_err(|error| error.to_string()),
+            Err(format!(
+                "{unknown} imports `Formal.Missing`, which formal does not ship. formal ships `Formal.Temporal`"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_proof_that_repeats_the_imports_formal_resolves_leaves_them_to_formal() {
+        let spec = parse(CYCLE).expect("it parses");
+        let composed = spec.compose(
+            "Cycle.count_at_most_two.always",
+            "import Formal.Temporal\nimport Spec.Base\nimport Std.Data.HashSet\n\ntheorem t : True := trivial\n",
+        );
+        assert!(
+            !composed.lean_code.contains("import Formal"),
+            "{}",
+            composed.lean_code
+        );
+        assert!(
+            !composed.lean_code.contains("import Spec"),
+            "{}",
+            composed.lean_code
+        );
+        assert!(
+            composed.lean_code.starts_with("import Std.Data.HashSet\n"),
+            "{}",
+            composed.lean_code
+        );
     }
 
     #[test]

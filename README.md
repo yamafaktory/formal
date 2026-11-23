@@ -374,6 +374,55 @@ invariant. When several such invariants are kept by every step together,
 
 `<State>.samples` steers the drawn states, as `<Type>.samples` steers the search.
 
+Liveness says that something good eventually happens. `import Formal.Temporal` gives a
+spec formal's temporal library. It defines the operators over a machine's `init` and `step`:
+
+- `Temporal.always init step p`: `p` holds in every state the machine reaches.
+- `Temporal.eventually init step assumed p`: every run that satisfies `assumed` reaches a
+  state where `p` holds.
+- `Temporal.leadsTo init step assumed p q`: in every run that satisfies `assumed`, each
+  state where `p` holds is followed by a state where `q` holds, or is one.
+- `Temporal.fair a`: the run takes the action `a` again and again. That is weak fairness,
+  since every action can always be taken.
+
+Fairness holds only where a property states it:
+
+```lean
+import Formal.Temporal
+
+def a_fair_reset_empties_the_count : Prop :=
+  Temporal.leadsTo init step (Temporal.fair Action.reset) (fun s => 0 < s.count) (fun s => s.count = 0)
+```
+
+`eventually` and `leadsTo` also claim that some run satisfies `assumed`. An assumption no
+run meets therefore makes the property false, not true for want of a run. For one fair
+action, `⟨_, Temporal.fair_constant a⟩` gives that run. For several, `Temporal.cycle`
+repeats a list of actions, and `Temporal.fair_cycle` proves each listed action fair in it:
+
+```lean
+⟨_, Temporal.fair_cycle Action.drain [Action.wait] Action.drain (by simp),
+  Temporal.fair_cycle Action.drain [Action.wait] Action.wait (by simp)⟩
+```
+
+The library proves its own rules:
+
+- `Temporal.always_of_inductive` proves `always` from an inductive invariant.
+- `Temporal.leadsTo_of_measure` proves `leadsTo` from a fair action and a measure. Every
+  step from `p` reaches `q`, or keeps `p` and does not raise the measure. The fair action
+  reaches `q`, or keeps `p` and lowers the measure. An invariant proved with `always`
+  limits both to the states where it holds. `Temporal.always_true` stands in when there is
+  none.
+- `Temporal.leadsTo_of_fair_step` is that rule without a measure: the fair action reaches
+  `q` at once.
+- `Temporal.leadsTo_trans` chains two `leadsTo`. `Temporal.leadsTo_or` joins two that
+  reach the same `q`, and `Temporal.leadsTo_of_imp` gives `leadsTo p q` when `p` implies `q`.
+- `Temporal.eventually_of_leadsTo` gives `eventually q` from `leadsTo p q` when `init`
+  satisfies `p`.
+
+The library is core Lean, in `rust/formal-core/lean/Temporal.lean`. To compile a spec
+without formal, paste the file in place of the import. formal refuses any other `Formal.`
+import, and leaves out a `Formal.` or `Spec.` import that a proof repeats.
+
 When the session opens, formal also searches each property for a counterexample with
 Plausible. A false property comes back under `refuted`, with the value of each variable
 and what does not hold. For this false property in a spec with the namespace `Demo`:
