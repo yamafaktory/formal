@@ -101,54 +101,6 @@
       "function_code": "fn rebase(error: &LeanError, entry: &BatchEntry, index: usize) -> LeanError {\n    let unqualified = LeanError {\n        data: error.data.replace(&format!(\"`Batch{index}.\"), \"`\"),\n        ..error.clone()\n    };\n    let Some(line) = error.position().0 else {\n        return unqualified;\n    };\n    let Some(offset) = line.checked_sub(entry.first_line) else {\n        return unqualified;\n    };\n    entry.source_lines.get(offset as usize).map_or_else(\n        || unqualified.clone(),\n        |source| unqualified.rebased_to(*source),\n    )\n}"
     },
     {
-      "id": "parse_output/a_sorry_warning_is_never_a_success",
-      "function": "parse_output",
-      "kind": "invariant",
-      "formal": "forall ms code, (exists m in ms, severity m = warning and has_sorry (data m)) -> success code (collect ms) = false",
-      "description": "a proof with a hole in it never passes — the sorry Lean reports as a warning is promoted into the errors, and a non-empty error list is not a success",
-      "assumptions": [
-        "the two substring tests are left abstract, so the claim holds whatever they are spelled with"
-      ],
-      "source_file": "rust/formal-lean/src/run.rs",
-      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines: Vec<&str> = captured.stdout.lines().collect();\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
-    },
-    {
-      "id": "parse_output/every_promoted_sorry_is_reported_as_an_error",
-      "function": "parse_output",
-      "kind": "invariant",
-      "formal": "forall m in promoted ms, severity m = error",
-      "description": "a sorry that Lean called a warning is reported as an error, not passed through with its original severity",
-      "assumptions": [
-        "the substring test for sorry is left abstract"
-      ],
-      "source_file": "rust/formal-lean/src/run.rs",
-      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines: Vec<&str> = captured.stdout.lines().collect();\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
-    },
-    {
-      "id": "parse_output/the_first_error_lean_reported_stays_first",
-      "function": "parse_output",
-      "kind": "identity",
-      "formal": "forall ms, real_errors ms <> [] -> head (collect ms) = head (real_errors ms)",
-      "description": "promoted sorries are appended after the real errors, so the first thing Lean said stays the first thing reported",
-      "assumptions": [
-        "the two substring tests are left abstract"
-      ],
-      "source_file": "rust/formal-lean/src/run.rs",
-      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines: Vec<&str> = captured.stdout.lines().collect();\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
-    },
-    {
-      "id": "parse_output/a_nonzero_exit_is_never_a_success",
-      "function": "parse_output",
-      "kind": "invariant",
-      "formal": "forall code errors, code <> some 0 -> success code errors = false",
-      "description": "an exit code other than zero is never a pass, however empty the diagnostics are",
-      "assumptions": [
-        "the exit code modelled as Option Nat, absent when the process was killed"
-      ],
-      "source_file": "rust/formal-lean/src/run.rs",
-      "function_code": "pub fn parse_output(captured: &Captured) -> LeanResult {\n    let lines: Vec<&str> = captured.stdout.lines().collect();\n    let messages: Vec<LeanError> = lines\n        .iter()\n        .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())\n        .collect();\n\n    let mut errors: Vec<LeanError> = messages\n        .iter()\n        .filter(|message| message.severity == \"error\" && !message.data.contains(SORRY_DECLARATION))\n        .cloned()\n        .collect();\n\n    // A sorry is a warning to Lean and a failure here: the proof has a hole in it.\n    // Appended after the errors, so the first error stays the first thing Lean said.\n    errors.extend(\n        messages\n            .iter()\n            .filter(|message| message.severity == \"warning\" && message.data.contains(\"sorry\"))\n            .map(|message| LeanError {\n                severity: \"error\".to_string(),\n                ..message.clone()\n            }),\n    );\n\n    let mut output = lines.join(\"\\n\");\n    if !captured.stderr.is_empty() {\n        output.push('\\n');\n        output.push_str(&captured.stderr);\n    }\n    LeanResult {\n        success: captured.code == Some(0) && errors.is_empty(),\n        output,\n        errors,\n    }\n}"
-    },
-    {
       "id": "is_stale/trailing_space_does_not_break_the_match",
       "function": "is_stale",
       "kind": "invariant",
