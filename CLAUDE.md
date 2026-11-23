@@ -35,7 +35,7 @@ anything the cache key touches — reaching for `str::lines` or
 Four things outside `rust/` decide whether a change is allowed to land. All are
 data, and none of them mention an implementation.
 
-- `tests/conformance/golden/responses.json` — the HTTP surface. 32 steps, status
+- `tests/conformance/golden/responses.json` — the HTTP surface. 35 steps, status
   codes everywhere including the refusals, bodies where formal writes them.
   Driven by `formal-server/tests/conformance.rs`, which can also judge an
   already-running server:
@@ -91,10 +91,17 @@ before the proof, so no notation or variable in the proof can change what it doe
 chain and the cache all see the proof alone. Each proof of a spec costs its own Lean
 run: one file cannot hold the spec once per proof, so spec proofs are never batched.
 
+A spec function that names its code in a `code:` line of its doc comment is compared
+with that code. `def <name>.inputs` lists the inputs, and a spec without it is refused.
+`LeanSpec::evaluation` builds one file that prints the inputs and the spec's answers.
+formal runs it when the session opens and caches the answers per spec text. The caller
+runs its code and sends the answers to `POST /session/{id}/compare`. The evaluation
+prints JSON through `Lean.ToJson`, with a `List Char` as a string.
+
 `formal-service/tests/spec_sessions.rs` checks every proof of `spec/Pystr.lean` through
 a session, and holds the check to proofs that try to cheat. `formal-lean/tests/spec.rs`
-compares the Rust with the spec on every character and on every short string over an
-alphabet of space and line breaks. The spec uses core Lean only.
+runs that evaluation on `spec/Pystr.lean` and compares the Rust with each answer. The
+spec uses core Lean only.
 
 ## Lean
 

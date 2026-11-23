@@ -146,6 +146,19 @@ pub fn lean_spec_key(spec: &str, id: &str) -> String {
     sha256_hex(&format!("lean-spec:{}", framed(&[spec, id])))
 }
 
+/// The cache key of the spec's answers to the inputs of one function.
+///
+/// It covers the encoding and the command that print the answers, so a change
+/// to how formal prints them never serves answers printed the old way. Its own
+/// word keeps it apart from the key of a property with the same name.
+#[must_use]
+pub fn lean_spec_answers_key(spec: &str, encoding: &str, command: &str) -> String {
+    sha256_hex(&format!(
+        "lean-spec-answers:{}",
+        framed(&[spec, encoding, command])
+    ))
+}
+
 /// The SHA-256 digest of `text`, in lowercase hex.
 #[must_use]
 pub fn sha256_hex(text: &str) -> String {

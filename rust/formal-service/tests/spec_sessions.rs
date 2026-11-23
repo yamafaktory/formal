@@ -58,7 +58,9 @@ struct Checked {
 fn check(runner: &Runner, dir: &TempDir, spec: LeanSpec, proofs: &[(String, String)]) -> Checked {
     let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
     let table = Table::shipped().expect("the shipped table is valid");
-    let session = Sessions::default().open_spec(&cache, spec);
+    let session = Sessions::default()
+        .open_spec(runner, &cache, spec)
+        .expect("Lean evaluates the spec");
     let mut session = session.lock().expect("a fresh session");
     let outcomes = session
         .check(&Checker::new(runner, table), &cache, proofs)

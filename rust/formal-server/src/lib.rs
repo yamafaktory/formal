@@ -10,6 +10,7 @@ use axum::{
     Json,
     Router,
     extract::{
+        DefaultBodyLimit,
         Path,
         State,
     },
@@ -39,6 +40,7 @@ use formal_service::{
     cache::ProofCache,
     checker::Checker,
     session::{
+        CompareError,
         Session,
         Sessions,
     },
@@ -55,12 +57,18 @@ pub use wire::{
     CacheHitOut,
     CheckRequest,
     CheckResponse,
+    CompareOut,
+    CompareRequest,
+    CompareResponse,
+    DifferenceOut,
     FailureOut,
     ProofOut,
     PropertySpecIn,
     SessionRequest,
     SessionResponse,
 };
+
+const COMPARE_BODY_LIMIT: usize = 64 * 1024 * 1024;
 
 /// Everything a request might need, built once at startup.
 #[derive(Debug)]
@@ -214,6 +222,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/session/{session_id}/check", post(check_session))
         .route(
+            "/session/{session_id}/compare",
+            post(compare_session).layer(DefaultBodyLimit::max(COMPARE_BODY_LIMIT)),
+        )
+        .route(
             "/session/{session_id}/proof/{*property_id}",
             get(read_proof),
         )
@@ -228,9 +240,9 @@ pub fn router(state: Arc<AppState>) -> Router {
 #[derive(Debug, OpenApi)]
 #[openapi(
     info(title = "formal", version = env!("CARGO_PKG_VERSION")),
-    paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, read_proof, close_session),
+    paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, compare_session, read_proof, close_session),
     components(schemas(
-        CacheHitOut, CheckRequest, CheckResponse, Detail, FailureOut,
+        CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut,
         ProofOut, PropertySpecIn, SessionRequest, SessionResponse, Status, TopicOut,
     )),
 )]
@@ -314,6 +326,15 @@ fn describe(session: &Session) -> SessionResponse {
             .collect(),
         complete: session.complete(),
         stale: session.stale.clone(),
+        compare: session
+            .evaluated
+            .iter()
+            .map(|evaluated| CompareOut {
+                function: evaluated.function.clone(),
+                code: evaluated.code.clone(),
+                inputs: evaluated.inputs.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -322,7 +343,8 @@ fn describe(session: &Session) -> SessionResponse {
     request_body = SessionRequest,
     responses(
         (status = 200, description = "The session, and what it already knows", body = SessionResponse),
-        (status = 400, description = "No source or more than one given, a duplicate id, an unreadable spec file, or a spec that runs code", body = Detail),
+        (status = 400, description = "No source or more than one given, a duplicate id, an unreadable spec file, a spec that runs code, or a spec Lean could not evaluate", body = Detail),
+        (status = 500, description = "formal could not run Lean to evaluate the spec", body = Detail),
     ),
 )]
 async fn open_session(
@@ -344,9 +366,21 @@ async fn open_session(
 
     if let Some(path) = &req.spec {
         let spec = LeanSpec::load(path).map_err(|e| ApiError::bad_request(e.to_string()))?;
-        let session = state.sessions.open_spec(&state.cache, spec);
-        let session = session.lock().map_err(|_| poisoned())?;
-        return Ok(Json(describe(&session)));
+        return tokio::task::spawn_blocking(move || {
+            let session = state
+                .sessions
+                .open_spec(&state.runner, &state.cache, spec)
+                .map_err(|e| match e {
+                    CompareError::Unrun(_) => {
+                        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+                    }
+                    _ => ApiError::bad_request(e.to_string()),
+                })?;
+            let session = session.lock().map_err(|_| poisoned())?;
+            Ok(Json(describe(&session)))
+        })
+        .await
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
     let (specs, stale_ids) = if let Some(spec_file) = &req.spec_file {
@@ -455,6 +489,33 @@ async fn check_session(
     })
     .await
     .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+}
+
+#[utoipa::path(
+    post, path = "/session/{session_id}/compare",
+    params(("session_id" = String, Path, description = "The id /session handed back")),
+    request_body = CompareRequest,
+    responses(
+        (status = 200, description = "The functions whose code answers what the spec answers, and the first difference of each other one", body = CompareResponse),
+        (status = 400, description = "A function the session does not compare, or a different number of answers than inputs", body = Detail),
+        (status = 404, description = "No such session, or it expired", body = Detail),
+    ),
+)]
+async fn compare_session(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Json(req): Json<CompareRequest>,
+) -> ApiResult<CompareResponse> {
+    let session = state
+        .sessions
+        .get(&session_id)
+        .ok_or_else(|| ApiError::no_such_session(&session_id))?;
+    let session = session.lock().map_err(|_| poisoned())?;
+    let answers: Vec<(String, Vec<serde_json::Value>)> = req.answers.into_iter().collect();
+    let comparison = session
+        .compare(&answers)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(Json(comparison.into()))
 }
 
 #[utoipa::path(

@@ -1,6 +1,7 @@
 //! A spec written in Lean, and the file formal checks a proof of it in.
 
 use std::{
+    collections::HashMap,
     fs,
     path::Path,
     sync::OnceLock,
@@ -15,7 +16,10 @@ use crate::{
         runs_code,
         without_comments,
     },
-    proof_cache::lean_spec_key,
+    proof_cache::{
+        lean_spec_answers_key,
+        lean_spec_key,
+    },
     property::PropertySpec,
     specs::{
         SpecError,
@@ -27,6 +31,16 @@ use crate::{
 /// The command, defined before every proof, that requires `<id>.holds` to state `<id>`.
 pub const HOLDS_COMMAND: &str = "#formal_holds";
 
+/// What starts each line the evaluation prints, before the function and its answers.
+pub const COMPARE_MARK: &str = "formal-compare";
+
+const EVALUATION_IMPORT: &str = "Lean.Data.Json";
+
+const ENCODING: &str = "namespace FormalCompare
+scoped instance (priority := high) : Lean.ToJson Char := ⟨fun c => Lean.Json.str (String.singleton c)⟩
+scoped instance (priority := high) : Lean.ToJson (List Char) := ⟨fun s => Lean.Json.str (String.ofList s)⟩
+end FormalCompare";
+
 /// A Lean file that defines the code's model and states its properties.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanSpec {
@@ -36,6 +50,61 @@ pub struct LeanSpec {
     pub namespace: String,
     /// The id of each `def <name> : Prop`, as `<namespace>.<name>`, in the spec's order.
     pub properties: Vec<String>,
+    /// The functions whose doc comment names the code they describe, in the spec's order.
+    pub compared: Vec<Compared>,
+}
+
+/// A function of the spec that names the code it describes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Compared {
+    /// The function, as `<namespace>.<name>`.
+    pub function: String,
+    /// What the `code:` line of its doc comment says.
+    pub code: String,
+}
+
+/// The inputs of a compared function, and the spec's answer to each.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct Evaluated {
+    /// The function, as `<namespace>.<name>`.
+    pub function: String,
+    /// What the `code:` line of its doc comment says.
+    pub code: String,
+    /// The inputs, as JSON.
+    pub inputs: Vec<serde_json::Value>,
+    /// The spec's answer to each input, in the same order.
+    pub answers: Vec<serde_json::Value>,
+}
+
+/// The first input on which the code and the spec disagree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Difference {
+    /// The function, as `<namespace>.<name>`.
+    pub function: String,
+    /// The input.
+    pub input: serde_json::Value,
+    /// What the spec answers.
+    pub spec: serde_json::Value,
+    /// What the code answers.
+    pub code: serde_json::Value,
+}
+
+impl Evaluated {
+    /// The first input whose answer from the code is not the spec's answer.
+    #[must_use]
+    pub fn first_difference(&self, code: &[serde_json::Value]) -> Option<Difference> {
+        self.inputs
+            .iter()
+            .zip(&self.answers)
+            .zip(code)
+            .find(|((_, spec), code)| spec != code)
+            .map(|((input, spec), code)| Difference {
+                function: self.function.clone(),
+                input: input.clone(),
+                spec: spec.clone(),
+                code: code.clone(),
+            })
+    }
 }
 
 /// A proof put after the spec it proves, ready for Lean.
@@ -86,6 +155,103 @@ fn prop_definition_pattern() -> &'static Regex {
     pattern(&PATTERN, || {
         r"\b(def|abbrev)\s+([^\s:]+)\s*:\s*Prop\s*:=".to_string()
     })
+}
+
+const DEFINITION: &str =
+    r"(?:@\[[^\]]*\]\s*)*(?:(?:private|protected|noncomputable|partial)\s+)*(?:def|abbrev)\s+";
+
+fn definition_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        format!(r"(?m)^[ \t]*{DEFINITION}({IDENTIFIER}(?:\.{IDENTIFIER})*)")
+    })
+}
+
+fn doc_comment_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || r"(?s)/--(.*?)-/".to_string())
+}
+
+fn documented_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || format!(r"\A\s*{DEFINITION}({IDENTIFIER})"))
+}
+
+fn code_line_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        r"(?m)^[ \t]*code:[ \t]*(\S[^\n]*?)[ \t]*$".to_string()
+    })
+}
+
+fn compared_functions(
+    path: &Path,
+    text: &str,
+    code: &str,
+    namespace: &str,
+    blocks: &[(String, usize, usize)],
+) -> Result<Vec<Compared>, SpecError> {
+    let defined: HashMap<&str, bool> = definition_pattern()
+        .captures_iter(code)
+        .filter_map(|found| {
+            let at = found.get(0)?.start();
+            let inside = blocks
+                .iter()
+                .any(|(_, start, end)| *start <= at && at < *end);
+            Some((found.get(1)?.as_str(), inside))
+        })
+        .collect();
+    let mut compared = Vec::new();
+    for found in doc_comment_pattern().captures_iter(text) {
+        let Some(code_line) = code_line_pattern().captures(&found[1]) else {
+            continue;
+        };
+        let after = found.get(0).map_or("", |whole| &text[whole.end()..]);
+        let name = documented_pattern()
+            .captures(after)
+            .and_then(|documented| documented.get(1))
+            .map(|name| name.as_str());
+        let name = match name.map(|name| (name, defined.get(name))) {
+            Some((_, None)) => continue,
+            Some((name, Some(true))) => name,
+            _ => {
+                return Err(SpecError::UncomparableCode {
+                    path: path.to_path_buf(),
+                    line: format!("code: {}", &code_line[1]),
+                });
+            }
+        };
+        let function = format!("{namespace}.{name}");
+        if defined.get(format!("{name}.inputs").as_str()) != Some(&true) {
+            return Err(SpecError::NoInputs {
+                path: path.to_path_buf(),
+                function,
+            });
+        }
+        compared.push(Compared {
+            function,
+            code: code_line[1].to_string(),
+        });
+    }
+    Ok(compared)
+}
+
+fn import_lines<'a>(modules: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for module in modules {
+        let line = format!("import {module}");
+        if !lines.contains(&line) {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
+fn evaluation_of(function: &str) -> String {
+    format!(
+        "open FormalCompare in\n#eval IO.println (\"{COMPARE_MARK} {function} \" ++ \
+         (Lean.toJson ((_root_.{function}.inputs).map fun input => (input, _root_.{function} input))).compress)"
+    )
 }
 
 fn blanked(code: &str, imports: &[Import]) -> String {
@@ -190,10 +356,12 @@ impl LeanSpec {
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
+        let compared = compared_functions(path, &text, &code, &namespace, &blocks)?;
         Ok(Self {
             text,
             namespace,
             properties,
+            compared,
         })
     }
 
@@ -216,6 +384,30 @@ impl LeanSpec {
         lean_spec_key(&self.text, id)
     }
 
+    /// The cache key of the spec's answers for a compared function.
+    #[must_use]
+    pub fn answers_key(&self, function: &str) -> String {
+        lean_spec_answers_key(&self.text, ENCODING, &evaluation_of(function))
+    }
+
+    /// The file that prints the inputs of each function in `functions`, and the spec's answers.
+    ///
+    /// Each function prints one line: [`COMPARE_MARK`], the function, and a JSON
+    /// list of `[input, answer]` pairs.
+    #[must_use]
+    pub fn evaluation(&self, functions: &[&str]) -> String {
+        let spec = self.text.trim_start_matches('\u{feff}');
+        let spec_imports = imports(spec);
+        let mut lines = import_lines(
+            std::iter::once(EVALUATION_IMPORT)
+                .chain(spec_imports.iter().map(|import| import.module.as_str())),
+        );
+        lines.push(blanked(spec, &spec_imports));
+        lines.push(ENCODING.to_string());
+        lines.extend(functions.iter().map(|function| evaluation_of(function)));
+        format!("{}\n", lines.join("\n"))
+    }
+
     /// The file that checks `proof` against the property `id`.
     ///
     /// The imports of the spec and the proof come first, then the spec and a
@@ -230,13 +422,12 @@ impl LeanSpec {
         let spec_imports = imports(spec);
         let proof_imports = imports(proof);
 
-        let mut lines: Vec<String> = Vec::new();
-        for import in spec_imports.iter().chain(&proof_imports) {
-            let line = format!("import {}", import.module);
-            if !lines.contains(&line) {
-                lines.push(line);
-            }
-        }
+        let mut lines = import_lines(
+            spec_imports
+                .iter()
+                .chain(&proof_imports)
+                .map(|import| import.module.as_str()),
+        );
         lines.extend(blanked(spec, &spec_imports).split('\n').map(str::to_string));
         lines.push(format!("#check _root_.{id}"));
         let offset = u32::try_from(lines.len()).unwrap_or(u32::MAX);
@@ -249,6 +440,42 @@ impl LeanSpec {
             proof_lines: u32::try_from(body.split('\n').count()).unwrap_or(u32::MAX),
         }
     }
+}
+
+/// The answers the evaluation of `compared` printed, one per function.
+///
+/// # Errors
+///
+/// What is wrong, when a function printed no line, more than one, or a line
+/// that is not a JSON list of `[input, answer]` pairs.
+pub fn read_evaluation(compared: &[&Compared], printed: &[&str]) -> Result<Vec<Evaluated>, String> {
+    compared
+        .iter()
+        .map(|Compared { function, code }| {
+            let mark = format!("{COMPARE_MARK} {function} ");
+            let lines: Vec<&str> = printed
+                .iter()
+                .filter_map(|line| line.strip_prefix(&mark))
+                .collect();
+            let [line] = lines.as_slice() else {
+                return Err(format!(
+                    "the evaluation printed {} answers for {function}, not one",
+                    lines.len()
+                ));
+            };
+            let pairs: Vec<(serde_json::Value, serde_json::Value)> =
+                serde_json::from_str(line.trim_end()).map_err(|e| {
+                    format!("the evaluation of {function} printed something else than pairs: {e}")
+                })?;
+            let (inputs, answers) = pairs.into_iter().unzip();
+            Ok(Evaluated {
+                function: function.clone(),
+                code: code.clone(),
+                inputs,
+                answers,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -504,6 +731,193 @@ mod tests {
         assert!(
             matches!(refused, Err(SpecError::UnregisteredProperty { .. })),
             "{refused:?}"
+        );
+    }
+
+    const COMPARED: &str = "/-- Doubles.\n\n  code: src/double.rs double\n-/\ndef twice (n : Nat) : Nat := n + n\n\ndef twice.inputs : List Nat := [0, 1, 2]";
+
+    #[test]
+    fn a_code_line_in_a_doc_comment_names_the_code_of_a_function() {
+        let spec = with(&format!(
+            "{COMPARED}\n/-- code: src/half.rs half -/ def half (n : Nat) : Nat := n / 2\ndef half.inputs : List Nat := [4]"
+        ))
+        .expect("it parses");
+        assert_eq!(
+            spec.compared,
+            [
+                Compared {
+                    function: "Demo.twice".to_string(),
+                    code: "src/double.rs double".to_string(),
+                },
+                Compared {
+                    function: "Demo.half".to_string(),
+                    code: "src/half.rs half".to_string(),
+                },
+            ]
+        );
+        assert_eq!(demo().compared, []);
+    }
+
+    #[test]
+    fn a_doc_comment_without_a_code_line_or_on_a_dead_definition_compares_nothing() {
+        let spec = with(
+            "/-- What double does. -/\ndef plain (n : Nat) : Nat := n\n/-\n/-- code: src/gone.rs gone -/\ndef gone (n : Nat) : Nat := n\n-/",
+        )
+        .expect("it parses");
+        assert_eq!(spec.compared, []);
+    }
+
+    #[test]
+    fn a_code_line_names_only_the_function_its_doc_comment_sits_on() {
+        let spec = with(
+            "/-- code: src/a.rs a -/\n@[simp] def a (n : Nat) : Nat := n\ndef a.inputs : List Nat := [0]\n/-- Helper. -/\ndef b (n : Nat) : Nat := n",
+        )
+        .expect("it parses");
+        assert_eq!(
+            spec.compared,
+            [Compared {
+                function: "Demo.a".to_string(),
+                code: "src/a.rs a".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_compared_function_and_its_inputs_may_carry_attributes_and_modifiers() {
+        let spec = with(
+            "/-- code: src/f.rs f -/\npartial def f (n : Nat) : Nat := n\n@[reducible] abbrev f.inputs : List Nat := [0]",
+        )
+        .expect("it parses");
+        assert_eq!(
+            spec.compared,
+            [Compared {
+                function: "Demo.f".to_string(),
+                code: "src/f.rs f".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_code_line_on_no_function_of_the_namespace_is_refused() {
+        let loose = with("/-- code: src/x.rs x -/\ntheorem x : True := trivial");
+        assert!(
+            matches!(loose, Err(SpecError::UncomparableCode { ref line, .. }) if line == "code: src/x.rs x"),
+            "{loose:?}"
+        );
+        let outside = parse(&format!(
+            "/-- code: src/f.rs f -/\ndef f (n : Nat) : Nat := n\ndef f.inputs : List Nat := [0]\n{DEMO}"
+        ));
+        assert!(
+            matches!(outside, Err(SpecError::UncomparableCode { ref line, .. }) if line == "code: src/f.rs f"),
+            "{outside:?}"
+        );
+    }
+
+    #[test]
+    fn a_function_that_names_its_code_without_inputs_is_refused() {
+        let refused = with(&COMPARED.replace("def twice.inputs", "def twice_inputs"));
+        assert!(
+            matches!(refused, Err(SpecError::NoInputs { ref function, .. }) if function == "Demo.twice"),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn the_evaluation_prints_each_function_after_the_spec() {
+        let spec = with(COMPARED).expect("it parses");
+        let evaluation = spec.evaluation(&["Demo.twice"]);
+        assert!(evaluation.starts_with("import Lean.Data.Json\nnamespace Demo"));
+        assert!(evaluation.contains("end FormalCompare\nopen FormalCompare in\n#eval"));
+        assert!(evaluation.ends_with(
+            "(Lean.toJson ((_root_.Demo.twice.inputs).map fun input => (input, _root_.Demo.twice input))).compress)\n"
+        ));
+    }
+
+    fn twice() -> Compared {
+        Compared {
+            function: "Demo.twice".to_string(),
+            code: "src/double.rs double".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_evaluation_is_read_back_as_inputs_and_answers() {
+        let read = read_evaluation(
+            &[&twice()],
+            &[
+                "formal-audit 1 []",
+                "formal-compare Demo.twice [[0,0],[1,2]]\n",
+            ],
+        )
+        .expect("it reads");
+        assert_eq!(
+            read,
+            [Evaluated {
+                function: "Demo.twice".to_string(),
+                code: "src/double.rs double".to_string(),
+                inputs: vec![0.into(), 1.into()],
+                answers: vec![0.into(), 2.into()],
+            }]
+        );
+    }
+
+    #[test]
+    fn the_first_input_where_the_answers_part_is_the_difference() {
+        let evaluated = Evaluated {
+            function: "Demo.twice".to_string(),
+            code: "src/double.rs double".to_string(),
+            inputs: vec![0.into(), 1.into(), 2.into()],
+            answers: vec![0.into(), 2.into(), 4.into()],
+        };
+        assert_eq!(
+            evaluated.first_difference(&[0.into(), 2.into(), 4.into()]),
+            None
+        );
+        assert_eq!(
+            evaluated.first_difference(&[0.into(), 3.into(), 5.into()]),
+            Some(Difference {
+                function: "Demo.twice".to_string(),
+                input: 1.into(),
+                spec: 2.into(),
+                code: 3.into(),
+            })
+        );
+        assert!(
+            evaluated
+                .first_difference(&[0.into(), "2".into(), 4.into()])
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn an_evaluation_that_printed_no_line_two_or_no_pairs_is_refused() {
+        for printed in [
+            vec![],
+            vec![
+                "formal-compare Demo.twice []",
+                "formal-compare Demo.twice []",
+            ],
+            vec!["formal-compare Demo.twice [1, 2]"],
+        ] {
+            assert!(
+                read_evaluation(&[&twice()], &printed).is_err(),
+                "{printed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_answers_key_is_not_the_key_of_a_property_of_the_same_name() {
+        let spec = demo();
+        assert_ne!(
+            spec.answers_key("Demo.double_even"),
+            spec.key("Demo.double_even")
+        );
+        assert_ne!(
+            spec.answers_key("Demo.double"),
+            parse(&DEMO.replace("n + n", "2 * n"))
+                .expect("it parses")
+                .answers_key("Demo.double")
         );
     }
 

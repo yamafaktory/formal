@@ -19,7 +19,6 @@ use std::{
     },
 };
 
-use formal_core::property::PropertyResult;
 use formal_lean::{
     audit,
     env::Env,
@@ -28,6 +27,10 @@ use formal_lean::{
         log,
     },
     paths::Paths,
+};
+use serde::{
+    Serialize,
+    de::DeserializeOwned,
 };
 
 /// How long an entry survives without being rewritten.
@@ -80,7 +83,7 @@ impl ProofCache {
     /// overwritten or evicted rather than deleted here, because a read has no
     /// business changing what is stored.
     #[must_use]
-    pub fn load(&self, key: &str) -> Option<PropertyResult> {
+    pub fn load<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
         let text = fs::read_to_string(self.path(key)).ok()?;
         let mut entry: serde_json::Value = serde_json::from_str(&text).ok()?;
         let audited = entry.as_object_mut()?.remove(AUDITED);
@@ -94,7 +97,7 @@ impl ProofCache {
     ///
     /// The cache is an optimisation and never changes a verdict, so every failure
     /// here is reported and swallowed.
-    pub fn save(&self, key: &str, result: &PropertyResult) {
+    pub fn save<T: Serialize>(&self, key: &str, result: &T) {
         if let Err(e) = self.try_save(key, result) {
             log(
                 Tag::Cache,
@@ -103,7 +106,7 @@ impl ProofCache {
         }
     }
 
-    fn try_save(&self, key: &str, result: &PropertyResult) -> std::io::Result<()> {
+    fn try_save<T: Serialize>(&self, key: &str, result: &T) -> std::io::Result<()> {
         fs::create_dir_all(&self.dir)?;
         let mut entry = serde_json::to_value(result).map_err(std::io::Error::other)?;
         if let Some(fields) = entry.as_object_mut() {
@@ -163,6 +166,7 @@ pub fn is_writable(dir: &Path) -> bool {
 mod tests {
     use std::fs::File;
 
+    use formal_core::property::PropertyResult;
     use tempfile::TempDir;
 
     use super::*;
@@ -202,7 +206,9 @@ mod tests {
         let dir = TempDir::new().expect("a temporary directory");
         let cache = cache(&dir);
         cache.save("abc", &result("p1"));
-        let loaded = cache.load("abc").expect("the entry is there");
+        let loaded = cache
+            .load::<PropertyResult>("abc")
+            .expect("the entry is there");
         assert_eq!(loaded.property_id, "p1");
         assert!(loaded.verified);
     }
@@ -214,7 +220,7 @@ mod tests {
         fs::create_dir_all(&cache.dir).expect("the directory is creatable");
         let unaudited = serde_json::to_string(&result("p1")).expect("serialisable");
         fs::write(cache.path("old"), unaudited).expect("the file is writable");
-        assert_eq!(cache.load("old"), None);
+        assert_eq!(cache.load::<PropertyResult>("old"), None);
     }
 
     #[test]
@@ -225,13 +231,13 @@ mod tests {
         let mut entry = serde_json::to_value(result("p1")).expect("serialisable");
         entry["axioms_audited"] = serde_json::Value::Bool(true);
         fs::write(cache.path("old"), entry.to_string()).expect("the file is writable");
-        assert_eq!(cache.load("old"), None);
+        assert_eq!(cache.load::<PropertyResult>("old"), None);
     }
 
     #[test]
     fn a_key_nobody_saved_is_nothing() {
         let dir = TempDir::new().expect("a temporary directory");
-        assert_eq!(cache(&dir).load("nonexistent"), None);
+        assert_eq!(cache(&dir).load::<PropertyResult>("nonexistent"), None);
     }
 
     #[test]
@@ -240,7 +246,7 @@ mod tests {
         let cache = cache(&dir);
         fs::create_dir_all(&cache.dir).expect("the directory is creatable");
         fs::write(cache.path("bad"), "not valid json{{{").expect("the file is writable");
-        assert_eq!(cache.load("bad"), None);
+        assert_eq!(cache.load::<PropertyResult>("bad"), None);
     }
 
     #[test]
@@ -249,7 +255,10 @@ mod tests {
         let cache = cache(&dir);
         cache.save("abc", &result("p1"));
         assert!(
-            !cache.load("abc").expect("the entry is there").cached,
+            !cache
+                .load::<PropertyResult>("abc")
+                .expect("the entry is there")
+                .cached,
             "the caller marks it, so that a saved result and a served one differ"
         );
     }
@@ -266,7 +275,9 @@ mod tests {
                 ..result("p1")
             },
         );
-        let loaded = cache.load("abc").expect("the entry is there");
+        let loaded = cache
+            .load::<PropertyResult>("abc")
+            .expect("the entry is there");
         assert_eq!(loaded.preconditions, ["n > 0"]);
         assert_eq!(loaded.assumptions, ["floats as rationals"]);
     }
@@ -337,7 +348,7 @@ mod tests {
         fs::create_dir(cache.path("abc")).expect("something is in the way");
 
         cache.save("abc", &result("p1"));
-        assert_eq!(cache.load("abc"), None);
+        assert_eq!(cache.load::<PropertyResult>("abc"), None);
     }
 
     #[test]

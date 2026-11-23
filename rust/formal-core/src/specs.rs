@@ -145,6 +145,28 @@ pub enum SpecError {
         line: String,
     },
 
+    /// A Lean spec names code in a doc comment that sits on no function of its namespace.
+    #[error(
+        "{path} says `{line}` in a doc comment, and formal compares code only with a `def` of the spec's namespace that the doc comment sits on"
+    )]
+    UncomparableCode {
+        /// The spec.
+        path: PathBuf,
+        /// The `code:` line.
+        line: String,
+    },
+
+    /// A Lean spec names the code of a function, and gives no inputs to compare it on.
+    #[error(
+        "{path} names the code of `{function}`, and defines no `{function}.inputs` to compare the two on"
+    )]
+    NoInputs {
+        /// The spec.
+        path: PathBuf,
+        /// The function, as the spec names it.
+        function: String,
+    },
+
     /// A Lean spec contains something that runs code while Lean checks it.
     #[error(
         "{path} contains `{found}`, which can run code while Lean checks it, and formal does not check a spec that can"

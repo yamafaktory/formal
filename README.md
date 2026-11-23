@@ -229,6 +229,8 @@ GET  /guide/tactics              the proof failures that come up most, and how t
 POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}} or {"proof_files": {"<id>": "<path>"}}
      → {verified, recovered, failed, remaining, complete}
      fix the failures, send only those ids again, repeat
+POST /session/{id}/compare       {"answers": {"<function>": [...]}}
+     → {matched, differed}
 ```
 
 Three things keep the loop cheap:
@@ -281,6 +283,26 @@ spec out and declares `theorem Pystr.rstrip_idempotent.holds : Pystr.rstrip_idem
 formal puts the spec before the proof and holds the proof to the spec's own statement.
 A proof that redefines a name of the spec fails. The cache key covers the whole spec, so
 an edit to the spec sends every property back as work.
+
+A Lean spec can also hold the code to its model. A function names the code it describes
+in a `code:` line of its doc comment, and `def <name>.inputs` lists the inputs:
+
+```lean
+/-- code: rust/formal-core/src/pystr.rs rstrip -/
+def rstrip (s : List Char) : List Char := (s.reverse.dropWhile isSpace).reverse
+
+def rstrip.inputs : List (List Char) := words 4
+```
+
+formal evaluates the inputs in Lean when the session opens. The session lists each such
+function under `compare`, with its inputs as JSON. Inputs and answers cross through
+Lean's `ToJson`, and a `List Char` crosses as a JSON string. Core Lean has instances for
+`Nat`, `Int`, `Bool`, `String`, lists, pairs and options. A spec cannot name `Lean`, so it
+cannot add an instance for a type of its own.
+The caller runs its own code on each input and sends the answers to
+`POST /session/{id}/compare`. formal keeps the spec's answers to itself. It answers with
+the functions that `matched`. Each function that `differed` comes with the first input
+where the two disagree, the spec's answer and the code's answer.
 
 ### Stale properties
 
