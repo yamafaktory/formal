@@ -363,10 +363,12 @@ formal checks itself, and its own code moves from `formal.properties.json` to Le
   Its word boundary follows Unicode, as the regex in Rust does: the spec holds the regex's
   table of word characters, and the compare checks it on every code point. The kind is
   lowercased as ASCII, in the spec and in Rust.
+- `spec/Hints.lean` specifies how formal picks the advice for a failed proof: the first
+  rule that claims the error and answers wins.
 
 Their proofs are in `proofs/<Namespace>/`. The test `formal-service/tests/spec_sessions.rs`
 checks every proof of every spec, and `formal-lean/tests/spec.rs` compares the code in
-Rust with each spec.
+Rust with each spec that names its code in a `code:` line.
 
 `formal.properties.json` holds the properties not moved yet, with their proofs in
 `proofs/`. A test fails when one of them is stale, so a change to the code updates them in

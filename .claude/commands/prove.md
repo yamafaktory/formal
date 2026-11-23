@@ -1,6 +1,6 @@
 ---
 description: Prove properties about formal's own pure functions, using formal
-argument-hint: "[target, e.g. verifier | parse_output | hints]"
+argument-hint: "[target, e.g. verifier | parse_output]"
 ---
 
 Point formal at its own Rust and come back with proved properties. You are not here to
@@ -17,10 +17,10 @@ what to aim at, and what not to break.
 ## What already exists
 
 formal's own properties live in two places. The Lean specs in `spec/` hold those already
-moved: `spec/Pystr.lean` and `spec/ProofCache.lean`, with their proofs in
-`proofs/<Namespace>/`. `formal.properties.json` holds the properties not moved yet, about
-functions in `rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in
-`proofs/`. Read both before you write a property, and do not restate one.
+moved, one spec per module, with their proofs in `proofs/<Namespace>/`.
+`formal.properties.json` holds the properties not moved yet, about functions in
+`rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in `proofs/`. Read
+both before you write a property, and do not restate one.
 
 Everything else in the workspace is unproved.
 
@@ -64,8 +64,8 @@ Pure, total, no I/O — in order of value:
 3. **`rust/formal-lean/src/run.rs::parse_output`** — pure and load-bearing: a `sorry` is a
    *warning* to Lean and a failure here. "Success implies no promoted sorry", "errors
    precede promoted sorries".
-4. **`rust/formal-core/src/hints.rs`** — order is the semantics; a general rule above a
-   specific one swallows it. "The first matching rule wins."
+4. **`rust/formal-core/src/hints.rs`** — done differently: `spec/Hints.lean` holds its
+   properties and `proofs/Hints/` their proofs. Not a target here.
 
 Not targets: `run_command` and anything else touching processes, threads, clocks or the
 filesystem; the sandbox; the server wiring. Not pure, not provable, not the point.
@@ -78,9 +78,9 @@ filesystem; the sandbox; the server wiring. Not pure, not provable, not the poin
 - **`function_code` must be the current source, copied exactly.** If it drifts the
   property comes back `stale` and is never proved. Copy from the working tree.
 - Append to `formal.properties.json` (`version: 1` stays). Save each proof as
-  `proofs/<function>_<short>.lean`, matching the three already there. Nothing reads
-  the top level of `proofs/` — it is the committed record. `proofs/Pystr/` belongs to the
-  spec, and `formal-service/tests/spec_sessions.rs` reads it.
+  `proofs/<function>_<short>.lean`, as the other proofs there are. Nothing reads the
+  top level of `proofs/` — it is the committed record. Each `proofs/<Namespace>/` belongs
+  to its spec, and `formal-service/tests/spec_sessions.rs` reads it.
 - **Do not touch four of the judging files**: `tests/conformance/golden/responses.json`,
   `tests/fixtures/cache_keys.toml`, `tests/fixtures/hint_corpus.toml`,
   `rust/formal-core/guidance/`. The fifth, `formal.properties.json`, takes new
