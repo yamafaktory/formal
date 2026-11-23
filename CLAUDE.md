@@ -32,8 +32,8 @@ anything the cache key touches — reaching for `str::lines` or
 
 ## The files that judge changes
 
-Four things outside `rust/` decide whether a change is allowed to land. All are
-data, and none of them mention an implementation.
+Five things decide whether a change is allowed to land. All are data. Only
+`formal.properties.json` quotes the implementation.
 
 - `tests/conformance/golden/responses.json` — the HTTP surface. 35 steps, status
   codes everywhere including the refusals, bodies where formal writes them.
@@ -57,6 +57,12 @@ data, and none of them mention an implementation.
 - `rust/formal-core/guidance/` — the text formal serves. Its three topic bodies
   are pinned by digest inside `responses.json`, so an edit there moves a golden
   entry and has to be re-recorded on purpose.
+
+- `formal.properties.json` — formal's own properties. Two tests in
+  `formal-core/tests/specs.rs` fail when a property is stale, or when its
+  `function_code` does not hold the function it names. They do not check proofs. A
+  change to a function updates the property's `function_code`, and its proof in
+  `proofs/` has to pass formal again, by hand.
 
 ## Hints
 
