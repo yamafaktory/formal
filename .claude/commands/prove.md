@@ -1,13 +1,13 @@
 ---
 description: Prove properties about formal's own pure functions, using formal
-argument-hint: "[target, e.g. verifier | split_imports]"
+argument-hint: "[target, e.g. lean_text | without_comments]"
 ---
 
 Point formal at its own Rust and come back with proved properties. You are not here to
 change the Rust.
 
-Target for this run: **$ARGUMENTS** — if that is empty, take the first entry under
-"Where to aim" that has no properties yet. **One target per run.** Stop when it is done
+Target for this run: **$ARGUMENTS** — if that is empty, take the first pure function that
+no spec covers yet. **One target per run.** Stop when it is done
 rather than moving on; a long run costs more than two short ones and reviews worse.
 
 Read `README.md` §"Driving formal from an agent" and `CLAUDE.md` first. The guide served
@@ -16,13 +16,9 @@ what to aim at, and what not to break.
 
 ## What already exists
 
-formal's own properties live in two places. The Lean specs in `spec/` hold those already
-moved, one spec per module, with their proofs in `proofs/<Namespace>/`.
-`formal.properties.json` holds the properties not moved yet, about functions in
-`rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in `proofs/`. Read
-both before you write a property, and do not restate one.
-
-Everything else in the workspace is unproved.
+formal's own properties live in Lean specs: `spec/` holds one spec per module, named after
+it, with the proofs in `proofs/<Namespace>/`. Read the spec of your module before you write
+a property, and do not restate one. See `CLAUDE.md` §"Specs".
 
 ## Running it
 
@@ -42,29 +38,27 @@ It serves on `http://127.0.0.1:1337`.
 ```
 GET  /guide                      the workflow and the spec-file schema
 GET  /guide/extract              how to find pure functions and properties
-POST /session {"spec_file": "<absolute path to formal.properties.json>"}
+POST /session {"spec": "<absolute path to spec/<Module>.lean>"}
 GET  /guide/formalize            Lean 4 conventions for stating a property
 GET  /guide/tactics              read before writing a proof, not after it fails
 POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
 ```
 
-`spec_file` must be absolute — the server's working directory is not yours.
+`spec` must be absolute — the server's working directory is not yours.
 `/guide/{topic}` takes exactly `extract`, `formalize`, `tactics`.
 
 ## Where to aim
 
-Pure, total, no I/O — in order of value:
+Pure, total, no I/O. Every module below has a spec, so a new property goes into it:
 
-1. **`rust/formal-core/src/pystr.rs`** — done differently: `spec/Pystr.lean` holds its
-   properties and `proofs/Pystr/` their proofs. See `CLAUDE.md` §"Specs". Not a target here.
-2. **`rust/formal-lean/src/verifier.rs`** — `split_imports`, `build_batch`, `rebase`.
-   Batching is where a wrong answer gets attributed to the wrong proof: `rebase` maps a
-   Lean error's line back into its entry, and "a rebased line lands inside the entry it is
-   attributed to" is the claim a test samples and a proof settles.
-3. **`rust/formal-lean/src/run.rs::parse_output`** — done differently: `spec/Run.lean`
-   holds its properties and `proofs/Run/` their proofs. Not a target here.
-4. **`rust/formal-core/src/hints.rs`** — done differently: `spec/Hints.lean` holds its
-   properties and `proofs/Hints/` their proofs. Not a target here.
+- `rust/formal-core/src/pystr.rs` — `spec/Pystr.lean`
+- `rust/formal-core/src/proof_cache.rs` — `spec/ProofCache.lean`
+- `rust/formal-core/src/hints.rs` — `spec/Hints.lean`
+- `rust/formal-core/src/specs.rs` — `spec/Specs.lean`
+- `rust/formal-lean/src/run.rs` — `spec/Run.lean`
+- `rust/formal-lean/src/verifier.rs` — `spec/Verifier.lean`
+
+A pure function in a module without a spec gets a new spec, `spec/<Module>.lean`.
 
 Not targets: `run_command` and anything else touching processes, threads, clocks or the
 filesystem; the sandbox; the server wiring. Not pure, not provable, not the point.
@@ -74,25 +68,25 @@ filesystem; the sandbox; the server wiring. Not pure, not provable, not the poin
 - **Never edit the Rust to make a proof go through.** If a property will not close, the
   property is wrong or an assumption is missing. If you believe the *code* is wrong, say
   so and stop — do not fix it here.
-- **`function_code` must be the current source, copied exactly.** If it drifts the
-  property comes back `stale` and is never proved. Copy from the working tree.
-- Append to `formal.properties.json` (`version: 1` stays). Save each proof as
-  `proofs/<function>_<short>.lean`, as the other proofs there are. Nothing reads the
-  top level of `proofs/` — it is the committed record. Each `proofs/<Namespace>/` belongs
-  to its spec, and `formal-service/tests/spec_sessions.rs` reads it.
-- **Do not touch four of the judging files**: `tests/conformance/golden/responses.json`,
+- **One model per function.** Model a function once in its spec, and state every
+  property against that model. A function with plain inputs gets a `code:` line and
+  `<name>.inputs`, and a row in the `answer` table of `formal-lean/tests/spec.rs`.
+- Write each property as `def <function>_<claim> : Prop` in the spec. Save its proof as
+  `proofs/<Namespace>/<function>_<claim>.lean`, declaring
+  `theorem <Namespace>.<function>_<claim>.holds`. `formal-service/tests/spec_sessions.rs`
+  checks every one. A spec uses core Lean only.
+- **Do not touch the four judging files**: `tests/conformance/golden/responses.json`,
   `tests/fixtures/cache_keys.toml`, `tests/fixtures/hint_corpus.toml`,
-  `rust/formal-core/guidance/`. The fifth, `formal.properties.json`, takes new
-  properties. Its tests fail when a property is stale, or when its `function_code` does
-  not hold the function it names.
-- **Batch.** Every proof in one `check` request pays a single `import Mathlib` (~3.2s);
-  one request per proof pays it each time. Read `/guide/tactics` before the first attempt
-  — most first-attempt failures are already on that list.
+  `rust/formal-core/guidance/`.
+- **Each spec proof is its own Lean run,** because spec proofs are never batched. Read
+  `/guide/tactics` before the first attempt — most first-attempt failures are already on
+  that list.
 - **Turn count is the cost** (~$0.11/turn here; context re-reads dominate, not payload).
   Read a file once. Do not re-extract properties you have already written.
-- Before finishing, from `rust/`: `cargo +stable test --workspace --locked`. Nothing you
-  wrote should have touched the Rust, and this is how you find out that it did.
-- **Do not commit.** Stage the spec file and the `.lean` proofs, and hand over a commit
+- Before finishing, from `rust/`: `cargo +stable test --workspace --locked`, and the two
+  spec tests in `CLAUDE.md` §"Lean". Nothing you wrote should have touched the Rust, and
+  this is how you find out that it did.
+- **Do not commit.** Stage the spec and the `.lean` proofs, and hand over a commit
   message — the human commits.
 
 ## Report back
