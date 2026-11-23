@@ -267,7 +267,7 @@ The generated code redeclares a name that Mathlib already defines (commonly `Pat
 Rename the local model with a prefix that cannot clash — `MyPath`, `SrcOption`, `ModelString` — and update every reference to it in the theorem and proof. Do NOT try to work around it with `namespace`, `open`, or `_root_.`: the theorem should model your function's own type, not shadow a Mathlib one.'''
 
 [uses_sorry]
-error = "declaration uses 'sorry'"
+error = 'declaration uses `sorry`'
 hint = 'Replace sorry with a real proof. Try omega, simp, decide, or rfl.'
 
 [timeout]
