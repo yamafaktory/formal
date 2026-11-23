@@ -84,8 +84,9 @@ run, never from memory.
 ## Specs
 
 A Lean spec says what code must do. `spec/Pystr.lean` is the one for
-`formal_core::pystr`. Each `def <name> : Prop :=` in it is a property, and its proof
-is `proofs/Pystr/<name>.lean`, which declares `theorem Pystr.<name>.holds`.
+`formal_core::pystr`, and `spec/ProofCache.lean`, which imports it, the one for
+`formal_core::proof_cache`. Each `def <name> : Prop :=` in a spec is a property, and its
+proof is `proofs/<Namespace>/<name>.lean`, which declares `theorem <Namespace>.<name>.holds`.
 
 formal checks a spec itself: `POST /session` with `{"spec": path}`.
 `formal-core/src/lean_spec.rs` reads the spec and composes each proof after it. A
@@ -114,10 +115,11 @@ defines a `Testable` instance for `∀ x ∈ l`, and draws half of the values of
 the spec lists `<Type>.samples` for from that list. formal runs it when the session
 opens and caches each answer Lean gave. A refuted property stays work.
 
-`formal-service/tests/spec_sessions.rs` checks every proof of `spec/Pystr.lean` through
-a session, and holds the check to proofs that try to cheat. `formal-lean/tests/spec.rs`
-runs that evaluation on `spec/Pystr.lean` and compares the Rust with each answer. The
-spec uses core Lean only.
+`formal-service/tests/spec_sessions.rs` checks every proof of every spec in `spec/`
+through a session, and holds the check to proofs that try to cheat.
+`formal-lean/tests/spec.rs` runs that evaluation on each spec and compares the Rust with
+each answer. A new `code:` line needs a row in its `answer` table. The specs use core
+Lean only.
 
 ## Lean
 

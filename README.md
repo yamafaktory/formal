@@ -354,17 +354,23 @@ becomes stale, and its `function_code` needs the new indentation. A property wit
 
 ### formal's own properties
 
-formal checks itself. `formal.properties.json` in this repository is formal's own spec,
-with the proofs in `proofs/`. Two of its properties guard against collisions that really
-happened in formal's cache key: an operator spelled as a word counts only at a word
-boundary, and no field of the key can imitate the boundary between two others.
-A test fails when one of these properties is stale, so a change to the code updates them in
-the same pull request. The tests do not check the proofs, so whoever updates a property
-checks its proof through formal again.
+formal checks itself, and its own code moves from `formal.properties.json` to Lean specs.
 
-The Python string rules the cache key depends on have a spec instead: `spec/Pystr.lean`.
-Their proofs are in `proofs/Pystr/`. The test `formal-service/tests/spec_sessions.rs` checks
-each proof, and `formal-lean/tests/spec.rs` compares the Rust with the spec.
+- `spec/Pystr.lean` specifies the Python string rules the cache key depends on.
+- `spec/ProofCache.lean` imports it and specifies the cache key. Two of its properties
+  guard against collisions that really happened: an operator spelled as a word counts only
+  at a word boundary, and no field of the key can imitate the boundary between two others.
+  Its word boundary and its lowercasing are ASCII. The Rust follows Unicode, so the spec
+  and the code agree on ASCII text only, and its compare inputs stay ASCII.
+
+Their proofs are in `proofs/<Namespace>/`. The test `formal-service/tests/spec_sessions.rs`
+checks every proof of every spec, and `formal-lean/tests/spec.rs` compares the Rust with
+each spec.
+
+`formal.properties.json` holds the properties not moved yet, with their proofs in
+`proofs/`. A test fails when one of them is stale, so a change to the code updates them in
+the same pull request. The tests do not check those proofs, so whoever updates a property
+checks its proof through formal again.
 
 ## What a result means
 

@@ -16,10 +16,11 @@ what to aim at, and what not to break.
 
 ## What already exists
 
-`formal.properties.json` holds formal's own properties, about functions in
-`rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in `proofs/`. Two of
-them were written after formal found a real cache-key collision. Read the file before you
-write a property, and do not restate one.
+formal's own properties live in two places. The Lean specs in `spec/` hold those already
+moved: `spec/Pystr.lean` and `spec/ProofCache.lean`, with their proofs in
+`proofs/<Namespace>/`. `formal.properties.json` holds the properties not moved yet, about
+functions in `rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in
+`proofs/`. Read both before you write a property, and do not restate one.
 
 Everything else in the workspace is unproved.
 

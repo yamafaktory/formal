@@ -6,9 +6,11 @@ def alphabet : List Char :=
 
 def Char.samples : List Char := alphabet
 
-def words : Nat → List (List Char)
+def wordsOver (letters : List Char) : Nat → List (List Char)
   | 0 => [[]]
-  | n + 1 => [] :: alphabet.flatMap fun c => (words n).map (c :: ·)
+  | n + 1 => [] :: letters.flatMap fun c => (wordsOver letters n).map (c :: ·)
+
+def words (n : Nat) : List (List Char) := wordsOver alphabet n
 
 /-- code: rust/formal-core/src/pystr.rs is_space -/
 def isSpace (c : Char) : Bool :=

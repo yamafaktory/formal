@@ -54,12 +54,8 @@ def normaliseFormal (s : List Char) : List Char :=
 
 def operatorAlphabet : List Char := ['<', '-', '>', '=', '/', '\\', '⟶', 'i', 'n', 'a', ' ']
 
-def wordsOver (alphabet : List Char) : Nat → List (List Char)
-  | 0 => [[]]
-  | n + 1 => [] :: alphabet.flatMap fun c => (wordsOver alphabet n).map (c :: ·)
-
 def normaliseFormal.inputs : List (List Char) :=
-  wordsOver operatorAlphabet 4 ++
+  Pystr.wordsOver operatorAlphabet 4 ++
     ["forall x, p x", "∀x", "forallx", "exists y", "not p", "a in b", "a_in_b", "x->y",
       "p <-> q", "p /\\ q", "p \\/ q", "a <> b", "a <= b", "a >= b", "a ⟶ b", "1in2",
       "(not)", "notin"].map String.toList
@@ -73,17 +69,17 @@ def framed (parts : List (List Char)) : List Char :=
 def normaliseKind (kind : List Char) : List Char :=
   (Pystr.strip kind).map Char.toLower
 
-def length_non_increasing : Prop :=
+def normalise_code_length_non_increasing : Prop :=
   ∀ s, (normaliseCode s).length ≤ s.length
 
-def shifting_a_boundary_changes_the_payload : Prop :=
+def framed_shifting_a_boundary_changes_the_payload : Prop :=
   framed ["X\na".toList, ['b'], ['c']] ≠ framed [['X'], "a\nb".toList, ['c']]
 
-def word_operators_respect_boundaries : Prop :=
+def normalise_formal_word_operators_respect_boundaries : Prop :=
   normaliseFormal "a in b".toList = normaliseFormal "a∈b".toList ∧
     normaliseFormal "ainb".toList ≠ normaliseFormal "a∈b".toList
 
-def a_kind_differing_only_in_case_or_space_is_the_same_key : Prop :=
+def cache_key_a_kind_differing_only_in_case_or_space_is_the_same_key : Prop :=
   normaliseKind "  Invariant ".toList = normaliseKind "invariant".toList
 
 end ProofCache

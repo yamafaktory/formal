@@ -57,7 +57,7 @@ theorem splitlines_go_length (line s : List Char) :
     · simp_all
       omega
 
-theorem length_non_increasing.holds : length_non_increasing := by
+theorem normalise_code_length_non_increasing.holds : normalise_code_length_non_increasing := by
   intro s
   have h := intercalate_map_rstrip_le (Pystr.splitlines (Pystr.strip s))
   have g := splitlines_go_length [] (Pystr.strip s)

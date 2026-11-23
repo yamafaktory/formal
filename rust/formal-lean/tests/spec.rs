@@ -23,8 +23,6 @@ use serde_json::{
     json,
 };
 
-const SPECS: [&str; 2] = ["Pystr", "ProofCache"];
-
 fn runner() -> Option<Runner> {
     let runner = Runner::from_env();
     let project = &runner.paths().lean_project_dir;
@@ -37,6 +35,21 @@ fn spec_path(name: &str) -> PathBuf {
 
 fn spec(name: &str) -> LeanSpec {
     LeanSpec::load(&spec_path(name).to_string_lossy()).expect("the spec loads")
+}
+
+fn specs() -> Vec<String> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("the specs are listable")
+        .map(|entry| entry.expect("the entry is readable").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "lean")
+        })
+        .filter_map(|path| Some(path.file_stem()?.to_string_lossy().to_string()))
+        .collect();
+    names.sort();
+    names
 }
 
 fn searched(runner: &Runner, spec: &LeanSpec) -> Vec<Answer> {
@@ -76,19 +89,12 @@ fn answer(code: &str, input: &Value) -> Value {
 
 #[test]
 fn the_specs_compare_these_functions() {
-    let compared: Vec<(String, String)> = SPECS
+    let compared: Vec<(String, String)> = specs()
         .iter()
         .flat_map(|name| spec(name).compared)
         .map(|compared| (compared.function, compared.code))
         .collect();
     let expected = [
-        ("Pystr.isSpace", "rust/formal-core/src/pystr.rs is_space"),
-        ("Pystr.rstrip", "rust/formal-core/src/pystr.rs rstrip"),
-        ("Pystr.strip", "rust/formal-core/src/pystr.rs strip"),
-        (
-            "Pystr.splitlines",
-            "rust/formal-core/src/pystr.rs splitlines",
-        ),
         (
             "ProofCache.normaliseCode",
             "rust/formal-core/src/proof_cache.rs normalise_code",
@@ -97,7 +103,15 @@ fn the_specs_compare_these_functions() {
             "ProofCache.normaliseFormal",
             "rust/formal-core/src/proof_cache.rs normalise_formal",
         ),
+        ("Pystr.isSpace", "rust/formal-core/src/pystr.rs is_space"),
+        ("Pystr.rstrip", "rust/formal-core/src/pystr.rs rstrip"),
+        ("Pystr.strip", "rust/formal-core/src/pystr.rs strip"),
+        (
+            "Pystr.splitlines",
+            "rust/formal-core/src/pystr.rs splitlines",
+        ),
     ];
+
     let expected: Vec<(String, String)> = expected
         .iter()
         .map(|(function, code)| ((*function).to_string(), (*code).to_string()))
@@ -112,8 +126,8 @@ fn the_rust_answers_what_each_spec_answers() {
     };
     let mut counts = Vec::new();
     let mut differences = Vec::new();
-    for name in SPECS {
-        let spec = spec(name);
+    for name in specs() {
+        let spec = spec(&name);
         let functions: Vec<&str> = spec
             .compared
             .iter()
@@ -147,12 +161,12 @@ fn the_rust_answers_what_each_spec_answers() {
     assert_eq!(
         counts,
         [
+            ("ProofCache.normaliseCode", 54_241),
+            ("ProofCache.normaliseFormal", 16_123),
             ("Pystr.isSpace", 1_112_064),
             ("Pystr.rstrip", 54_241),
             ("Pystr.strip", 54_241),
             ("Pystr.splitlines", 54_241),
-            ("ProofCache.normaliseCode", 54_241),
-            ("ProofCache.normaliseFormal", 16_123),
         ]
     );
     assert!(differences.is_empty(), "{}", differences.join("\n"));
@@ -163,8 +177,8 @@ fn lean_answers_the_search_of_every_property_of_every_spec_and_refutes_none() {
     let Some(runner) = runner() else {
         return;
     };
-    for name in SPECS {
-        let spec = spec(name);
+    for name in specs() {
+        let spec = spec(&name);
         let searched = searched(&runner, &spec);
         assert_eq!(searched.len(), spec.properties.len(), "{name}");
         assert!(
