@@ -80,6 +80,21 @@ pub fn normalise_formal(formal: &str) -> String {
     formal.chars().filter(|&c| !pystr::is_space(c)).collect()
 }
 
+/// Whether `c` belongs to a word, as the word boundary of the operator words counts it.
+#[must_use]
+pub fn is_word_char(c: char) -> bool {
+    regex_syntax::is_word_character(c)
+}
+
+/// The kind as the cache key holds it: stripped, and lowercased as ASCII.
+///
+/// Every kind the guide names is ASCII, and Unicode lowercasing depends on
+/// context and can change the length.
+#[must_use]
+pub fn normalise_kind(kind: &str) -> String {
+    pystr::strip(kind).to_ascii_lowercase()
+}
+
 /// Indentation is meaning in Python, so only trailing and surrounding space goes.
 #[must_use]
 pub fn normalise_code(function_code: &str) -> String {
@@ -129,7 +144,7 @@ fn framed(parts: &[&str]) -> String {
 pub fn cache_key(function_code: &str, kind: &str, formal: &str) -> String {
     let payload = framed(&[
         &normalise_code(function_code),
-        &pystr::strip(kind).to_lowercase(),
+        &normalise_kind(kind),
         &normalise_formal(formal),
     ]);
     sha256_hex(&payload)
@@ -232,11 +247,21 @@ mod tests {
     }
 
     #[test]
-    fn the_kind_is_lowercased_with_unicode_rules() {
-        assert_eq!(
+    fn the_kind_is_lowercased_as_ascii() {
+        assert_eq!(normalise_kind("  INVARIANTÉ "), "invariantÉ");
+        assert_ne!(
             cache_key("f", "INVARIANTÉ", "p"),
             cache_key("f", "invarianté", "p")
         );
+    }
+
+    #[test]
+    fn a_word_char_is_what_the_word_boundary_counts() {
+        assert!(is_word_char('α'));
+        assert!(is_word_char('_'));
+        assert!(is_word_char('\u{301}'));
+        assert!(!is_word_char('∈'));
+        assert!(!is_word_char('₁'));
     }
 
     #[test]
