@@ -576,3 +576,102 @@ fn an_invariant_a_step_breaks_from_an_unreachable_state_comes_back_with_that_sta
         ]
     );
 }
+
+fn failing(runner: &Runner, name: &str, spec: &str, proofs: &[(&str, &str)]) -> Vec<String> {
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join(format!("{name}.lean"));
+    fs::write(&path, spec).expect("written");
+    let proofs: Vec<(String, String)> = proofs
+        .iter()
+        .map(|(id, proof)| (format!("{name}.{id}"), (*proof).to_string()))
+        .collect();
+    let checked = check(runner, &dir, load(&path), &proofs);
+    assert_eq!(checked.outcomes.len(), proofs.len());
+    checked
+        .outcomes
+        .iter()
+        .filter(|outcome| !outcome.verified())
+        .map(|outcome| outcome.id.clone())
+        .collect()
+}
+
+#[test]
+fn a_spec_proves_safety_and_liveness_with_formal_s_temporal_library() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let live = "import Formal.Temporal\n\nnamespace Live\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef count_stays_small : Prop := Temporal.always init step (fun s => s.count ≤ 2)\n\ndef a_fair_reset_empties_the_count : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.reset) (fun s => 0 < s.count) (fun s => s.count = 0)\n\ndef a_reset_empties_the_count_without_fairness : Prop :=\n  Temporal.leadsTo init step (fun _ => True) (fun s => 0 < s.count) (fun s => s.count = 0)\n\ndef unfairness_breaks_it : Prop := ¬ a_reset_empties_the_count_without_fairness\n\nend Live\n";
+    let always = "namespace Live\n\ntheorem count_stays_small.holds : count_stays_small :=\n  Temporal.always_of_inductive (by simp [init]) (by\n    intro s a h\n    cases a <;> simp [step] <;> omega)\n\nend Live\n";
+    let leads = "namespace Live\n\ntheorem a_fair_reset_empties_the_count.holds : a_fair_reset_empties_the_count :=\n  Temporal.leadsTo_of_fair_step Action.reset (fun _ fair => fair) ⟨_, Temporal.fair_constant Action.reset⟩\n    Temporal.always_true\n    (by\n      intro s b _ _ _\n      cases b <;> simp [step] <;> omega)\n    (by\n      intro s _ _ _\n      simp [step])\n\nend Live\n";
+    let broken = "namespace Live\n\ntheorem unfairness_breaks_it.holds : unfairness_breaks_it := by\n  unfold unfairness_breaks_it a_reset_empties_the_count_without_fairness Temporal.leadsTo\n  intro ⟨_, leads⟩\n  have positive : ∀ m, 0 < (Temporal.states init step (fun _ => Action.inc) (m + 1)).count := by\n    intro m\n    simp only [Temporal.states, step]\n    omega\n  obtain ⟨m, hm, empty⟩ := leads (fun _ => Action.inc) trivial 1 (by simp [Temporal.states, step, init])\n  have := positive (m - 1)\n  rw [show m - 1 + 1 = m by omega] at this\n  omega\n\nend Live\n";
+    let unfair = leads.replace(
+        "a_fair_reset_empties_the_count",
+        "a_reset_empties_the_count_without_fairness",
+    );
+    assert_eq!(
+        failing(
+            &runner,
+            "Live",
+            live,
+            &[
+                ("count_stays_small", always),
+                ("a_fair_reset_empties_the_count", leads),
+                ("a_reset_empties_the_count_without_fairness", &unfair),
+                ("unfairness_breaks_it", broken),
+            ],
+        ),
+        ["Live.a_reset_empties_the_count_without_fairness"]
+    );
+}
+
+#[test]
+fn a_decreasing_measure_proves_that_a_fair_drain_empties_the_tank() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let drain = "import Formal.Temporal\n\nnamespace Drain\n\ninductive Action where\n  | drain\n  | wait\n\nstructure State where\n  level : Nat\n\ndef init : State := ⟨3⟩\n\ndef step (s : State) : Action → State\n  | .drain => ⟨s.level - 1⟩\n  | .wait => s\n\ndef a_full_tank_empties : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.drain) (fun s => 0 < s.level) (fun s => s.level = 0)\n\ndef the_tank_empties : Prop :=\n  Temporal.eventually init step (Temporal.fair Action.drain) (fun s => s.level = 0)\n\ndef draining_while_waiting_empties_it : Prop :=\n  Temporal.leadsTo init step (fun run => Temporal.fair Action.drain run ∧ Temporal.fair Action.wait run)\n    (fun s => 0 < s.level) (fun s => s.level = 0)\n\nend Drain\n";
+    let leads = "namespace Drain\n\ntheorem a_full_tank_empties.holds : a_full_tank_empties :=\n  Temporal.leadsTo_of_measure Action.drain (fun _ fair => fair) ⟨_, Temporal.fair_constant Action.drain⟩\n    Temporal.always_true\n    (fun s => s.level)\n    (by\n      intro s b _ _ _\n      cases b <;> simp [step] <;> omega)\n    (by\n      intro s _ _ _\n      simp [step]\n      omega)\n\nend Drain\n";
+    let eventually = "namespace Drain\n\ntheorem the_tank_empties.holds : the_tank_empties :=\n  Temporal.eventually_of_leadsTo (p := fun (s : State) => 0 < s.level) (by simp [init]) a_full_tank_empties.holds\n\nend Drain\n";
+    let both = format!("{leads}\n{eventually}");
+    let two = leads
+        .replace("a_full_tank_empties", "draining_while_waiting_empties_it")
+        .replace(
+            "(fun _ fair => fair) ⟨_, Temporal.fair_constant Action.drain⟩",
+            "(fun _ fair => fair.1)\n    ⟨_, Temporal.fair_cycle Action.drain [Action.wait] Action.drain (by simp),\n      Temporal.fair_cycle Action.drain [Action.wait] Action.wait (by simp)⟩",
+        );
+    assert_eq!(
+        failing(
+            &runner,
+            "Drain",
+            drain,
+            &[
+                ("a_full_tank_empties", leads),
+                ("the_tank_empties", &both),
+                ("draining_while_waiting_empties_it", &two),
+            ],
+        ),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn no_temporal_property_holds_for_want_of_a_run() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let empty = "import Formal.Temporal\n\nnamespace Empty\n\ninductive Action where\n\ndef init_breaks_it : Prop :=\n  Temporal.always (1 : Nat) (fun n (_ : Action) => n) (fun n => n = 0)\n\ndef seven_comes_with_no_run : Prop :=\n  Temporal.eventually (1 : Nat) (fun n (_ : Bool) => n) (fun _ => False) (fun n => n = 7)\n\nend Empty\n";
+    let no_action = "namespace Empty\n\ntheorem init_breaks_it.holds : init_breaks_it := fun run _ => nomatch run 0\n\nend Empty\n";
+    let no_run = "namespace Empty\n\ntheorem seven_comes_with_no_run.holds : seven_comes_with_no_run :=\n  ⟨by simp, fun _ impossible => impossible.elim⟩\n\nend Empty\n";
+    assert_eq!(
+        failing(
+            &runner,
+            "Empty",
+            empty,
+            &[
+                ("init_breaks_it", no_action),
+                ("seven_comes_with_no_run", no_run),
+            ],
+        ),
+        ["Empty.init_breaks_it", "Empty.seven_comes_with_no_run"]
+    );
+}

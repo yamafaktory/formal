@@ -181,6 +181,16 @@ pub enum SpecError {
     )]
     NoReplayActions(PathBuf),
 
+    /// A Lean spec imports a library formal does not ship.
+    #[error("{spec} imports `{import}`, which formal does not ship. formal ships {known}")]
+    NoSuchLibrary {
+        /// The spec that imports it.
+        spec: PathBuf,
+        /// The import, as the spec writes it.
+        import: String,
+        /// The libraries formal ships, as a spec imports them.
+        known: String,
+    },
     /// A Lean spec imports a spec that is not there.
     #[error("{spec} imports `{import}`, and there is no spec at {path}")]
     NoSuchImport {
