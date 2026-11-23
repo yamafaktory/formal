@@ -367,6 +367,8 @@ formal checks itself, and its own code moves from `formal.properties.json` to Le
   rule that claims the error and answers wins.
 - `spec/Run.lean` specifies how formal reads Lean's verdict: a `sorry` is a warning to
   Lean and a failure here, and the first error Lean reported stays first.
+- `spec/Specs.lean` imports `spec/ProofCache.lean` and specifies how formal reads a spec
+  file: when a property is stale, when two ids clash, and which fields are missing.
 
 Their proofs are in `proofs/<Namespace>/`. The test `formal-service/tests/spec_sessions.rs`
 checks every proof of every spec, and `formal-lean/tests/spec.rs` compares the code in

@@ -101,34 +101,6 @@
       "function_code": "fn rebase(error: &LeanError, entry: &BatchEntry, index: usize) -> LeanError {\n    let unqualified = LeanError {\n        data: error.data.replace(&format!(\"`Batch{index}.\"), \"`\"),\n        ..error.clone()\n    };\n    let Some(line) = error.position().0 else {\n        return unqualified;\n    };\n    let Some(offset) = line.checked_sub(entry.first_line) else {\n        return unqualified;\n    };\n    entry.source_lines.get(offset as usize).map_or_else(\n        || unqualified.clone(),\n        |source| unqualified.rebased_to(*source),\n    )\n}"
     },
     {
-      "id": "is_stale/trailing_space_does_not_break_the_match",
-      "function": "is_stale",
-      "kind": "invariant",
-      "formal": "describes (with_trailing_space) (recorded) = true",
-      "description": "trailing whitespace in the source does not make a property stale — normalise_code rstrips every line before the comparison",
-      "assumptions": [
-        "text modelled as List Char, one list per line where lines matter",
-        "splitlines modelled as splitting on '\\n', which is all the witness contains",
-        "stated on a witness rather than universally, as the collision properties are"
-      ],
-      "source_file": "rust/formal-core/src/specs.rs",
-      "function_code": "/// Whether the source this property was written against still says the same thing.\n///\n/// Compared as normalised text rather than parsed, so it holds for every language\n/// formal accepts. A spec with no recorded source cannot go stale — there is\n/// nothing to compare it against.\nfn is_stale(entry: &Object, root: &Path) -> bool {\n    let source_file = field(entry, \"source_file\");\n    let function_code = field(entry, \"function_code\");\n    if source_file.is_empty() || function_code.is_empty() {\n        return false;\n    }\n    let Ok(current) = fs::read_to_string(root.join(source_file)) else {\n        return true;\n    };\n    !normalise_code(&current).contains(&normalise_code(&function_code))\n}"
-    },
-    {
-      "id": "is_stale/reindenting_does_break_the_match",
-      "function": "is_stale",
-      "kind": "counterexample",
-      "formal": "describes (reindented) (recorded) = false",
-      "description": "reindenting a function DOES make its property stale — normalise_code preserves leading whitespace because indentation is meaning, so a function moved one level deeper no longer matches what was recorded",
-      "assumptions": [
-        "text modelled as List Char, one list per line where lines matter",
-        "splitlines modelled as splitting on '\\n', which is all the witness contains",
-        "stated on the witness that the README claimed would still match"
-      ],
-      "source_file": "rust/formal-core/src/specs.rs",
-      "function_code": "/// Whether the source this property was written against still says the same thing.\n///\n/// Compared as normalised text rather than parsed, so it holds for every language\n/// formal accepts. A spec with no recorded source cannot go stale — there is\n/// nothing to compare it against.\nfn is_stale(entry: &Object, root: &Path) -> bool {\n    let source_file = field(entry, \"source_file\");\n    let function_code = field(entry, \"function_code\");\n    if source_file.is_empty() || function_code.is_empty() {\n        return false;\n    }\n    let Ok(current) = fs::read_to_string(root.join(source_file)) else {\n        return true;\n    };\n    !normalise_code(&current).contains(&normalise_code(&function_code))\n}"
-    },
-    {
       "id": "build_batch/every_span_starts_after_where_it_was_laid_out",
       "function": "build_batch",
       "kind": "bound",
@@ -252,30 +224,6 @@
       ],
       "source_file": "rust/formal-lean/src/verifier.rs",
       "function_code": "pub fn suggested_tactic(output: &str) -> Option<String> {\n    for line in output.lines() {\n        let data = serde_json::from_str::<serde_json::Value>(line)\n            .ok()\n            .and_then(|parsed| {\n                parsed\n                    .get(\"data\")\n                    .and_then(|d| d.as_str())\n                    .map(ToString::to_string)\n            })\n            .unwrap_or_else(|| line.to_string());\n        let Some(found) = suggestion_pattern().captures(&data) else {\n            continue;\n        };\n        // `trim_matches` takes a set of characters, not a suffix — trimming \"\\n\"\n        // that way would eat a trailing n from `exact Nat.le_refl n`.\n        let tactic = pystr::splitlines(&found[1])\n            .first()\n            .map(|first| first.trim().trim_matches('\"').trim().to_string())\n            .unwrap_or_default();\n        if !tactic.is_empty() {\n            return Some(tactic);\n        }\n    }\n    None\n}"
-    },
-    {
-      "id": "validate/the_duplicate_check_is_exactly_nodup",
-      "function": "validate",
-      "kind": "identity",
-      "formal": "forall ids, duplicates ids = [] <-> nodup ids",
-      "description": "the count-based duplicate check is exactly distinctness — an id that slipped through would make two properties indistinguishable to every later lookup",
-      "assumptions": [
-        "ids modelled as the list validate collects, in order"
-      ],
-      "source_file": "rust/formal-core/src/specs.rs",
-      "function_code": "/// The entries as objects, which is also what says they are usable.\nfn validate<'a>(entries: &'a [Value], path: &Path) -> Result<Vec<&'a Object>, SpecError> {\n    let mut objects = Vec::with_capacity(entries.len());\n    for (index, entry) in entries.iter().enumerate() {\n        let Some(entry) = entry.as_object() else {\n            return Err(SpecError::NotAnObject {\n                path: path.to_path_buf(),\n                index,\n            });\n        };\n        let missing: Vec<String> = REQUIRED\n            .iter()\n            .filter(|name| field(entry, name).trim().is_empty())\n            .map(|name| (*name).to_string())\n            .collect();\n        if !missing.is_empty() {\n            return Err(SpecError::MissingFields {\n                path: path.to_path_buf(),\n                index,\n                missing,\n            });\n        }\n        objects.push(entry);\n    }\n\n    let ids: Vec<String> = objects.iter().map(|entry| field(entry, \"id\")).collect();\n    let mut duplicates: Vec<String> = ids\n        .iter()\n        .filter(|id| ids.iter().filter(|other| other == id).count() > 1)\n        .cloned()\n        .collect();\n    duplicates.sort();\n    duplicates.dedup();\n    if !duplicates.is_empty() {\n        return Err(SpecError::DuplicateIds {\n            path: path.to_path_buf(),\n            ids: duplicates,\n        });\n    }\n    Ok(objects)\n}"
-    },
-    {
-      "id": "validate/the_refusal_names_every_missing_field",
-      "function": "validate",
-      "kind": "identity",
-      "formal": "forall required present r, r in missing required present <-> (r in required and r not in present)",
-      "description": "an entry short a required field is refused rather than half-read, and the refusal names every field that was missing rather than the first",
-      "assumptions": [
-        "an entry modelled by the field names it carries"
-      ],
-      "source_file": "rust/formal-core/src/specs.rs",
-      "function_code": "/// The entries as objects, which is also what says they are usable.\nfn validate<'a>(entries: &'a [Value], path: &Path) -> Result<Vec<&'a Object>, SpecError> {\n    let mut objects = Vec::with_capacity(entries.len());\n    for (index, entry) in entries.iter().enumerate() {\n        let Some(entry) = entry.as_object() else {\n            return Err(SpecError::NotAnObject {\n                path: path.to_path_buf(),\n                index,\n            });\n        };\n        let missing: Vec<String> = REQUIRED\n            .iter()\n            .filter(|name| field(entry, name).trim().is_empty())\n            .map(|name| (*name).to_string())\n            .collect();\n        if !missing.is_empty() {\n            return Err(SpecError::MissingFields {\n                path: path.to_path_buf(),\n                index,\n                missing,\n            });\n        }\n        objects.push(entry);\n    }\n\n    let ids: Vec<String> = objects.iter().map(|entry| field(entry, \"id\")).collect();\n    let mut duplicates: Vec<String> = ids\n        .iter()\n        .filter(|id| ids.iter().filter(|other| other == id).count() > 1)\n        .cloned()\n        .collect();\n    duplicates.sort();\n    duplicates.dedup();\n    if !duplicates.is_empty() {\n        return Err(SpecError::DuplicateIds {\n            path: path.to_path_buf(),\n            ids: duplicates,\n        });\n    }\n    Ok(objects)\n}"
     }
   ]
 }
