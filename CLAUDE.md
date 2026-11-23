@@ -119,7 +119,9 @@ once. The actions are the constructors of the action type, or `<Action>.samples`
 runs it when the session opens. A violation becomes a refutation with a shortest trace,
 an invariant that held becomes a bound, and each answer Lean gave is cached. The walk stops
 after 100,000 states and reports the depth it finished, and Lean proves a list of
-constructors complete before the walk uses it.
+constructors complete before the walk uses it. A `code:` line on `step` makes `<Namespace>.run` a
+compared function: its inputs are one trace per reached state, from the same walk, and
+the evaluation derives `Lean.ToJson` for the spec's types.
 
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file

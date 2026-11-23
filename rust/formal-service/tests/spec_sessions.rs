@@ -446,3 +446,87 @@ fn the_exploration_answers_every_shape_of_machine_it_reads() {
     assert_eq!(id, "Wide.short.always");
     assert!(*depth < 10 && *states > 100_000, "{bounded:?}");
 }
+
+#[test]
+fn the_code_of_a_machine_replays_one_trace_per_state_and_a_difference_names_it() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Bounded.lean");
+    fs::write(
+        &path,
+        BOUNDED.replace(
+            "def step (s : State) : Action → State",
+            "/-- code: src/bounded.rs step -/\ndef step (s : State) : Action → State",
+        ),
+    )
+    .expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, load(&path))
+        .expect("Lean evaluates the traces");
+    let session = session.lock().expect("a fresh session");
+    let [replay] = session.evaluated.as_slice() else {
+        panic!("one compared function, got {:?}", session.evaluated);
+    };
+    assert_eq!(replay.function, "Bounded.run");
+    assert_eq!(replay.code, "src/bounded.rs step");
+    assert_eq!(
+        replay.inputs,
+        [
+            serde_json::json!([]),
+            serde_json::json!(["inc"]),
+            serde_json::json!(["inc", "inc"])
+        ]
+    );
+    let states = |counts: &[u64]| -> Vec<serde_json::Value> {
+        counts
+            .iter()
+            .map(|count| serde_json::json!({ "count": count }))
+            .collect()
+    };
+    let matched = session
+        .compare(&[("Bounded.run".to_string(), states(&[0, 1, 2]))])
+        .expect("the machine is compared");
+    assert_eq!(matched.matched, ["Bounded.run"]);
+    let differed = session
+        .compare(&[("Bounded.run".to_string(), states(&[0, 1, 3]))])
+        .expect("the machine is compared");
+    let [difference] = differed.differed.as_slice() else {
+        panic!("one difference, got {:?}", differed.differed);
+    };
+    assert_eq!(difference.input, serde_json::json!(["inc", "inc"]));
+    assert_eq!(difference.spec, serde_json::json!({ "count": 2 }));
+    assert_eq!(difference.code, serde_json::json!({ "count": 3 }));
+}
+
+#[test]
+fn a_replayed_machine_with_text_in_its_state_and_an_unrelated_type_still_opens() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Typed.lean");
+    fs::write(
+        &path,
+        "namespace Typed\n\ninductive Action where\n  | a\n  | clear\n\nstructure State where\n  text : List Char\n\nstructure Config where\n  pick : Nat → Nat\n\ndef init : State := ⟨[]⟩\n\n/-- code: src/typed.rs step -/\ndef step (s : State) : Action → State\n  | .a => ⟨if s.text.length < 2 then 'a' :: s.text else s.text⟩\n  | .clear => ⟨[]⟩\n\ndef short : State → Prop := fun s => s.text.length ≤ 2\n\nend Typed\n",
+    )
+    .expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, load(&path))
+        .expect("the unrelated type does not refuse the session");
+    let session = session.lock().expect("a fresh session");
+    let [replay] = session.evaluated.as_slice() else {
+        panic!("one compared function, got {:?}", session.evaluated);
+    };
+    assert_eq!(
+        replay.answers,
+        [
+            serde_json::json!({ "text": "" }),
+            serde_json::json!({ "text": "a" }),
+            serde_json::json!({ "text": "aa" })
+        ]
+    );
+}

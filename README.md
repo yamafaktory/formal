@@ -323,7 +323,9 @@ def count_at_most_two : State → Prop := fun s => s.count ≤ 2
 
 In a spec with the namespace `Bounded`, formal registers `Bounded.count_at_most_two.always`,
 which states `∀ actions, count_at_most_two (run actions)`. Its proof declares
-`theorem Bounded.count_at_most_two.always.holds : Bounded.count_at_most_two.always`.
+`theorem Bounded.count_at_most_two.always.holds : Bounded.count_at_most_two.always`. The
+search derives generators for the spec's types, so a broken invariant comes back with the
+list of actions that breaks it.
 
 When the actions are known, formal also explores every reachable state up to a depth,
 10 unless the spec defines `def depth : Nat`. The actions are the constructors of the
@@ -338,8 +340,25 @@ that held comes back under `bounded`, with the depth and the number of states:
 The check stops after 100,000 states, and `bounded` then gives the last depth it explored
 in full. Lean proves the list of constructors complete before the check uses it, so a
 missed action can only skip the check, never claim a bound. An invariant Lean cannot
-decide is left out of the check. Only a proof settles it. The search derives generators for
-the spec's types, so a broken invariant comes back with the list of actions that breaks it.
+decide is left out of the check. Only a proof settles it.
+
+A `code:` line on `step` holds the code to the machine. The session lists `Bounded.run`
+under `compare`, with one trace of actions per state the bounded walk reached. The caller
+replays each trace on its code and sends the last state to `POST /session/{id}/compare`,
+and formal names the first trace where the code's state differs from the spec's. Actions
+and states cross in Lean's derived JSON:
+
+```json
+{
+  "inputs": [[], ["inc"], ["inc", "inc"]],
+  "answers": {"Bounded.run": [{"count": 0}, {"count": 1}, {"count": 2}]}
+}
+```
+
+A structure crosses as an object of its fields, and text as a string. A constructor with
+no argument crosses as its name, one with named arguments as `{"add": {"n": 1}}`, one with
+one anonymous argument as `{"one": 1}`, and one with several as `{"two": [2, false]}`.
+`Option.none` crosses as `null`. A trace of `Char` actions crosses as a string.
 
 When the session opens, formal also searches each property for a counterexample with
 Plausible. A false property comes back under `refuted`, with the value of each variable

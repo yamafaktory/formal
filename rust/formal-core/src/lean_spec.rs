@@ -61,10 +61,11 @@ const EXPLORATION_HELPERS: &str = "namespace FormalBounded
 
 def complete {α : Type} (actions : List α) (_ : ∀ a, a ∈ actions) : List α := actions
 
-def explore {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
-    (holds : σ → Bool) (depth budget : Nat) : Option (List α) × Nat × Nat := Id.run do
-  if !holds init then return (some [], 1, 0)
+def walk {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
+    (holds : σ → Bool) (depth budget : Nat) : Option (List α) × Array (List α) × Nat := Id.run do
+  if !holds init then return (some [], #[[]], 0)
   let mut seen : Std.HashSet σ := (∅ : Std.HashSet σ).insert init
+  let mut found : Array (List α) := #[[]]
   let mut frontier : Array (σ × List α) := #[(init, [])]
   let mut completed := 0
   for _ in [0:depth] do
@@ -74,12 +75,22 @@ def explore {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α 
         let t := step s a
         if !seen.contains t then
           seen := seen.insert t
-          if !holds t then return (some (trace ++ [a]), seen.size, completed)
-          if seen.size > budget then return (none, seen.size, completed)
+          found := found.push (trace ++ [a])
+          if !holds t then return (some (trace ++ [a]), found, completed)
+          if seen.size > budget then return (none, found, completed)
           next := next.push (t, trace ++ [a])
     frontier := next
     completed := completed + 1
-  return (none, seen.size, completed)
+  return (none, found, completed)
+
+def explore {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
+    (holds : σ → Bool) (depth budget : Nat) : Option (List α) × Nat × Nat :=
+  let (violation, found, completed) := walk init step actions holds depth budget
+  (violation, found.size, completed)
+
+def traces {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
+    (depth budget : Nat) : List (List α) :=
+  (walk init step actions (fun _ => true) depth budget).2.1.toList
 
 def report {α : Type} [Repr α] (mark id : String) : Option (List α) × Nat × Nat → String
   | (some trace, _, _) => s!\"{mark} {id} falsified {reprStr trace}\"
@@ -574,6 +585,7 @@ fn compared_functions(
     text: &str,
     namespace: &str,
     defined: &HashMap<&str, bool>,
+    machine: Option<&Machine>,
 ) -> Result<Vec<Compared>, SpecError> {
     let mut compared = Vec::new();
     for found in doc_comment_pattern().captures_iter(text) {
@@ -595,6 +607,16 @@ fn compared_functions(
                 });
             }
         };
+        if let Some(machine) = machine.filter(|_| name == "step") {
+            if machine.actions.is_none() {
+                return Err(SpecError::NoReplayActions(path.to_path_buf()));
+            }
+            compared.push(Compared {
+                function: format!("{namespace}.run"),
+                code: code_line[1].to_string(),
+            });
+            continue;
+        }
         let function = format!("{namespace}.{name}");
         if defined.get(format!("{name}.inputs").as_str()) != Some(&true) {
             return Err(SpecError::NoInputs {
@@ -821,7 +843,7 @@ impl LeanSpec {
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
-        let compared = compared_functions(path, &text, &namespace, &defined)?;
+        let compared = compared_functions(path, &text, &namespace, &defined, machine.as_ref())?;
         let sampled = sampled_types(&defined);
         let imported = imported_specs(path, &text)?;
         let mut source = source(text, &imported);
@@ -862,7 +884,32 @@ impl LeanSpec {
     /// The cache key of the spec's answers for a compared function.
     #[must_use]
     pub fn answers_key(&self, function: &str) -> String {
-        lean_spec_answers_key(&self.source, ENCODING, &evaluation_of(function))
+        let command = std::iter::once(evaluation_of(function))
+            .chain(self.replay_lines(function))
+            .collect::<Vec<_>>()
+            .join("\n");
+        lean_spec_answers_key(&self.source, ENCODING, &command)
+    }
+
+    fn replay_lines(&self, function: &str) -> Vec<String> {
+        let namespace = &self.namespace;
+        let Some((machine, actions)) = self
+            .explored()
+            .filter(|_| function == format!("{namespace}.run"))
+        else {
+            return Vec::new();
+        };
+        let mut lines = vec![EXPLORATION_HELPERS.to_string()];
+        lines.extend(self.deriving(
+            &["BEq", "Hashable", "Lean.ToJson"],
+            "open FormalCompare in ",
+        ));
+        lines.push(format!(
+            "def _root_.{namespace}.run.inputs := FormalBounded.traces {namespace}.init {namespace}.step {} {} {STATE_BUDGET}",
+            actions.expression(),
+            machine.depth
+        ));
+        lines
     }
 
     /// The file that prints the inputs of each function in `functions`, and the spec's answers.
@@ -873,12 +920,19 @@ impl LeanSpec {
     pub fn evaluation(&self, functions: &[&str]) -> String {
         let spec = self.source.trim_start_matches('\u{feff}');
         let spec_imports = imports(spec);
+        let replay: Vec<String> = functions
+            .iter()
+            .flat_map(|function| self.replay_lines(function))
+            .collect();
+        let extra = (!replay.is_empty()).then_some(EXPLORATION_IMPORT);
         let mut lines = import_lines(
             std::iter::once(EVALUATION_IMPORT)
+                .chain(extra)
                 .chain(spec_imports.iter().map(|import| import.module.as_str())),
         );
         lines.push(blanked(spec, &spec_imports));
         lines.push(ENCODING.to_string());
+        lines.extend(replay);
         lines.extend(functions.iter().map(|function| evaluation_of(function)));
         format!("{}\n", lines.join("\n"))
     }
@@ -904,16 +958,21 @@ impl LeanSpec {
         }
     }
 
-    fn derived(&self) -> Vec<String> {
+    fn deriving(&self, classes: &[&str], scope: &str) -> Vec<String> {
         let namespace = &self.namespace;
         self.machine
             .iter()
             .flat_map(|machine| &machine.types)
-            .flat_map(|derived| {
-                ["Repr", "Plausible.Shrinkable", "Plausible.Arbitrary"]
-                    .map(|class| format!("deriving instance {class} for {namespace}.{derived}"))
+            .flat_map(|declared| {
+                classes.iter().map(move |class| {
+                    format!("{scope}deriving instance {class} for {namespace}.{declared}")
+                })
             })
             .collect()
+    }
+
+    fn derived(&self) -> Vec<String> {
+        self.deriving(&["Repr", "Plausible.Shrinkable", "Plausible.Arbitrary"], "")
     }
 
     fn exploration_of(&self, machine: &Machine, actions: &Actions, invariant: &str) -> String {
@@ -934,14 +993,7 @@ impl LeanSpec {
     }
 
     fn explored_types(&self) -> Vec<String> {
-        let namespace = &self.namespace;
-        self.machine
-            .iter()
-            .flat_map(|machine| &machine.types)
-            .map(|declared| {
-                format!("deriving instance Repr, BEq, Hashable for {namespace}.{declared}")
-            })
-            .collect()
+        self.deriving(&["Repr", "BEq", "Hashable"], "")
     }
 
     /// The cache key of the bounded check of the property `id`.
@@ -1909,7 +1961,7 @@ mod tests {
         assert!(
             exploration
                 .lean_code
-                .contains("deriving instance Repr, BEq, Hashable for Counter.State")
+                .contains("deriving instance Hashable for Counter.State")
         );
         assert!(exploration.lean_code.contains(
             "(FormalBounded.explore Counter.init Counter.step (FormalBounded.complete [Counter.Action.inc, Counter.Action.reset] (by intro a; cases a <;> simp)) (fun s => decide (Counter.count_below_three s)) 10 100000))"
@@ -1941,6 +1993,50 @@ mod tests {
             }
         );
         assert_eq!(read_exploration(&exploration, &[]), []);
+    }
+
+    #[test]
+    fn a_code_line_on_step_replays_the_machine_as_run() {
+        let spec = parse(&COUNTER.replace(
+            "def step (s : State) : Action → State",
+            "/-- code: src/counter.rs step -/\ndef step (s : State) : Action → State",
+        ))
+        .expect("it parses");
+        assert_eq!(
+            spec.compared,
+            [Compared {
+                function: "Counter.run".to_string(),
+                code: "src/counter.rs step".to_string(),
+            }]
+        );
+        let evaluation = spec.evaluation(&["Counter.run"]);
+        assert!(evaluation.starts_with("import Lean.Data.Json\nimport Std.Data.HashSet\n"));
+        assert!(
+            evaluation
+                .contains("open FormalCompare in deriving instance Lean.ToJson for Counter.Action")
+        );
+        assert!(evaluation.contains(
+            "def _root_.Counter.run.inputs := FormalBounded.traces Counter.init Counter.step (FormalBounded.complete [Counter.Action.inc, Counter.Action.reset] (by intro a; cases a <;> simp)) 10 100000"
+        ));
+        assert_ne!(
+            spec.answers_key("Counter.run"),
+            parse(COUNTER)
+                .expect("it parses")
+                .answers_key("Counter.run")
+        );
+        let unlisted = parse(
+            &COUNTER
+                .replace(
+                    "def step (s : State) : Action → State",
+                    "/-- code: src/counter.rs step -/\ndef step (s : State) : Action → State",
+                )
+                .replace("  | inc\n", "  | add (n : Nat)\n")
+                .replace("  | .inc => ⟨s.count + 1⟩", "  | .add n => ⟨s.count + n⟩"),
+        );
+        assert!(
+            matches!(unlisted, Err(SpecError::NoReplayActions(_))),
+            "{unlisted:?}"
+        );
     }
 
     #[test]
