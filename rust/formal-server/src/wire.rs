@@ -113,6 +113,23 @@ pub struct SessionResponse {
     pub refuted: Vec<RefutationOut>,
     /// The invariants that held in every state the bounded check reached.
     pub bounded: Vec<BoundOut>,
+    /// The invariants a step can break from a state where they hold, so their proofs need stronger ones.
+    pub not_inductive: Vec<NotInductiveOut>,
+    /// Invariants that are not inductive one by one, and are kept by every step together.
+    pub inductive_together: Vec<String>,
+}
+
+/// An invariant a step breaks from a state where it holds.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct NotInductiveOut {
+    /// The property, as `<Namespace>.<name>.always`.
+    pub id: String,
+    /// The state where the invariant holds, as Lean prints it.
+    pub state: String,
+    /// The action, as Lean prints it.
+    pub action: String,
+    /// The state after the action, where the invariant does not hold.
+    pub next: String,
 }
 
 /// An invariant that held in every state the bounded check reached.

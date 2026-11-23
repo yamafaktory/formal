@@ -29,10 +29,12 @@ use formal_core::{
         Difference,
         Evaluated,
         Explored,
+        Inductive,
         LeanSpec,
         Refutation,
         read_evaluation,
         read_exploration,
+        read_induction,
         read_search,
     },
     property::{
@@ -181,6 +183,23 @@ pub struct Session {
     pub refuted: Vec<Refutation>,
     /// The invariants the bounded check found to hold in every state up to its depth.
     pub bounded: Vec<Bound>,
+    /// The invariants a step can break from a state where they hold, with that state.
+    pub not_inductive: Vec<NotInductive>,
+    /// Invariants that are not inductive one by one, and are kept by every step together.
+    pub inductive_together: Vec<String>,
+}
+
+/// An invariant a step breaks from a state where it holds, so its proof needs a stronger one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotInductive {
+    /// The property, as `<namespace>.<name>.always`.
+    pub id: String,
+    /// The state where the invariant holds, as Lean prints it.
+    pub state: String,
+    /// The action, as Lean prints it.
+    pub action: String,
+    /// The state after the action, where the invariant does not hold.
+    pub next: String,
 }
 
 #[derive(Default)]
@@ -188,6 +207,8 @@ struct Checked {
     evaluated: Vec<Evaluated>,
     refuted: Vec<Refutation>,
     bounded: Vec<Bound>,
+    not_inductive: Vec<NotInductive>,
+    inductive_together: Vec<String>,
 }
 
 impl Session {
@@ -443,6 +464,85 @@ pub fn explore<V: Verifier>(
     (refuted, bounded)
 }
 
+/// Which invariants of `spec` a step can break from a state where they hold, and
+/// whether those that can are kept by every step together.
+///
+/// Only the invariants the bounded check answered and nothing refuted are tested:
+/// those are the ones Lean can decide and that hold. Only an answer Lean gave is
+/// cached, and a test no drawn state reached gives none.
+pub fn induct<V: Verifier>(
+    verifier: &V,
+    cache: &ProofCache,
+    spec: &LeanSpec,
+    bounded: &[Bound],
+    refuted: &[Refutation],
+) -> (Vec<NotInductive>, Vec<String>) {
+    let ids: Vec<&str> = bounded
+        .iter()
+        .map(|bound| bound.id.as_str())
+        .filter(|id| refuted.iter().all(|refutation| refutation.id != *id))
+        .collect();
+    let induction = spec.induction(&ids);
+    let key = |group: &[String]| {
+        let group: Vec<&str> = group.iter().map(String::as_str).collect();
+        spec.induction_key(&group)
+    };
+    let mut found: Vec<Option<Inductive>> = induction
+        .groups
+        .iter()
+        .map(|group| {
+            cache
+                .load::<Tested>(&key(group))
+                .map(|tested| tested.inductive)
+        })
+        .collect();
+    if found.iter().any(Option::is_none) {
+        let printed = verifier.verify(&induction.lean_code, None).printed();
+        let printed: Vec<&str> = printed.iter().map(String::as_str).collect();
+        for (group, inductive) in read_induction(&induction, &printed) {
+            cache.save(
+                &key(&group),
+                &Tested {
+                    inductive: inductive.clone(),
+                },
+            );
+            if let Some(slot) = induction.groups.iter().position(|known| *known == group) {
+                found[slot] = Some(inductive);
+            }
+        }
+    }
+    let mut not_inductive = Vec::new();
+    let mut together = Vec::new();
+    for (group, inductive) in induction.groups.iter().zip(&found) {
+        match (group.as_slice(), inductive) {
+            (
+                [id],
+                Some(Inductive::Broken {
+                    state,
+                    action,
+                    next,
+                }),
+            ) => not_inductive.push(NotInductive {
+                id: id.clone(),
+                state: state.clone(),
+                action: action.clone(),
+                next: next.clone(),
+            }),
+            ([_, _, ..], Some(Inductive::Kept)) => together.clone_from(group),
+            _ => {}
+        }
+    }
+    if not_inductive.is_empty() {
+        together.clear();
+    }
+    (not_inductive, together)
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Tested {
+    inductive: Inductive,
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Answered {
     explored: Explored,
@@ -627,6 +727,8 @@ impl Sessions {
             .filter(|found| falsified.iter().all(|known| known.id != found.id))
             .collect();
         let refuted: Vec<Refutation> = falsified.into_iter().chain(searched).collect();
+        let (not_inductive, inductive_together) =
+            induct(verifier, cache, &spec, &bounded, &refuted);
         let keys = spec
             .properties
             .iter()
@@ -644,6 +746,8 @@ impl Sessions {
                     evaluated,
                     refuted,
                     bounded,
+                    not_inductive,
+                    inductive_together,
                 },
             )),
         ))
@@ -682,6 +786,8 @@ impl Sessions {
             evaluated,
             refuted,
             bounded,
+            not_inductive,
+            inductive_together,
         } = checked;
 
         let mut session = Session {
@@ -698,6 +804,8 @@ impl Sessions {
             evaluated,
             refuted,
             bounded,
+            not_inductive,
+            inductive_together,
         };
 
         for spec in session.specs.clone() {

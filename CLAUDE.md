@@ -123,6 +123,12 @@ constructors complete before the walk uses it. A `code:` line on `step` makes `<
 compared function: its inputs are one trace per reached state, from the same walk, and
 the evaluation derives `Lean.ToJson` for the spec's types.
 
+`LeanSpec::induction` builds one file that draws states with Plausible, keeps those where
+an invariant holds, and steps each one by every action. It tests each invariant the
+checks did not refute, then all of them together. A broken step becomes a `not_inductive`
+entry, and a conjunction that holds while one of its parts does not becomes
+`inductive_together`. Each answer Lean gave is cached.
+
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file
 defines a `Testable` instance for `∀ x ∈ l`, and draws half of the values of each type

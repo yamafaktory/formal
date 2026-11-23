@@ -63,6 +63,7 @@ pub use wire::{
     CompareResponse,
     DifferenceOut,
     FailureOut,
+    NotInductiveOut,
     ProofOut,
     PropertySpecIn,
     RefutationOut,
@@ -244,7 +245,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     info(title = "formal", version = env!("CARGO_PKG_VERSION")),
     paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, compare_session, read_proof, close_session),
     components(schemas(
-        BoundOut, CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut, RefutationOut,
+        BoundOut, CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut, NotInductiveOut, RefutationOut,
         ProofOut, PropertySpecIn, SessionRequest, SessionResponse, Status, TopicOut,
     )),
 )]
@@ -346,6 +347,17 @@ fn describe(session: &Session) -> SessionResponse {
                 states: bound.states,
             })
             .collect(),
+        not_inductive: session
+            .not_inductive
+            .iter()
+            .map(|found| NotInductiveOut {
+                id: found.id.clone(),
+                state: found.state.clone(),
+                action: found.action.clone(),
+                next: found.next.clone(),
+            })
+            .collect(),
+        inductive_together: session.inductive_together.clone(),
         refuted: session
             .refuted
             .iter()
