@@ -165,6 +165,15 @@ mod loading {
     }
 
     #[test]
+    fn every_missing_required_field_is_named_not_only_the_first() {
+        let workspace = Workspace::new();
+        let path = workspace.spec_file(&[with(&[("formal", json!("  ")), ("kind", json!(""))])]);
+        let refusal = message(&path);
+        assert!(refusal.contains("kind"), "{refusal}");
+        assert!(refusal.contains("formal"), "{refusal}");
+    }
+
+    #[test]
     fn duplicate_ids_are_refused() {
         let workspace = Workspace::new();
         assert!(message(&workspace.spec_file(&[entry(), entry()])).contains("duplicate"));
