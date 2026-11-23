@@ -1,6 +1,6 @@
 ---
 description: Prove properties about formal's own pure functions, using formal
-argument-hint: "[target, e.g. verifier | parse_output]"
+argument-hint: "[target, e.g. verifier | split_imports]"
 ---
 
 Point formal at its own Rust and come back with proved properties. You are not here to
@@ -61,9 +61,8 @@ Pure, total, no I/O — in order of value:
    Batching is where a wrong answer gets attributed to the wrong proof: `rebase` maps a
    Lean error's line back into its entry, and "a rebased line lands inside the entry it is
    attributed to" is the claim a test samples and a proof settles.
-3. **`rust/formal-lean/src/run.rs::parse_output`** — pure and load-bearing: a `sorry` is a
-   *warning* to Lean and a failure here. "Success implies no promoted sorry", "errors
-   precede promoted sorries".
+3. **`rust/formal-lean/src/run.rs::parse_output`** — done differently: `spec/Run.lean`
+   holds its properties and `proofs/Run/` their proofs. Not a target here.
 4. **`rust/formal-core/src/hints.rs`** — done differently: `spec/Hints.lean` holds its
    properties and `proofs/Hints/` their proofs. Not a target here.
 

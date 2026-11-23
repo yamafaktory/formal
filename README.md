@@ -365,6 +365,8 @@ formal checks itself, and its own code moves from `formal.properties.json` to Le
   lowercased as ASCII, in the spec and in Rust.
 - `spec/Hints.lean` specifies how formal picks the advice for a failed proof: the first
   rule that claims the error and answers wins.
+- `spec/Run.lean` specifies how formal reads Lean's verdict: a `sorry` is a warning to
+  Lean and a failure here, and the first error Lean reported stays first.
 
 Their proofs are in `proofs/<Namespace>/`. The test `formal-service/tests/spec_sessions.rs`
 checks every proof of every spec, and `formal-lean/tests/spec.rs` compares the code in
