@@ -175,6 +175,12 @@ pub enum SpecError {
     )]
     MachineRun(PathBuf),
 
+    /// A Lean spec names the code of its machine's `step`, and formal can list no actions to replay.
+    #[error(
+        "{0} names the code of `step`, and formal can list no actions to replay on it: declare the action type in this spec with constructors that take no argument, or define `<Action>.samples`"
+    )]
+    NoReplayActions(PathBuf),
+
     /// A Lean spec imports a spec that is not there.
     #[error("{spec} imports `{import}`, and there is no spec at {path}")]
     NoSuchImport {

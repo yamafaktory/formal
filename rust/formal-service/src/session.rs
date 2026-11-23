@@ -525,15 +525,18 @@ pub fn evaluate<V: Verifier>(
         .map(|compared| compared.function.as_str())
         .collect();
     let result = verifier.verify(&spec.evaluation(&functions), None);
-    if !result.success {
-        return Err(result.first_error().map_or_else(
-            || CompareError::Unrun(result.output.clone()),
-            |error| CompareError::Evaluation(error.data.clone()),
-        ));
-    }
     let printed = result.printed();
     let printed: Vec<&str> = printed.iter().map(String::as_str).collect();
-    let read = read_evaluation(&missing, &printed).map_err(CompareError::Evaluation)?;
+    let read = read_evaluation(&missing, &printed).map_err(|unread| {
+        if result.success {
+            CompareError::Evaluation(unread)
+        } else {
+            result.first_error().map_or_else(
+                || CompareError::Unrun(result.output.clone()),
+                |error| CompareError::Evaluation(error.data.clone()),
+            )
+        }
+    })?;
     for evaluated in &read {
         cache.save(&spec.answers_key(&evaluated.function), evaluated);
     }
