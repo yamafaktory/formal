@@ -47,6 +47,8 @@ end FormalCompare";
 
 const SEARCH_IMPORT: &str = "Plausible";
 
+const ALWAYS: &str = "always";
+
 const SEARCH_HELPERS: &str = "namespace FormalRefute
 open Plausible
 
@@ -98,6 +100,34 @@ pub struct LeanSpec {
     pub compared: Vec<Compared>,
     /// The types the spec lists samples of, as `def <Type>.samples`, in name order.
     pub sampled: Vec<String>,
+    /// The state machine the spec describes with `init` and `step`, when it has one.
+    pub machine: Option<Machine>,
+}
+
+/// A state machine: an `init : <State>`, a `step`, and at least one invariant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Machine {
+    /// Each `def <name> : <State> → Prop` or `def <name> (<s> : <State>) : Prop`, in the
+    /// spec's order.
+    pub invariants: Vec<String>,
+    /// Each `inductive` and `structure` the spec defines, in the spec's order.
+    pub types: Vec<String>,
+}
+
+impl Machine {
+    /// What formal adds after the spec: `run`, and one property per invariant.
+    fn definitions(&self, namespace: &str) -> String {
+        let mut lines = vec![format!(
+            "def _root_.{namespace}.run := List.foldl _root_.{namespace}.step _root_.{namespace}.init"
+        )];
+        lines.extend(self.invariants.iter().map(|invariant| {
+            format!(
+                "def _root_.{namespace}.{invariant}.{ALWAYS} : Prop := \
+                 ∀ actions, _root_.{namespace}.{invariant} (_root_.{namespace}.run actions)"
+            )
+        }));
+        lines.join("\n")
+    }
 }
 
 /// A property the search found a counterexample to.
@@ -267,13 +297,74 @@ fn definitions<'a>(code: &'a str, blocks: &[(String, usize, usize)]) -> HashMap<
     definition_pattern()
         .captures_iter(code)
         .filter_map(|found| {
-            let at = found.get(0)?.start();
-            let inside = blocks
-                .iter()
-                .any(|(_, start, end)| *start <= at && at < *end);
-            Some((found.get(1)?.as_str(), inside))
+            Some((
+                found.get(1)?.as_str(),
+                in_block(blocks, found.get(0)?.start()),
+            ))
         })
         .collect()
+}
+
+fn in_block(blocks: &[(String, usize, usize)], at: usize) -> bool {
+    blocks
+        .iter()
+        .any(|(_, start, end)| *start <= at && at < *end)
+}
+
+fn init_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        format!(r"(?m)^[ \t]*{DEFINITION}init\s*:\s*({IDENTIFIER})\s*(?::=|where)")
+    })
+}
+
+fn declared_type_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        format!(r"(?m)^[ \t]*(?:inductive|structure)\s+({IDENTIFIER})")
+    })
+}
+
+fn captured_in_block(
+    pattern: &Regex,
+    code: &str,
+    blocks: &[(String, usize, usize)],
+) -> Vec<String> {
+    pattern
+        .captures_iter(code)
+        .filter(|found| {
+            found
+                .get(0)
+                .is_some_and(|whole| in_block(blocks, whole.start()))
+        })
+        .map(|found| found[1].to_string())
+        .collect()
+}
+
+fn machine(
+    code: &str,
+    blocks: &[(String, usize, usize)],
+    defined: &HashMap<&str, bool>,
+) -> Option<Machine> {
+    if defined.get("step") != Some(&true) {
+        return None;
+    }
+    let state = captured_in_block(init_pattern(), code, blocks)
+        .into_iter()
+        .next()?;
+    let state = regex::escape(&state);
+    let invariant = Regex::new(&format!(
+        r"(?m)^[ \t]*{DEFINITION}({IDENTIFIER})\s*(?::\s*{state}\s*→|\(\s*{IDENTIFIER}\s*:\s*{state}\s*\)\s*:)\s*Prop\s*:="
+    ))
+    .expect("the pattern is built from literals");
+    let invariants = captured_in_block(&invariant, code, blocks);
+    if invariants.is_empty() {
+        return None;
+    }
+    Some(Machine {
+        invariants,
+        types: captured_in_block(declared_type_pattern(), code, blocks),
+    })
 }
 
 fn sampled_types(defined: &HashMap<&str, bool>) -> Vec<String> {
@@ -524,20 +615,38 @@ impl LeanSpec {
                 });
             }
         };
+        let defined = definitions(&code, &blocks);
+        let machine = machine(&code, &blocks, &defined);
+        if let Some(machine) = &machine {
+            if defined.contains_key("run") {
+                return Err(SpecError::MachineRun(path.to_path_buf()));
+            }
+            properties.extend(
+                machine
+                    .invariants
+                    .iter()
+                    .map(|invariant| format!("{namespace}.{invariant}.{ALWAYS}")),
+            );
+        }
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
-        let defined = definitions(&code, &blocks);
         let compared = compared_functions(path, &text, &namespace, &defined)?;
         let sampled = sampled_types(&defined);
         let imported = imported_specs(path, &text)?;
-        let source = source(text, &imported);
+        let mut source = source(text, &imported);
+        if let Some(machine) = &machine {
+            source.push('\n');
+            source.push_str(&machine.definitions(&namespace));
+            source.push('\n');
+        }
         Ok(Self {
             source,
             namespace,
             properties,
             compared,
             sampled,
+            machine,
         })
     }
 
@@ -587,7 +696,42 @@ impl LeanSpec {
     /// The cache key of the search for a counterexample to the property `id`.
     #[must_use]
     pub fn search_key(&self, id: &str) -> String {
-        lean_spec_search_key(&self.source, SEARCH_HELPERS, &search_of(id))
+        let helpers = std::iter::once(SEARCH_HELPERS.to_string())
+            .chain(self.derived())
+            .collect::<Vec<_>>()
+            .join("\n");
+        lean_spec_search_key(&self.source, &helpers, &self.search_line(id))
+    }
+
+    fn search_line(&self, id: &str) -> String {
+        let invariant = id
+            .strip_prefix(&format!("{}.", self.namespace))
+            .and_then(|name| name.strip_suffix(&format!(".{ALWAYS}")))
+            .filter(|name| {
+                self.machine.as_ref().is_some_and(|machine| {
+                    machine.invariants.iter().any(|invariant| invariant == name)
+                })
+            });
+        match invariant {
+            Some(invariant) => format!(
+                "open FormalRefute in example : _root_.{id} := by \
+                 unfold _root_.{id} _root_.{}.{invariant}; plausible",
+                self.namespace
+            ),
+            None => search_of(id),
+        }
+    }
+
+    fn derived(&self) -> Vec<String> {
+        let namespace = &self.namespace;
+        self.machine
+            .iter()
+            .flat_map(|machine| &machine.types)
+            .flat_map(|derived| {
+                ["Repr", "Plausible.Shrinkable", "Plausible.Arbitrary"]
+                    .map(|class| format!("deriving instance {class} for {namespace}.{derived}"))
+            })
+            .collect()
     }
 
     /// The file that searches each property in `ids` for a counterexample.
@@ -605,6 +749,7 @@ impl LeanSpec {
         lines.extend(blanked(spec, &spec_imports).split('\n').map(str::to_string));
         lines.extend(SEARCH_HELPERS.split('\n').map(str::to_string));
         let namespace = &self.namespace;
+        lines.extend(self.derived());
         lines.extend(self.sampled.iter().map(|sampled| {
             format!(
                 "open {namespace} in instance (priority := high) : Plausible.Arbitrary {sampled} := \
@@ -613,7 +758,7 @@ impl LeanSpec {
         }));
         let mut searched = Vec::new();
         for id in ids {
-            lines.push(search_of(id));
+            lines.push(self.search_line(id));
             searched.push((
                 (*id).to_string(),
                 u32::try_from(lines.len()).unwrap_or(u32::MAX),
@@ -1281,6 +1426,104 @@ mod tests {
             ]
         );
         assert_eq!(refutation.issue, "45 < 45 does not hold");
+    }
+
+    const COUNTER: &str = "namespace Counter\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨s.count + 1⟩\n  | .reset => ⟨0⟩\n\ndef count_below_three : State → Prop := fun s => s.count < 3\n\ndef init_is_zero : Prop := init.count = 0\n\nend Counter\n";
+
+    #[test]
+    fn an_init_and_a_step_make_a_machine_and_each_invariant_a_property() {
+        let spec = parse(COUNTER).expect("it parses");
+        assert_eq!(
+            spec.machine,
+            Some(Machine {
+                invariants: vec!["count_below_three".to_string()],
+                types: vec!["Action".to_string(), "State".to_string()],
+            })
+        );
+        assert_eq!(
+            spec.properties,
+            ["Counter.init_is_zero", "Counter.count_below_three.always"]
+        );
+        assert!(
+            spec.source.ends_with(
+                "def _root_.Counter.run := List.foldl _root_.Counter.step _root_.Counter.init\ndef _root_.Counter.count_below_three.always : Prop := ∀ actions, _root_.Counter.count_below_three (_root_.Counter.run actions)\n"
+            ),
+            "{}",
+            spec.source
+        );
+        assert_eq!(demo().machine, None);
+        assert!(!demo().source.contains("def run"));
+    }
+
+    #[test]
+    fn a_machine_whose_invariants_are_its_only_properties_is_a_spec() {
+        let spec = parse(&COUNTER.replace("def init_is_zero : Prop := init.count = 0\n", ""))
+            .expect("it parses");
+        assert_eq!(spec.properties, ["Counter.count_below_three.always"]);
+    }
+
+    #[test]
+    fn a_machine_in_an_unclosed_namespace_still_names_its_properties_from_the_root() {
+        let spec = parse(&COUNTER.replace("\nend Counter\n", "\n")).expect("it parses");
+        assert!(
+            spec.source.contains(
+                "def _root_.Counter.count_below_three.always : Prop := ∀ actions, _root_.Counter.count_below_three (_root_.Counter.run actions)"
+            ),
+            "{}",
+            spec.source
+        );
+    }
+
+    #[test]
+    fn an_init_and_a_step_without_an_invariant_are_no_machine() {
+        let text = "namespace Old\n\ndef init : Nat := 0\n\ndef step (n : Nat) : Nat := n + 1\n\ndef run : Nat := 1\n\ndef step_grows : Prop := ∀ n, n < step n\n\nend Old\n";
+        let spec = parse(text).expect("it parses");
+        assert_eq!(spec.machine, None);
+        assert_eq!(spec.properties, ["Old.step_grows"]);
+        assert_eq!(spec.source, text);
+    }
+
+    #[test]
+    fn an_invariant_may_take_its_state_as_a_binder_and_carry_attributes() {
+        let spec = parse(
+            &COUNTER
+                .replace(
+                    "def count_below_three : State → Prop := fun s => s.count < 3",
+                    "@[simp] def count_below_three (s : State) : Prop := s.count < 3",
+                )
+                .replace("def init : State := ⟨0⟩", "abbrev init : State := ⟨0⟩"),
+        )
+        .expect("it parses");
+        assert_eq!(
+            spec.properties,
+            ["Counter.init_is_zero", "Counter.count_below_three.always"]
+        );
+    }
+
+    #[test]
+    fn a_machine_that_defines_run_is_refused() {
+        let refused = parse(&COUNTER.replace(
+            "end Counter",
+            "def run (actions : List Action) : State := actions.foldl step init\n\nend Counter",
+        ));
+        assert!(
+            matches!(refused, Err(SpecError::MachineRun(_))),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn the_search_derives_the_machine_types_and_unfolds_each_invariant() {
+        let spec = parse(COUNTER).expect("it parses");
+        let search = spec.search(&["Counter.count_below_three.always"]);
+        for line in [
+            "deriving instance Plausible.Arbitrary for Counter.Action",
+            "deriving instance Plausible.Shrinkable for Counter.State",
+            "deriving instance Repr for Counter.Action",
+            "open FormalRefute in example : _root_.Counter.count_below_three.always := by unfold _root_.Counter.count_below_three.always _root_.Counter.count_below_three; plausible",
+        ] {
+            assert!(search.lean_code.contains(line), "{line}");
+        }
     }
 
     #[test]

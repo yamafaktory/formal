@@ -311,6 +311,21 @@ The caller runs its own code on each input and sends the answers to
 the functions that `matched`. Each function that `differed` comes with the first input
 where the two disagree, the spec's answer and the code's answer.
 
+A spec can describe a state machine. It defines `init : State`,
+`step : State → Action → State` and at least one invariant in its namespace. An invariant
+is a `def <name> : State → Prop`, or a `def <name> (s : State) : Prop`. formal defines
+`run`, the fold of `step` over a list of actions from `init`, and registers each invariant
+as `<Namespace>.<name>.always`, which says that it holds in every reachable state:
+
+```lean
+def count_at_most_two : State → Prop := fun s => s.count ≤ 2
+```
+
+In a spec with the namespace `Bounded`, formal registers `Bounded.count_at_most_two.always`,
+which states `∀ actions, count_at_most_two (run actions)`. Its proof declares
+`theorem Bounded.count_at_most_two.always.holds : Bounded.count_at_most_two.always`. The search derives generators for
+the spec's types, so a broken invariant comes back with the list of actions that breaks it.
+
 When the session opens, formal also searches each property for a counterexample with
 Plausible. A false property comes back under `refuted`, with the value of each variable
 and what does not hold. For this false property in a spec with the namespace `Demo`:

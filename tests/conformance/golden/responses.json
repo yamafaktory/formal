@@ -72,7 +72,9 @@
     "Run the code on each input. Then POST /session/{session_id}/compare with {\"answers\": {\"<Namespace>.<name>\": [...]}}, one answer per input, in the order of the inputs. A List Char crosses as a JSON string.",
     "When the session opens, formal searches each property for a counterexample. A property it finds one for comes back under refuted, with the value of each variable and what does not hold. It stays under work: fix the spec and open the session again.",
     "Random values rarely hit a rare input. A spec can list values for a type as `def <Type>.samples : List <Type>`. The search then draws half of the values of that type from that list.",
-    "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted name from a subdirectory. Properties come only from that spec."
+    "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted name from a subdirectory. Properties come only from that spec.",
+    "A spec can describe a state machine: `def init : <State>` and `def step : <State> → <Action> → <State>` in its namespace, with at least one invariant `def <name> : <State> → Prop` or `def <name> (s : <State>) : Prop`. formal then defines `run`, the fold of `step` over a list of actions from `init`, so the spec must not define `run`.",
+    "formal registers each invariant as `<Namespace>.<name>.always`, which states `∀ actions, <name> (run actions)`. Its proof declares `theorem <Namespace>.<name>.always.holds : <Namespace>.<name>.always`. The search derives the generators for the spec's types, so a broken invariant comes back with the trace that breaks it."
    ],
    "openapi": "GET /openapi.json is the full schema of every endpoint and response, including field types. Read it rather than guessing at a shape.",
    "sessions": "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by default), and it is lost if the server restarts. Once it is gone, POST /session again with the same spec file: anything already proved comes straight back as a cache hit, so you never reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on.",
@@ -237,6 +239,20 @@
   },
   "status": 200
  },
+ "session_open_from_lean_spec_with_a_machine": {
+  "body": {
+   "cached": [],
+   "compare": [],
+   "complete": false,
+   "refuted": [],
+   "session_id": "<machine-session>",
+   "stale": [],
+   "work": [
+    "Bounded.count_at_most_two.always"
+   ]
+  },
+  "status": 200
+ },
  "session_open_from_spec": {
   "body": {
    "cached": [],
@@ -259,6 +275,12 @@
   },
   "status": 400
  },
+ "session_open_lean_spec_with_a_machine_that_defines_run": {
+  "body": {
+   "detail": "<workspace>/OwnRun.lean describes a state machine with `init` and `step`, and defines `run`, which formal defines for that machine"
+  },
+  "status": 400
+ },
  "session_open_lean_spec_with_a_missing_import": {
   "body": {
    "detail": "<workspace>/Missing.lean imports `Spec.Absent`, and there is no spec at <workspace>/Absent.lean"
@@ -273,7 +295,7 @@
  },
  "session_open_lean_spec_without_property": {
   "body": {
-   "detail": "<workspace>/Empty.lean states no property, which formal finds as `def <name> : Prop :=`"
+   "detail": "<workspace>/Empty.lean states no property, which formal finds as `def <name> : Prop :=`, or as an invariant `def <name> : <State> → Prop :=` of a machine with `init : <State>` and `step`"
   },
   "status": 400
  },

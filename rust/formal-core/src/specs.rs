@@ -122,7 +122,9 @@ pub enum SpecError {
     NoNamespace(PathBuf),
 
     /// A Lean spec states nothing to prove.
-    #[error("{0} states no property, which formal finds as `def <name> : Prop :=`")]
+    #[error(
+        "{0} states no property, which formal finds as `def <name> : Prop :=`, or as an invariant `def <name> : <State> → Prop :=` of a machine with `init : <State>` and `step`"
+    )]
     NoLeanProperties(PathBuf),
 
     /// A Lean spec opens more than one namespace, so a property's id is ambiguous.
@@ -166,6 +168,12 @@ pub enum SpecError {
         /// The function, as the spec names it.
         function: String,
     },
+
+    /// A Lean spec with a state machine defines `run`, which formal defines for it.
+    #[error(
+        "{0} describes a state machine with `init` and `step`, and defines `run`, which formal defines for that machine"
+    )]
+    MachineRun(PathBuf),
 
     /// A Lean spec imports a spec that is not there.
     #[error("{spec} imports `{import}`, and there is no spec at {path}")]

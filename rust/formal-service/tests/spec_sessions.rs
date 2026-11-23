@@ -274,3 +274,56 @@ fn a_spec_that_imports_another_spec_proves_against_its_definitions() {
     };
     assert!(outcome.verified(), "{}", outcome.error);
 }
+
+const BOUNDED: &str = "namespace Bounded\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_below_two : State → Prop := fun s => s.count < 2\n\nend Bounded\n";
+
+#[test]
+fn an_invariant_of_a_machine_holds_in_every_reachable_state_and_a_false_one_never_does() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Bounded.lean");
+    fs::write(&path, BOUNDED).expect("written");
+    let spec = load(&path);
+    assert_eq!(
+        spec.properties,
+        [
+            "Bounded.count_at_most_two.always",
+            "Bounded.count_below_two.always"
+        ]
+    );
+    let holds = "namespace Bounded\n\ntheorem count_at_most_two.always.holds : count_at_most_two.always := by\n  unfold count_at_most_two.always run\n  have key : ∀ (actions : List Action) (s : State), count_at_most_two s →\n      count_at_most_two (actions.foldl step s) := by\n    intro actions\n    induction actions with\n    | nil => intro s h; exact h\n    | cons a rest ih =>\n      intro s h\n      apply ih\n      cases a <;> simp [step, count_at_most_two] at * <;> omega\n  intro actions\n  exact key actions init (by simp [count_at_most_two, init])\n\nend Bounded\n";
+    let wrong = "namespace Bounded\n\ntheorem count_below_two.always.holds : count_below_two.always := by\n  unfold count_below_two.always run count_below_two\n  intro actions\n  omega\n\nend Bounded\n";
+    let checked = check(
+        &runner,
+        &dir,
+        spec,
+        &[
+            (
+                "Bounded.count_at_most_two.always".to_string(),
+                holds.to_string(),
+            ),
+            (
+                "Bounded.count_below_two.always".to_string(),
+                wrong.to_string(),
+            ),
+        ],
+    );
+    let verified: Vec<&str> = checked
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.verified())
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    assert_eq!(
+        verified,
+        ["Bounded.count_at_most_two.always"],
+        "{:?}",
+        checked
+            .outcomes
+            .iter()
+            .map(|outcome| &outcome.error)
+            .collect::<Vec<_>>()
+    );
+}

@@ -265,3 +265,30 @@ fn a_false_property_comes_back_with_a_counterexample_drawn_from_the_samples() {
     );
     assert_eq!(refutation.counterexample.len(), 1, "{refutation:?}");
 }
+
+#[test]
+fn a_false_invariant_of_a_machine_comes_back_with_the_trace_that_breaks_it() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = tempfile::TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Bounded.lean");
+    std::fs::write(&path, "namespace Bounded\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_below_two : State → Prop := fun s => s.count < 2\n\nend Bounded\n").expect("written");
+    let spec = LeanSpec::load(&path.to_string_lossy()).expect("the spec loads");
+    let answers = searched(&runner, &spec);
+    let refuted: Vec<Refutation> = answers
+        .iter()
+        .filter_map(|answer| match answer {
+            Answer::Refuted(refutation) => Some(refutation.clone()),
+            _ => None,
+        })
+        .collect();
+    let [refutation] = refuted.as_slice() else {
+        panic!("one refutation, got {answers:?}");
+    };
+    assert_eq!(refutation.id, "Bounded.count_below_two.always");
+    assert_eq!(
+        refutation.counterexample,
+        ["actions := [Bounded.Action.inc, Bounded.Action.inc]"]
+    );
+}

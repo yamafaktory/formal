@@ -127,7 +127,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 9] = [
+const LEAN_SPEC: [&str; 11] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -150,6 +150,14 @@ const LEAN_SPEC: [&str; 9] = [
     "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads \
      `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted \
      name from a subdirectory. Properties come only from that spec.",
+    "A spec can describe a state machine: `def init : <State>` and `def step : <State> → <Action> → <State>` \
+     in its namespace, with at least one invariant `def <name> : <State> → Prop` or \
+     `def <name> (s : <State>) : Prop`. formal then defines `run`, the fold of `step` over a list of actions \
+     from `init`, so the spec must not define `run`.",
+    "formal registers each invariant as `<Namespace>.<name>.always`, which states \
+     `∀ actions, <name> (run actions)`. Its proof declares \
+     `theorem <Namespace>.<name>.always.holds : <Namespace>.<name>.always`. The search derives the \
+     generators for the spec's types, so a broken invariant comes back with the trace that breaks it.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \
