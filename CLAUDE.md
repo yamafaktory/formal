@@ -83,10 +83,11 @@ run, never from memory.
 
 ## Specs
 
-A Lean spec says what code must do. `spec/Pystr.lean` is the one for
-`formal_core::pystr`, and `spec/ProofCache.lean`, which imports it, the one for
-`formal_core::proof_cache`. Each `def <name> : Prop :=` in a spec is a property, and its
-proof is `proofs/<Namespace>/<name>.lean`, which declares `theorem <Namespace>.<name>.holds`.
+A Lean spec says what code must do. `spec/` holds one spec per module of formal's
+code, named after it: `spec/Pystr.lean` for `formal_core::pystr`,
+`spec/ProofCache.lean` for `formal_core::proof_cache`, and so on. Each
+`def <name> : Prop :=` in a spec is a property, and its proof is
+`proofs/<Namespace>/<name>.lean`, which declares `theorem <Namespace>.<name>.holds`.
 
 formal checks a spec itself: `POST /session` with `{"spec": path}`.
 `formal-core/src/lean_spec.rs` reads the spec and composes each proof after it. A
