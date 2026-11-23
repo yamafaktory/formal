@@ -3,7 +3,10 @@
 use std::{
     collections::HashMap,
     fs,
-    path::Path,
+    path::{
+        Path,
+        PathBuf,
+    },
     sync::OnceLock,
 };
 
@@ -83,8 +86,10 @@ const COUNTEREXAMPLE_MARK: &str = "Found a counter-example!";
 /// A Lean file that defines the code's model and states its properties.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanSpec {
-    /// The spec as it was read, which is also what its cache keys digest.
-    pub text: String,
+    /// What Lean reads, which is also what the cache keys digest: the specs it
+    /// imports, then the spec, under one header of their imports. The spec as it
+    /// was read when it imports no spec.
+    pub source: String,
     /// The namespace that holds the definitions and the properties.
     pub namespace: String,
     /// The id of each `def <name> : Prop`, as `<namespace>.<name>`, in the spec's order.
@@ -324,6 +329,80 @@ fn compared_functions(
     Ok(compared)
 }
 
+const SPEC_IMPORT: &str = "Spec.";
+
+fn imported_specs(path: &Path, text: &str) -> Result<Vec<String>, SpecError> {
+    let root = path.parent().unwrap_or(path);
+    let mut read = Vec::new();
+    visit(root, path, text, &mut vec![path.to_path_buf()], &mut read)?;
+    Ok(read.into_iter().map(|(_, text)| text).collect())
+}
+
+fn visit(
+    root: &Path,
+    path: &Path,
+    text: &str,
+    importing: &mut Vec<PathBuf>,
+    read: &mut Vec<(PathBuf, String)>,
+) -> Result<(), SpecError> {
+    for import in imports(text.trim_start_matches('\u{feff}')) {
+        let Some(name) = import.module.strip_prefix(SPEC_IMPORT) else {
+            continue;
+        };
+        let imported = root.join(format!("{}.lean", name.replace('.', "/")));
+        if let Some(start) = importing.iter().position(|seen| *seen == imported) {
+            let chain: Vec<String> = importing[start..]
+                .iter()
+                .chain(std::iter::once(&imported))
+                .map(|step| step.display().to_string())
+                .collect();
+            return Err(SpecError::ImportCycle {
+                chain: chain.join(" → "),
+            });
+        }
+        if read.iter().any(|(done, _)| *done == imported) {
+            continue;
+        }
+        let imported_text = fs::read_to_string(&imported).map_err(|_| SpecError::NoSuchImport {
+            spec: path.to_path_buf(),
+            import: import.module.clone(),
+            path: imported.clone(),
+        })?;
+        if let Some(found) = runs_code(&imported_text) {
+            return Err(SpecError::RunsCode {
+                path: imported,
+                found,
+            });
+        }
+        importing.push(imported.clone());
+        visit(root, &imported, &imported_text, importing, read)?;
+        importing.pop();
+        read.push((imported, imported_text));
+    }
+    Ok(())
+}
+
+fn source(text: String, imported: &[String]) -> String {
+    if imported.is_empty() {
+        return text;
+    }
+    let files: Vec<&str> = imported
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(text.as_str()))
+        .map(|file| file.trim_start_matches('\u{feff}'))
+        .collect();
+    let modules: Vec<String> = files
+        .iter()
+        .flat_map(|file| imports(file))
+        .map(|import| import.module)
+        .filter(|module| !module.starts_with(SPEC_IMPORT))
+        .collect();
+    let mut lines = import_lines(modules.iter().map(String::as_str));
+    lines.extend(files.iter().map(|file| blanked(file, &imports(file))));
+    format!("{}\n", lines.join("\n"))
+}
+
 fn import_lines<'a>(modules: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for module in modules {
@@ -451,8 +530,10 @@ impl LeanSpec {
         let defined = definitions(&code, &blocks);
         let compared = compared_functions(path, &text, &namespace, &defined)?;
         let sampled = sampled_types(&defined);
+        let imported = imported_specs(path, &text)?;
+        let source = source(text, &imported);
         Ok(Self {
-            text,
+            source,
             namespace,
             properties,
             compared,
@@ -476,13 +557,13 @@ impl LeanSpec {
     /// The cache key of a property, which covers the whole spec.
     #[must_use]
     pub fn key(&self, id: &str) -> String {
-        lean_spec_key(&self.text, id)
+        lean_spec_key(&self.source, id)
     }
 
     /// The cache key of the spec's answers for a compared function.
     #[must_use]
     pub fn answers_key(&self, function: &str) -> String {
-        lean_spec_answers_key(&self.text, ENCODING, &evaluation_of(function))
+        lean_spec_answers_key(&self.source, ENCODING, &evaluation_of(function))
     }
 
     /// The file that prints the inputs of each function in `functions`, and the spec's answers.
@@ -491,7 +572,7 @@ impl LeanSpec {
     /// list of `[input, answer]` pairs.
     #[must_use]
     pub fn evaluation(&self, functions: &[&str]) -> String {
-        let spec = self.text.trim_start_matches('\u{feff}');
+        let spec = self.source.trim_start_matches('\u{feff}');
         let spec_imports = imports(spec);
         let mut lines = import_lines(
             std::iter::once(EVALUATION_IMPORT)
@@ -506,7 +587,7 @@ impl LeanSpec {
     /// The cache key of the search for a counterexample to the property `id`.
     #[must_use]
     pub fn search_key(&self, id: &str) -> String {
-        lean_spec_search_key(&self.text, SEARCH_HELPERS, &search_of(id))
+        lean_spec_search_key(&self.source, SEARCH_HELPERS, &search_of(id))
     }
 
     /// The file that searches each property in `ids` for a counterexample.
@@ -515,7 +596,7 @@ impl LeanSpec {
     /// those samples. Each search is one line, and Lean answers it on that line.
     #[must_use]
     pub fn search(&self, ids: &[&str]) -> Search {
-        let spec = self.text.trim_start_matches('\u{feff}');
+        let spec = self.source.trim_start_matches('\u{feff}');
         let spec_imports = imports(spec);
         let mut lines = import_lines(
             std::iter::once(SEARCH_IMPORT)
@@ -553,7 +634,7 @@ impl LeanSpec {
     /// to state the spec's own property.
     #[must_use]
     pub fn compose(&self, id: &str, proof: &str) -> Composed {
-        let spec = self.text.trim_start_matches('\u{feff}');
+        let spec = self.source.trim_start_matches('\u{feff}');
         let proof = proof.trim_start_matches('\u{feff}');
         let spec_imports = imports(spec);
         let proof_imports = imports(proof);
@@ -664,6 +745,8 @@ pub fn read_evaluation(compared: &[&Compared], printed: &[&str]) -> Result<Vec<E
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -811,7 +894,7 @@ mod tests {
     fn no_inline_property_shares_the_key_of_a_spec_property() {
         let spec = demo();
         let inline = PropertySpec {
-            function_code: spec.text.clone(),
+            function_code: spec.source.clone(),
             kind: "spec".to_string(),
             formal: "Demo.double_even".to_string(),
             ..PropertySpec::default()
@@ -1235,5 +1318,156 @@ mod tests {
         assert_eq!(composed.proof_line(composed.offset), None);
         assert_eq!(composed.proof_line(composed.offset + 1), Some(1));
         assert_eq!(composed.proof_line(composed.offset + 2), None);
+    }
+
+    const TEXT: &str = "import Mathlib\n\nnamespace Text\n\ndef blank (s : List Char) : Bool := s.all (· = ' ')\n\nend Text\n";
+
+    const USES: &str = "import Spec.Text\n\nnamespace Uses\n\ndef blank_is_all_space : Prop := ∀ s, Text.blank s = true → ∀ c ∈ s, c = ' '\n\nend Uses\n";
+
+    fn write(dir: &TempDir, name: &str, text: &str) -> String {
+        let path = dir.path().join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("a directory");
+        }
+        fs::write(&path, text).expect("written");
+        path.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn an_imported_spec_comes_before_the_spec_and_its_imports_go_to_the_top() {
+        let dir = TempDir::new().expect("a temporary directory");
+        write(&dir, "Text.lean", TEXT);
+        let spec = LeanSpec::load(&write(&dir, "Uses.lean", USES)).expect("it loads");
+        assert_eq!(spec.properties, ["Uses.blank_is_all_space"]);
+        assert!(
+            spec.source.starts_with("import Mathlib\n"),
+            "{}",
+            spec.source
+        );
+        assert!(!spec.source.contains("Spec.Text"), "{}", spec.source);
+        let text = spec
+            .source
+            .find("namespace Text")
+            .expect("the import is in");
+        let uses = spec.source.find("namespace Uses").expect("the spec is in");
+        assert!(text < uses, "{}", spec.source);
+        let composed = spec.compose("Uses.blank_is_all_space", "theorem t : True := trivial");
+        assert!(
+            composed.lean_code.starts_with("import Mathlib\n"),
+            "{}",
+            composed.lean_code
+        );
+        assert!(
+            composed.lean_code.contains("namespace Text"),
+            "{}",
+            composed.lean_code
+        );
+    }
+
+    #[test]
+    fn a_spec_without_a_spec_import_reads_as_its_own_text() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let text = TEXT.replace("end Text", "def p : Prop := True\n\nend Text");
+        let spec = LeanSpec::load(&write(&dir, "Text.lean", &text)).expect("it loads");
+        assert_eq!(spec.source, text);
+    }
+
+    #[test]
+    fn an_edit_to_an_imported_spec_moves_the_keys_of_the_spec() {
+        let dir = TempDir::new().expect("a temporary directory");
+        write(&dir, "Text.lean", TEXT);
+        let path = write(&dir, "Uses.lean", USES);
+        let before = LeanSpec::load(&path)
+            .expect("it loads")
+            .key("Uses.blank_is_all_space");
+        write(&dir, "Text.lean", &TEXT.replace("(· = ' ')", "(· == ' ')"));
+        let after = LeanSpec::load(&path)
+            .expect("it loads")
+            .key("Uses.blank_is_all_space");
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn a_spec_imported_twice_comes_in_once_and_a_nested_name_is_a_directory() {
+        let dir = TempDir::new().expect("a temporary directory");
+        write(&dir, "Lib/Text.lean", TEXT);
+        write(
+            &dir,
+            "Words.lean",
+            "import Spec.Lib.Text\n\nnamespace Words\n\ndef none : List Char := []\n\nend Words\n",
+        );
+        let path = write(
+            &dir,
+            "Uses.lean",
+            &USES.replace(
+                "import Spec.Text",
+                "import Spec.Lib.Text\nimport Spec.Words",
+            ),
+        );
+        let spec = LeanSpec::load(&path).expect("it loads");
+        assert_eq!(
+            spec.source.matches("namespace Text").count(),
+            1,
+            "{}",
+            spec.source
+        );
+        assert!(spec.source.find("namespace Text") < spec.source.find("namespace Words"));
+    }
+
+    #[test]
+    fn every_import_resolves_from_the_directory_of_the_spec_the_session_opens_on() {
+        let dir = TempDir::new().expect("a temporary directory");
+        write(&dir, "Text.lean", TEXT);
+        write(
+            &dir,
+            "Lib/Inner.lean",
+            "import Spec.Text\n\nnamespace Inner\n\nend Inner\n",
+        );
+        let top = write(
+            &dir,
+            "Top.lean",
+            &USES.replace("import Spec.Text", "import Spec.Lib.Inner"),
+        );
+        assert!(LeanSpec::load(&top).is_ok(), "{:?}", LeanSpec::load(&top));
+        let inner = write(
+            &dir,
+            "Lib/Inner.lean",
+            "import Spec.Text\n\nnamespace Inner\n\ndef p : Prop := True\n\nend Inner\n",
+        );
+        assert!(
+            matches!(LeanSpec::load(&inner), Err(SpecError::NoSuchImport { ref path, .. }) if path.ends_with("Lib/Text.lean")),
+            "{:?}",
+            LeanSpec::load(&inner)
+        );
+    }
+
+    #[test]
+    fn a_missing_import_a_cycle_and_an_import_that_runs_code_are_refused() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let path = write(&dir, "Uses.lean", USES);
+        assert!(
+            matches!(LeanSpec::load(&path), Err(SpecError::NoSuchImport { ref import, .. }) if import == "Spec.Text"),
+            "{:?}",
+            LeanSpec::load(&path)
+        );
+        write(
+            &dir,
+            "Text.lean",
+            &format!("import Spec.Uses\n{TEXT}").replace(
+                "import Spec.Uses\nimport Mathlib",
+                "import Mathlib\nimport Spec.Uses",
+            ),
+        );
+        assert!(
+            matches!(LeanSpec::load(&path), Err(SpecError::ImportCycle { .. })),
+            "{:?}",
+            LeanSpec::load(&path)
+        );
+        write(&dir, "Text.lean", &format!("{TEXT}\n#eval 1\n"));
+        assert!(
+            matches!(LeanSpec::load(&path), Err(SpecError::RunsCode { ref found, .. }) if found == "#eval"),
+            "{:?}",
+            LeanSpec::load(&path)
+        );
     }
 }

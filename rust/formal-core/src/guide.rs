@@ -127,14 +127,14 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 8] = [
+const LEAN_SPEC: [&str; 9] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
      `theorem <Namespace>.<name>.holds : <Namespace>.<name>` and leaves the spec out: formal puts the spec \
      before the proof, and holds the proof to the spec's own statement. A proof that redefines a name of the \
      spec is rejected.",
-    "The cache key covers the whole spec, so an edit to it sends every property back as work.",
+    "The cache key covers the whole spec and every spec it imports, so an edit to any of them sends every property back as work.",
     "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof.",
     "A function of the spec names the code it describes with a `code: <path> <name>` line in its doc comment. \
      `def <name>.inputs` then lists the inputs to compare the two on. The session lists each such function under \
@@ -147,6 +147,9 @@ const LEAN_SPEC: [&str; 8] = [
      fix the spec and open the session again.",
     "Random values rarely hit a rare input. A spec can list values for a type as \
      `def <Type>.samples : List <Type>`. The search then draws half of the values of that type from that list.",
+    "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads \
+     `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted \
+     name from a subdirectory. Properties come only from that spec.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \

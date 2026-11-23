@@ -88,7 +88,11 @@ A Lean spec says what code must do. `spec/Pystr.lean` is the one for
 is `proofs/Pystr/<name>.lean`, which declares `theorem Pystr.<name>.holds`.
 
 formal checks a spec itself: `POST /session` with `{"spec": path}`.
-`formal-core/src/lean_spec.rs` reads the spec and composes each proof after it. The
+`formal-core/src/lean_spec.rs` reads the spec and composes each proof after it. A
+header line `import Spec.<Name>` reads `<Name>.lean` from the directory of the spec the
+session opens on, for nested imports too.
+`LeanSpec::source` is what Lean reads: the imported specs in dependency order, then
+the spec, under one header of their real imports. Every cache key digests the source. The
 composed file ends with `#formal_holds "<id>"`, which finds `<id>.holds` by name and
 requires its type to be the property. Like `#formal_audit`, it is defined in the
 `FormalAudit` module (`formal-lean/lean/FormalAudit.lean`), which every check imports

@@ -167,6 +167,24 @@ pub enum SpecError {
         function: String,
     },
 
+    /// A Lean spec imports a spec that is not there.
+    #[error("{spec} imports `{import}`, and there is no spec at {path}")]
+    NoSuchImport {
+        /// The spec that imports it.
+        spec: PathBuf,
+        /// The import, as the spec writes it.
+        import: String,
+        /// Where formal looked for it.
+        path: PathBuf,
+    },
+
+    /// Lean specs import each other in a cycle.
+    #[error("these specs import each other in a cycle: {chain}")]
+    ImportCycle {
+        /// Each spec of the cycle, in import order, ending where it starts.
+        chain: String,
+    },
+
     /// A Lean spec contains something that runs code while Lean checks it.
     #[error(
         "{path} contains `{found}`, which can run code while Lean checks it, and formal does not check a spec that can"

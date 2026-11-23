@@ -284,6 +284,13 @@ formal puts the spec before the proof and holds the proof to the spec's own stat
 A proof that redefines a name of the spec fails. The cache key covers the whole spec, so
 an edit to the spec sends every property back as work.
 
+A spec can reuse another spec's definitions. `import Spec.Pystr` in its header makes formal
+read `Pystr.lean` from the directory of the spec the session opens on, and put it before the
+spec. Nested imports resolve from that same directory, as Lean resolves modules from one
+root. A dotted name, such as `Spec.Lib.Text`, reads from a subdirectory. Properties come only from the spec the
+session opens on. The cache key covers every imported spec too, and formal refuses an
+import it cannot find, a cycle, and an imported spec that can run code.
+
 A Lean spec can also hold the code to its model. A function names the code it describes
 in a `code:` line of its doc comment, and `def <name>.inputs` lists the inputs:
 

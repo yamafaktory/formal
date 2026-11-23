@@ -418,13 +418,16 @@ impl Run {
         .await;
     }
 
+    /// Write a file into the workspace, and return its path.
+    fn write(&self, name: &str, text: &str) -> String {
+        let path = self.workspace.join(name);
+        fs::write(&path, text).expect("writable");
+        path.to_string_lossy().to_string()
+    }
+
     /// Opening a session on a Lean spec, and every way of doing it wrongly.
     async fn lean_specs(&mut self, spec_path: &str) {
-        let write = |name: &str, text: &str| {
-            let path = self.workspace.join(name);
-            fs::write(&path, text).expect("writable");
-            path.to_string_lossy().to_string()
-        };
+        let write = |name: &str, text: &str| self.write(name, text);
         let lean_spec = write("Demo.lean", LEAN_SPEC);
         let no_property = write(
             "Empty.lean",
@@ -497,6 +500,37 @@ impl Run {
         .await;
     }
 
+    /// Opening a session on a Lean spec that imports another spec, and on one whose import is missing.
+    async fn lean_spec_imports(&mut self) {
+        let write = |name: &str, text: &str| self.write(name, text);
+        write(
+            "Twice.lean",
+            "namespace Twice\n\ndef twice (n : Nat) : Nat := n + n\n\nend Twice\n",
+        );
+        let imports = write(
+            "Uses.lean",
+            "import Spec.Twice\n\nnamespace Uses\n\ndef twice_even : Prop := ∀ n, Twice.twice n % 2 = 0\n\nend Uses\n",
+        );
+        let missing_import = write(
+            "Missing.lean",
+            "import Spec.Absent\n\nnamespace Missing\n\ndef p : Prop := True\n\nend Missing\n",
+        );
+
+        self.open_session(
+            "session_open_from_lean_spec_that_imports_a_spec",
+            json!({ "spec": imports }),
+            "<importing-session>",
+        )
+        .await;
+        self.step(
+            "session_open_lean_spec_with_a_missing_import",
+            "POST",
+            "/session",
+            Some(json!({ "spec": missing_import })),
+        )
+        .await;
+    }
+
     /// Drive one server through the whole surface and return what it answered.
     async fn all(&mut self) {
         let spec_path = self.workspace.join("conformance.properties.json");
@@ -516,6 +550,7 @@ impl Run {
         self.guide().await;
         let (session, spec_session) = self.sessions(&spec_path, &missing_path).await;
         self.lean_specs(&spec_path).await;
+        self.lean_spec_imports().await;
         self.checks(&session).await;
         self.proofs(&session).await;
         self.closing(&session, &spec_session).await;
@@ -618,7 +653,7 @@ async fn the_http_surface_still_answers_what_was_recorded() {
     );
     assert_eq!(
         run.recorded.len(),
-        35,
+        37,
         "every step the golden file records was exercised"
     );
 }
@@ -660,7 +695,7 @@ fn a_missing_step_and_an_unexpected_one_are_both_reported() {
 
 #[test]
 fn the_golden_file_still_names_the_whole_surface() {
-    assert_eq!(golden().len(), 35);
+    assert_eq!(golden().len(), 37);
 }
 
 /// The golden file lives outside the crate, so nothing rebuilds when it changes.
