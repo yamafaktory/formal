@@ -223,3 +223,33 @@ fn a_property_over_any_universe_can_be_proved() {
     let outcome = checked.outcomes.first().expect("one outcome");
     assert!(outcome.verified(), "{}", outcome.error);
 }
+
+#[test]
+fn a_spec_that_imports_another_spec_proves_against_its_definitions() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    fs::copy(
+        repository().join("spec/Pystr.lean"),
+        dir.path().join("Pystr.lean"),
+    )
+    .expect("copied");
+    let path = dir.path().join("Uses.lean");
+    fs::write(
+        &path,
+        "import Spec.Pystr\n\nnamespace Uses\n\ndef rstrip_drops_a_trailing_tab : Prop := Pystr.rstrip ['a', '\\t'] = ['a']\n\nend Uses\n",
+    )
+    .expect("written");
+    let lean = "namespace Uses\n\ntheorem rstrip_drops_a_trailing_tab.holds : rstrip_drops_a_trailing_tab := by\n  decide\n\nend Uses\n";
+    let checked = check(
+        &runner,
+        &dir,
+        load(&path),
+        &proof("Uses.rstrip_drops_a_trailing_tab", lean),
+    );
+    let [outcome] = checked.outcomes.as_slice() else {
+        panic!("one outcome, got {}", checked.outcomes.len());
+    };
+    assert!(outcome.verified(), "{}", outcome.error);
+}
