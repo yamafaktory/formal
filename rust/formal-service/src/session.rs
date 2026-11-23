@@ -23,11 +23,14 @@ use std::{
 
 use formal_core::{
     lean_spec::{
+        Answer,
         Compared,
         Difference,
         Evaluated,
         LeanSpec,
+        Refutation,
         read_evaluation,
+        read_search,
     },
     property::{
         PropertyResult,
@@ -171,6 +174,8 @@ pub struct Session {
     pub lean_spec: Option<LeanSpec>,
     /// The inputs and the spec's answers for each compared function, once Lean printed them.
     pub evaluated: Vec<Evaluated>,
+    /// The properties of the Lean spec the search found a counterexample to.
+    pub refuted: Vec<Refutation>,
 }
 
 impl Session {
@@ -364,6 +369,54 @@ impl Session {
     }
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Searched {
+    refutation: Option<Refutation>,
+}
+
+/// The properties of `spec` that have a counterexample, from the cache or from Lean.
+///
+/// The search only advises: a property it cannot test, or a Lean that never
+/// ran, refutes nothing, and only a search Lean answered is cached.
+pub fn search<V: Verifier>(verifier: &V, cache: &ProofCache, spec: &LeanSpec) -> Vec<Refutation> {
+    let mut found: Vec<Option<Searched>> = spec
+        .properties
+        .iter()
+        .map(|id| cache.load(&spec.search_key(id)))
+        .collect();
+    let missing: Vec<&str> = spec
+        .properties
+        .iter()
+        .zip(&found)
+        .filter(|(_, found)| found.is_none())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    if !missing.is_empty() {
+        let search = spec.search(&missing);
+        let said = verifier.verify(&search.lean_code, None).said();
+        let mut read = read_search(&search, &said).into_iter();
+        let unsearched = spec
+            .properties
+            .iter()
+            .zip(&mut found)
+            .filter(|(_, slot)| slot.is_none());
+        for (id, slot) in unsearched {
+            let refutation = match read.next() {
+                Some(Answer::Refuted(refutation)) => Some(refutation),
+                Some(Answer::Unrefuted) => None,
+                Some(Answer::Silent) | None => continue,
+            };
+            let searched = Searched { refutation };
+            cache.save(&spec.search_key(id), &searched);
+            *slot = Some(searched);
+        }
+    }
+    found
+        .into_iter()
+        .filter_map(|found| found?.refutation)
+        .collect()
+}
+
 /// The inputs of each function `spec` compares, and the spec's answer to each.
 ///
 /// The cache answers for a spec text it has seen; Lean evaluates the rest, in
@@ -476,8 +529,9 @@ impl Sessions {
 
     /// Open a session on a Lean spec, with one property per `def … : Prop` in it.
     ///
-    /// Lean evaluates the inputs of each function the spec compares, unless the
-    /// cache already holds them.
+    /// Lean evaluates the inputs of each function the spec compares, and
+    /// searches each property for a counterexample, unless the cache already
+    /// holds the answer.
     ///
     /// # Errors
     ///
@@ -490,6 +544,7 @@ impl Sessions {
         spec: LeanSpec,
     ) -> Result<Arc<Mutex<Session>>, CompareError> {
         let evaluated = evaluate(verifier, cache, &spec)?;
+        let refuted = search(verifier, cache, &spec);
         let keys = spec
             .properties
             .iter()
@@ -501,7 +556,7 @@ impl Sessions {
             spec.property_specs(),
             keys,
             Vec::new(),
-            Some((spec, evaluated)),
+            Some((spec, evaluated, refuted)),
         ))
     }
 
@@ -527,12 +582,13 @@ impl Sessions {
         specs: Vec<PropertySpec>,
         keys: HashMap<String, String>,
         stale: Vec<String>,
-        spec: Option<(LeanSpec, Vec<Evaluated>)>,
+        spec: Option<(LeanSpec, Vec<Evaluated>, Vec<Refutation>)>,
     ) -> Arc<Mutex<Session>> {
         self.evict_expired();
-        let (lean_spec, evaluated) = spec.map_or((None, Vec::new()), |(spec, evaluated)| {
-            (Some(spec), evaluated)
-        });
+        let (lean_spec, evaluated, refuted) = spec.map_or(
+            (None, Vec::new(), Vec::new()),
+            |(spec, evaluated, refuted)| (Some(spec), evaluated, refuted),
+        );
 
         let mut session = Session {
             id,
@@ -546,6 +602,7 @@ impl Sessions {
             recovered: Vec::new(),
             lean_spec,
             evaluated,
+            refuted,
         };
 
         for spec in session.specs.clone() {

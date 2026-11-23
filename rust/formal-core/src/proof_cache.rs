@@ -159,6 +159,18 @@ pub fn lean_spec_answers_key(spec: &str, encoding: &str, command: &str) -> Strin
     ))
 }
 
+/// The cache key of the search for a counterexample to one property.
+///
+/// It covers the helpers and the command that run the search, so a change to
+/// either searches again.
+#[must_use]
+pub fn lean_spec_search_key(spec: &str, helpers: &str, command: &str) -> String {
+    sha256_hex(&format!(
+        "lean-spec-search:{}",
+        framed(&[spec, helpers, command])
+    ))
+}
+
 /// The SHA-256 digest of `text`, in lowercase hex.
 #[must_use]
 pub fn sha256_hex(text: &str) -> String {

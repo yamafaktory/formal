@@ -7,9 +7,12 @@ use std::{
 
 use formal_core::{
     lean_spec::{
+        Answer,
         Compared,
         LeanSpec,
+        Refutation,
         read_evaluation,
+        read_search,
     },
     pystr,
 };
@@ -27,9 +30,21 @@ fn runner() -> Option<Runner> {
     (project.join("lakefile.toml").is_file() && project.join(".lake").is_dir()).then_some(runner)
 }
 
+fn spec_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/Pystr.lean")
+}
+
 fn spec() -> LeanSpec {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../spec/Pystr.lean");
-    LeanSpec::load(&path.to_string_lossy()).expect("the spec loads")
+    LeanSpec::load(&spec_path().to_string_lossy()).expect("the spec loads")
+}
+
+fn searched(runner: &Runner, spec: &LeanSpec) -> Vec<Answer> {
+    let ids: Vec<&str> = spec.properties.iter().map(String::as_str).collect();
+    let search = spec.search(&ids);
+    let said = runner
+        .verify(&search.lean_code, Some(Duration::from_mins(5)))
+        .said();
+    read_search(&search, &said)
 }
 
 fn answer(function: &str, input: &Value) -> Value {
@@ -114,4 +129,53 @@ fn the_rust_answers_what_the_spec_answers() {
         })
         .collect();
     assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+#[test]
+fn lean_answers_the_search_of_every_property_of_the_spec_and_refutes_none() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let spec = spec();
+    let searched = searched(&runner, &spec);
+    assert_eq!(searched.len(), spec.properties.len());
+    assert!(
+        searched.iter().all(|answer| *answer == Answer::Unrefuted),
+        "{searched:?}"
+    );
+}
+
+#[test]
+fn a_false_property_comes_back_with_a_counterexample_drawn_from_the_samples() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = tempfile::TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Pystr.lean");
+    let text = std::fs::read_to_string(spec_path()).expect("the spec reads");
+    std::fs::write(
+        &path,
+        text.replace(
+            "end Pystr",
+            "def space_is_ascii : Prop := ∀ c : Char, isSpace c = true → c.toNat < 128\n\nend Pystr",
+        ),
+    )
+    .expect("written");
+    let spec = LeanSpec::load(&path.to_string_lossy()).expect("the spec loads");
+    let refuted: Vec<Refutation> = searched(&runner, &spec)
+        .into_iter()
+        .filter_map(|answer| match answer {
+            Answer::Refuted(refutation) => Some(refutation),
+            _ => None,
+        })
+        .collect();
+    let [refutation] = refuted.as_slice() else {
+        panic!("one refutation, got {refuted:?}");
+    };
+    assert_eq!(refutation.id, "Pystr.space_is_ascii");
+    assert!(
+        refutation.issue.ends_with("< 128 does not hold"),
+        "{refutation:?}"
+    );
+    assert_eq!(refutation.counterexample.len(), 1, "{refutation:?}");
 }

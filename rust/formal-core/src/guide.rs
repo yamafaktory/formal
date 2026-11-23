@@ -127,7 +127,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 6] = [
+const LEAN_SPEC: [&str; 8] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -142,6 +142,11 @@ const LEAN_SPEC: [&str; 6] = [
     "Run the code on each input. Then POST /session/{session_id}/compare with \
      {\"answers\": {\"<Namespace>.<name>\": [...]}}, one answer per input, in the order of the inputs. \
      A List Char crosses as a JSON string.",
+    "When the session opens, formal searches each property for a counterexample. A property it finds one for \
+     comes back under refuted, with the value of each variable and what does not hold. It stays under work: \
+     fix the spec and open the session again.",
+    "Random values rarely hit a rare input. A spec can list values for a type as \
+     `def <Type>.samples : List <Type>`. The search then draws half of the values of that type from that list.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \

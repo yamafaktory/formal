@@ -69,7 +69,9 @@
     "The cache key covers the whole spec, so an edit to it sends every property back as work.",
     "A spec cannot run code. formal refuses #eval, run_cmd and the rest in a spec, as it does in a proof.",
     "A function of the spec names the code it describes with a `code: <path> <name>` line in its doc comment. `def <name>.inputs` then lists the inputs to compare the two on. The session lists each such function under compare, with its inputs.",
-    "Run the code on each input. Then POST /session/{session_id}/compare with {\"answers\": {\"<Namespace>.<name>\": [...]}}, one answer per input, in the order of the inputs. A List Char crosses as a JSON string."
+    "Run the code on each input. Then POST /session/{session_id}/compare with {\"answers\": {\"<Namespace>.<name>\": [...]}}, one answer per input, in the order of the inputs. A List Char crosses as a JSON string.",
+    "When the session opens, formal searches each property for a counterexample. A property it finds one for comes back under refuted, with the value of each variable and what does not hold. It stays under work: fix the spec and open the session again.",
+    "Random values rarely hit a rare input. A spec can list values for a type as `def <Type>.samples : List <Type>`. The search then draws half of the values of that type from that list."
    ],
    "openapi": "GET /openapi.json is the full schema of every endpoint and response, including field types. Read it rather than guessing at a shape.",
    "sessions": "A session is in-memory and expires after an idle period (SESSION_TTL_MINUTES, one hour by default), and it is lost if the server restarts. Once it is gone, POST /session again with the same spec file: anything already proved comes straight back as a cache hit, so you never reprove it. A 404 from /session/{id}/check means expired, not wrong — reopen and carry on.",
@@ -183,6 +185,7 @@
    "cached": [],
    "compare": [],
    "complete": false,
+   "refuted": [],
    "session_id": "<session>",
    "stale": [],
    "work": [
@@ -209,6 +212,7 @@
    "cached": [],
    "compare": [],
    "complete": false,
+   "refuted": [],
    "session_id": "<lean-spec-session>",
    "stale": [],
    "work": [
@@ -223,6 +227,7 @@
    "cached": [],
    "compare": [],
    "complete": false,
+   "refuted": [],
    "session_id": "<spec-session>",
    "stale": [
     "gone/stale"
@@ -286,6 +291,7 @@
    "cached": [],
    "compare": [],
    "complete": false,
+   "refuted": [],
    "session_id": "<session>",
    "stale": [],
    "work": [

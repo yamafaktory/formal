@@ -771,7 +771,13 @@ mod comparing {
         let again = sessions
             .open_spec(&fake, &cache, lean_spec(&dir))
             .expect("the cache answers");
-        assert_eq!(*fake.calls.borrow(), 1);
+        let evaluations = fake
+            .seen
+            .borrow()
+            .iter()
+            .filter(|code| code.contains("formal-compare"))
+            .count();
+        assert_eq!(evaluations, 1);
         assert_eq!(
             again.lock().expect("a fresh session").evaluated[0].answers,
             [json!(0), json!(2), json!(4)]
@@ -848,5 +854,112 @@ mod comparing {
             ),
             "{short:?}"
         );
+    }
+}
+
+mod searching {
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::*;
+
+    const SPEC: &str = "namespace Demo\n\ndef double (n : Nat) : Nat := n + n\n\ndef double_odd : Prop := ∀ n, double n % 2 = 1\n\ndef double_mono : Prop := ∀ a b, a ≤ b → double a ≤ double b\n\nend Demo\n";
+
+    const FOUND: &str = "\n===================\nFound a counter-example!\nn := 0\nissue: 0 = 1 does not hold\n(0 shrinks)\n-------------------";
+
+    fn lean_spec(dir: &TempDir) -> LeanSpec {
+        let path = dir.path().join("Demo.lean");
+        fs::write(&path, SPEC).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn answering(spec: &LeanSpec, said: &[(&str, &str)]) -> Fake {
+        let ids: Vec<&str> = spec.properties.iter().map(String::as_str).collect();
+        let search = spec.search(&ids);
+        let output: Vec<String> = said
+            .iter()
+            .map(|(id, data)| {
+                let line = search
+                    .lines
+                    .iter()
+                    .find(|(searched, _)| searched == id)
+                    .map(|(_, line)| *line)
+                    .expect("the property is searched");
+                json!({ "severity": "error", "data": data, "pos": { "line": line, "column": 0 } })
+                    .to_string()
+            })
+            .collect();
+        Fake {
+            result: Some(LeanResult {
+                success: false,
+                output: output.join("\n"),
+                errors: Vec::new(),
+            }),
+            ..Fake::default()
+        }
+    }
+
+    #[test]
+    fn a_counterexample_lean_found_is_a_refutation_and_the_property_stays_work() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let spec = lean_spec(&dir);
+        let fake = answering(
+            &spec,
+            &[
+                ("Demo.double_odd", FOUND),
+                ("Demo.double_mono", "Unable to find a counter-example"),
+            ],
+        );
+        let session = Sessions::default()
+            .open_spec(&fake, &cache(&dir), spec)
+            .expect("the spec compares nothing");
+        let session = session.lock().expect("a fresh session");
+        let [refutation] = session.refuted.as_slice() else {
+            panic!("one refutation, got {:?}", session.refuted);
+        };
+        assert_eq!(refutation.id, "Demo.double_odd");
+        assert_eq!(refutation.counterexample, ["n := 0"]);
+        assert_eq!(refutation.issue, "0 = 1 does not hold");
+        assert_eq!(session.work_ids(), ["Demo.double_odd", "Demo.double_mono"]);
+    }
+
+    #[test]
+    fn a_search_lean_answered_is_not_run_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let spec = lean_spec(&dir);
+        let fake = answering(
+            &spec,
+            &[
+                ("Demo.double_odd", FOUND),
+                ("Demo.double_mono", "Unable to find a counter-example"),
+            ],
+        );
+        let sessions = Sessions::default();
+        sessions
+            .open_spec(&fake, &cache, spec.clone())
+            .expect("the spec compares nothing");
+        let again = sessions
+            .open_spec(&fake, &cache, spec)
+            .expect("the spec compares nothing");
+        assert_eq!(*fake.calls.borrow(), 1);
+        assert_eq!(again.lock().expect("a fresh session").refuted.len(), 1);
+    }
+
+    #[test]
+    fn a_lean_that_never_ran_refutes_nothing_and_is_asked_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::default();
+        let sessions = Sessions::default();
+        let session = sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("the spec compares nothing");
+        assert_eq!(session.lock().expect("a fresh session").refuted, []);
+        sessions
+            .open_spec(&fake, &cache, lean_spec(&dir))
+            .expect("the spec compares nothing");
+        assert_eq!(*fake.calls.borrow(), 2);
     }
 }

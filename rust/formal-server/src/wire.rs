@@ -109,6 +109,19 @@ pub struct SessionResponse {
     pub stale: Vec<String>,
     /// The functions of the Lean spec whose code to compare with the spec.
     pub compare: Vec<CompareOut>,
+    /// The properties of the Lean spec the search found a counterexample to.
+    pub refuted: Vec<RefutationOut>,
+}
+
+/// A property of the Lean spec, and the values for which it does not hold.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct RefutationOut {
+    /// The property.
+    pub id: String,
+    /// The value of each variable, as Plausible prints it.
+    pub counterexample: Vec<String>,
+    /// What does not hold for those values.
+    pub issue: String,
 }
 
 /// A function of the Lean spec, and the inputs its code must answer.

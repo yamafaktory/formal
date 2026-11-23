@@ -64,6 +64,7 @@ pub use wire::{
     FailureOut,
     ProofOut,
     PropertySpecIn,
+    RefutationOut,
     SessionRequest,
     SessionResponse,
 };
@@ -242,7 +243,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     info(title = "formal", version = env!("CARGO_PKG_VERSION")),
     paths(health, read_guide, read_guide_topic, open_session, read_session, check_session, compare_session, read_proof, close_session),
     components(schemas(
-        CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut,
+        CacheHitOut, CheckRequest, CheckResponse, CompareOut, CompareRequest, CompareResponse, Detail, DifferenceOut, FailureOut, RefutationOut,
         ProofOut, PropertySpecIn, SessionRequest, SessionResponse, Status, TopicOut,
     )),
 )]
@@ -333,6 +334,15 @@ fn describe(session: &Session) -> SessionResponse {
                 function: evaluated.function.clone(),
                 code: evaluated.code.clone(),
                 inputs: evaluated.inputs.clone(),
+            })
+            .collect(),
+        refuted: session
+            .refuted
+            .iter()
+            .map(|refutation| RefutationOut {
+                id: refutation.id.clone(),
+                counterexample: refutation.counterexample.clone(),
+                issue: refutation.issue.clone(),
             })
             .collect(),
     }
