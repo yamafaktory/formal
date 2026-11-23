@@ -174,7 +174,9 @@ fn doc_comment_pattern() -> &'static Regex {
 
 fn documented_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    pattern(&PATTERN, || format!(r"\A\s*{DEFINITION}({IDENTIFIER})"))
+    pattern(&PATTERN, || {
+        format!(r"\A\s*{DEFINITION}({IDENTIFIER}(?:\.{IDENTIFIER})*)")
+    })
 }
 
 fn code_line_pattern() -> &'static Regex {
@@ -778,6 +780,21 @@ mod tests {
             [Compared {
                 function: "Demo.a".to_string(),
                 code: "src/a.rs a".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_code_line_on_a_dotted_function_names_that_function() {
+        let spec = with(
+            "def f (n : Nat) : Nat := n\n/-- code: src/f.rs go -/\ndef f.go (n : Nat) : Nat := n\ndef f.go.inputs : List Nat := [0]",
+        )
+        .expect("it parses");
+        assert_eq!(
+            spec.compared,
+            [Compared {
+                function: "Demo.f.go".to_string(),
+                code: "src/f.rs go".to_string(),
             }]
         );
     }
