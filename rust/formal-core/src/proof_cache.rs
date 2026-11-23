@@ -226,6 +226,20 @@ mod tests {
     }
 
     #[test]
+    fn a_word_operator_next_to_a_non_ascii_letter_is_part_of_a_word() {
+        assert_eq!(normalise_formal("αin b"), "αinb");
+        assert_eq!(normalise_formal("a inα"), "ainα");
+    }
+
+    #[test]
+    fn the_kind_is_lowercased_with_unicode_rules() {
+        assert_eq!(
+            cache_key("f", "INVARIANTÉ", "p"),
+            cache_key("f", "invarianté", "p")
+        );
+    }
+
+    #[test]
     fn the_frame_counts_characters_and_not_bytes() {
         assert_eq!(framed(&["∀"]), "1:∀");
     }

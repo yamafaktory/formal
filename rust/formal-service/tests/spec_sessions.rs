@@ -79,57 +79,78 @@ fn proof(id: &str, lean: &str) -> Vec<(String, String)> {
     vec![(id.to_string(), lean.to_string())]
 }
 
-#[test]
-fn every_proof_of_the_spec_holds() {
-    let Some(runner) = runner() else {
-        return;
-    };
-    let spec = load(&repository().join("spec/Pystr.lean"));
-    let proofs: Vec<(String, String)> = spec
-        .properties
-        .iter()
-        .map(|id| {
-            let path = repository()
-                .join("proofs")
-                .join(&spec.namespace)
-                .join(format!("{}.lean", name(&spec, id)));
-            (
-                id.clone(),
-                fs::read_to_string(path).expect("the proof is readable"),
-            )
+fn specs() -> Vec<LeanSpec> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(repository().join("spec"))
+        .expect("the specs are listable")
+        .map(|entry| entry.expect("the entry is readable").path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "lean")
         })
         .collect();
+    paths.sort();
+    paths.iter().map(|path| load(path)).collect()
+}
 
-    let dir = TempDir::new().expect("a temporary directory");
-    let checked = check(&runner, &dir, spec, &proofs);
-    let failed: Vec<String> = checked
-        .outcomes
-        .iter()
-        .filter(|outcome| !outcome.verified())
-        .map(|outcome| format!("{}: {}", outcome.id, outcome.error))
-        .collect();
-    assert!(failed.is_empty(), "{}", failed.join("\n"));
-    assert_eq!(checked.outcomes.len(), proofs.len());
+fn proof_path(spec: &LeanSpec, id: &str) -> PathBuf {
+    repository()
+        .join("proofs")
+        .join(&spec.namespace)
+        .join(format!("{}.lean", name(spec, id)))
 }
 
 #[test]
-fn every_proof_answers_a_property_of_the_spec() {
-    let spec = load(&repository().join("spec/Pystr.lean"));
-    let names: Vec<&str> = spec.properties.iter().map(|id| name(&spec, id)).collect();
-    let orphans: Vec<String> = fs::read_dir(repository().join("proofs").join(&spec.namespace))
-        .expect("the proofs are listable")
-        .map(|entry| entry.expect("the entry is readable").path())
-        .filter(|path| {
-            path.extension().is_none_or(|extension| extension != "lean")
-                || path
-                    .file_stem()
-                    .is_none_or(|stem| !names.iter().any(|name| stem == *name))
-        })
-        .map(|path| path.display().to_string())
-        .collect();
+fn every_proof_of_every_spec_holds() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let mut failed = Vec::new();
+    for spec in specs() {
+        let proofs: Vec<(String, String)> = spec
+            .properties
+            .iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    fs::read_to_string(proof_path(&spec, id)).expect("the proof is readable"),
+                )
+            })
+            .collect();
+        let dir = TempDir::new().expect("a temporary directory");
+        let checked = check(&runner, &dir, spec, &proofs);
+        assert_eq!(checked.outcomes.len(), proofs.len());
+        failed.extend(
+            checked
+                .outcomes
+                .iter()
+                .filter(|outcome| !outcome.verified())
+                .map(|outcome| format!("{}: {}", outcome.id, outcome.error)),
+        );
+    }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
+}
+
+#[test]
+fn every_proof_answers_a_property_of_its_spec() {
+    let mut orphans = Vec::new();
+    for spec in specs() {
+        let names: Vec<&str> = spec.properties.iter().map(|id| name(&spec, id)).collect();
+        orphans.extend(
+            fs::read_dir(repository().join("proofs").join(&spec.namespace))
+                .expect("the proofs are listable")
+                .map(|entry| entry.expect("the entry is readable").path())
+                .filter(|path| {
+                    path.extension().is_none_or(|extension| extension != "lean")
+                        || path
+                            .file_stem()
+                            .is_none_or(|stem| !names.iter().any(|name| stem == *name))
+                })
+                .map(|path| path.display().to_string()),
+        );
+    }
     assert!(
         orphans.is_empty(),
-        "these proofs answer no property of the spec: {}",
+        "these proofs answer no property of their spec: {}",
         orphans.join(", ")
     );
 }

@@ -2,45 +2,6 @@
   "version": 1,
   "properties": [
     {
-      "id": "normalise_code/length_non_increasing",
-      "function": "normalise_code",
-      "kind": "bound",
-      "formal": "forall s, length (normalise_code s) <= length s",
-      "description": "normalising code only ever removes characters",
-      "assumptions": [
-        "text modelled as List Char",
-        "splitlines modelled as splitting on '\\n'"
-      ],
-      "source_file": "rust/formal-core/src/proof_cache.rs",
-      "function_code": "/// Indentation is meaning in Python, so only trailing and surrounding space goes.\n#[must_use]\npub fn normalise_code(function_code: &str) -> String {\n    pystr::splitlines(pystr::strip(function_code))\n        .into_iter()\n        .map(pystr::rstrip)\n        .collect::<Vec<_>>()\n        .join(\"\\n\")\n}"
-    },
-    {
-      "id": "framed/shifting_a_boundary_changes_the_payload",
-      "function": "framed",
-      "kind": "invariant",
-      "formal": "framed ['X\\na', 'b', 'c'] <> framed ['X', 'a\\nb', 'c']",
-      "description": "a field cannot imitate the boundary between two others — the newline-joined payload could, and two distinct properties shared a cache key",
-      "assumptions": [
-        "text modelled as List Char",
-        "stated on the witness that collided under the old joining"
-      ],
-      "source_file": "rust/formal-core/src/proof_cache.rs",
-      "function_code": "/// Join fields so that no field can imitate the boundary between two others.\n///\n/// Joining on a newline was ambiguous: normalised code and the kind may both\n/// contain one, so `(\"X\\na\", \"b\", \"c\")` and `(\"X\", \"a\\nb\", \"c\")` produced the\n/// same payload and therefore the same key — two distinct properties sharing\n/// one cached proof. Length-prefixing each field removes the ambiguity whatever\n/// the field contains.\n///\n/// The length is a count of characters, not of bytes. Normalisation puts\n/// multi-byte operators into the statement, so the two differ for most real\n/// inputs and a byte count moves every key.\nfn framed(parts: &[&str]) -> String {\n    let mut payload = String::new();\n    for part in parts {\n        payload.push_str(&part.chars().count().to_string());\n        payload.push(':');\n        payload.push_str(part);\n    }\n    payload\n}"
-    },
-    {
-      "id": "normalise_formal/word_operators_respect_boundaries",
-      "function": "normalise_formal",
-      "kind": "invariant",
-      "formal": "normalise_formal 'a in b' = normalise_formal 'a∈b' /\\ normalise_formal 'ainb' <> normalise_formal 'a∈b'",
-      "description": "the membership word is an operator only on a word boundary — 'ainb' is an identifier, and merging it with 'a∈b' put two properties under one key",
-      "assumptions": [
-        "text modelled as List Char",
-        "stated on the witness that collided before word boundaries were respected"
-      ],
-      "source_file": "rust/formal-core/src/proof_cache.rs",
-      "function_code": "/// Spelled as words, so they only count on a word boundary: `in` inside `ainb`\n/// is not the membership operator, and treating it as one merged unrelated\n/// statements.\nconst WORD_OPERATORS: &[(&str, &str)] =\n    &[(\"forall\", \"∀\"), (\"exists\", \"∃\"), (\"not\", \"¬\"), (\"in\", \"∈\")];\n\nfn word_pattern() -> &'static Regex {\n    static PATTERN: OnceLock<Regex> = OnceLock::new();\n    PATTERN.get_or_init(|| {\n        let alternation = WORD_OPERATORS\n            .iter()\n            .map(|&(word, _)| word)\n            .collect::<Vec<_>>()\n            .join(\"|\");\n        Regex::new(&format!(r\"\\b({alternation})\\b\")).expect(\"the operator words are literals\")\n    })\n}\n\n/// Reduce a formal statement to the form two writers of it should agree on.\n///\n/// Operator spelling and spacing are free choices — `∀ x, p x → q x` and\n/// `forall x, p x -> q x` are one statement — and an agent picks differently\n/// from run to run where a fixed prompt at temperature 0 did not.\n///\n/// Word-spelled operators are matched on word boundaries, and only before the\n/// whitespace goes. Replacing them afterwards, or by substring, merges\n/// statements that merely contain the letters: `a∈b` and the unrelated `ainb`\n/// both reduced to `ainb` under the previous version.\n#[must_use]\npub fn normalise_formal(formal: &str) -> String {\n    let mut formal = formal.to_string();\n    for &(ascii_form, symbol) in ASCII_OPERATORS {\n        formal = formal.replace(ascii_form, symbol);\n    }\n    let formal = word_pattern().replace_all(&formal, |caps: &Captures| {\n        let word = &caps[1];\n        WORD_OPERATORS\n            .iter()\n            .find(|&&(candidate, _)| candidate == word)\n            .map_or_else(|| word.to_string(), |&(_, symbol)| symbol.to_string())\n    });\n    formal.chars().filter(|&c| !pystr::is_space(c)).collect()\n}"
-    },
-    {
       "id": "split_imports/conservation",
       "function": "split_imports",
       "kind": "invariant",
@@ -375,20 +336,6 @@
       ],
       "source_file": "rust/formal-lean/src/verifier.rs",
       "function_code": "pub fn suggested_tactic(output: &str) -> Option<String> {\n    for line in output.lines() {\n        let data = serde_json::from_str::<serde_json::Value>(line)\n            .ok()\n            .and_then(|parsed| {\n                parsed\n                    .get(\"data\")\n                    .and_then(|d| d.as_str())\n                    .map(ToString::to_string)\n            })\n            .unwrap_or_else(|| line.to_string());\n        let Some(found) = suggestion_pattern().captures(&data) else {\n            continue;\n        };\n        // `trim_matches` takes a set of characters, not a suffix — trimming \"\\n\"\n        // that way would eat a trailing n from `exact Nat.le_refl n`.\n        let tactic = pystr::splitlines(&found[1])\n            .first()\n            .map(|first| first.trim().trim_matches('\"').trim().to_string())\n            .unwrap_or_default();\n        if !tactic.is_empty() {\n            return Some(tactic);\n        }\n    }\n    None\n}"
-    },
-    {
-      "id": "cache_key/a_kind_differing_only_in_case_or_space_is_the_same_key",
-      "function": "cache_key",
-      "kind": "identity",
-      "formal": "norm_kind '  Invariant ' = norm_kind 'invariant'",
-      "description": "the kind is stripped and lowercased before it is framed, so the same kind written differently is the same key rather than a second cached proof of the same thing",
-      "assumptions": [
-        "text modelled as List Char",
-        "strip modelled over spaces, which is what the witness holds",
-        "stated on the normalisation the key rests on; the digest itself is not modelled"
-      ],
-      "source_file": "rust/formal-core/src/proof_cache.rs",
-      "function_code": "pub fn cache_key(function_code: &str, kind: &str, formal: &str) -> String {\n    let payload = framed(&[\n        &normalise_code(function_code),\n        &pystr::strip(kind).to_lowercase(),\n        &normalise_formal(formal),\n    ]);\n    sha256_hex(&payload)\n}"
     },
     {
       "id": "validate/the_duplicate_check_is_exactly_nodup",
