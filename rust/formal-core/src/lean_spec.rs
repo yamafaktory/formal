@@ -19,6 +19,7 @@ use crate::{
     proof_cache::{
         lean_spec_answers_key,
         lean_spec_key,
+        lean_spec_search_key,
     },
     property::PropertySpec,
     specs::{
@@ -41,6 +42,44 @@ scoped instance (priority := high) : Lean.ToJson Char := ⟨fun c => Lean.Json.s
 scoped instance (priority := high) : Lean.ToJson (List Char) := ⟨fun s => Lean.Json.str (String.ofList s)⟩
 end FormalCompare";
 
+const SEARCH_IMPORT: &str = "Plausible";
+
+const SEARCH_HELPERS: &str = "namespace FormalRefute
+open Plausible
+
+scoped instance (priority := high) {n : String} {p : Prop} [h : Decidable p] :
+    Decidable (NamedBinder n p) := h
+
+scoped instance (priority := high) {α : Type u} {l : List α} {p : α → Prop} [DecidablePred p]
+    {n : String} : Decidable (∀ x, NamedBinder n (x ∈ l → p x)) :=
+  inferInstanceAs (Decidable (∀ x, x ∈ l → p x))
+
+def boundedRun {α : Type u} [Repr α] {β : α → Prop} [∀ x, Testable (β x)] (var : String)
+    (cfg : Configuration) (min : Bool) : (l : List α) → Gen (TestResult (∀ x, x ∈ l → β x))
+  | [] => pure (.success (PSum.inr (fun _ h => nomatch h)))
+  | x :: xs => do
+    match ← Testable.runProp (β x) cfg min with
+    | .failure h msgs n =>
+      pure (.failure (fun all => h (all x List.mem_cons_self)) (s!\"{var} := {repr x}\" :: msgs) n)
+    | _ =>
+      match ← boundedRun var cfg min xs with
+      | .failure h msgs n =>
+        pure (.failure (fun all => h (fun y hy => all y (List.mem_cons_of_mem _ hy))) msgs n)
+      | _ => pure (.success (PSum.inl ()))
+
+scoped instance (priority := high) {α : Type u} [Repr α] {l : List α} {β : α → Prop}
+    [∀ x, Testable (β x)] {n n' : String} :
+    Testable (NamedBinder n (∀ x, NamedBinder n' (x ∈ l → β x))) where
+  run cfg min := boundedRun n cfg min l
+
+def withSamples {α : Type} [Arbitrary α] (samples : List α) : Gen α :=
+  Gen.frequency Arbitrary.arbitrary
+    [(1, Arbitrary.arbitrary), (1, Gen.oneOfWithDefault Arbitrary.arbitrary (samples.map pure))]
+
+end FormalRefute";
+
+const COUNTEREXAMPLE_MARK: &str = "Found a counter-example!";
+
 /// A Lean file that defines the code's model and states its properties.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeanSpec {
@@ -52,6 +91,39 @@ pub struct LeanSpec {
     pub properties: Vec<String>,
     /// The functions whose doc comment names the code they describe, in the spec's order.
     pub compared: Vec<Compared>,
+    /// The types the spec lists samples of, as `def <Type>.samples`, in name order.
+    pub sampled: Vec<String>,
+}
+
+/// A property the search found a counterexample to.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct Refutation {
+    /// The property, as `<namespace>.<name>`.
+    pub id: String,
+    /// The value of each variable, as Plausible prints it.
+    pub counterexample: Vec<String>,
+    /// What does not hold for those values.
+    pub issue: String,
+}
+
+/// What Lean said on the line of one search.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Answer {
+    /// Lean said nothing, because the search never ran.
+    Silent,
+    /// The search ran and found no counterexample.
+    Unrefuted,
+    /// The search found a counterexample.
+    Refuted(Refutation),
+}
+
+/// The file that searches properties for a counterexample, and the line of each search.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Search {
+    /// The file, ready for Lean.
+    pub lean_code: String,
+    /// Each property, and the line that searches it.
+    pub lines: Vec<(String, u32)>,
 }
 
 /// A function of the spec that names the code it describes.
@@ -186,14 +258,8 @@ fn code_line_pattern() -> &'static Regex {
     })
 }
 
-fn compared_functions(
-    path: &Path,
-    text: &str,
-    code: &str,
-    namespace: &str,
-    blocks: &[(String, usize, usize)],
-) -> Result<Vec<Compared>, SpecError> {
-    let defined: HashMap<&str, bool> = definition_pattern()
+fn definitions<'a>(code: &'a str, blocks: &[(String, usize, usize)]) -> HashMap<&'a str, bool> {
+    definition_pattern()
         .captures_iter(code)
         .filter_map(|found| {
             let at = found.get(0)?.start();
@@ -202,7 +268,27 @@ fn compared_functions(
                 .any(|(_, start, end)| *start <= at && at < *end);
             Some((found.get(1)?.as_str(), inside))
         })
+        .collect()
+}
+
+fn sampled_types(defined: &HashMap<&str, bool>) -> Vec<String> {
+    let mut types: Vec<String> = defined
+        .iter()
+        .filter(|(_, inside)| **inside)
+        .filter_map(|(name, _)| name.strip_suffix(".samples"))
+        .filter(|name| identifier_pattern().is_match(name))
+        .map(ToString::to_string)
         .collect();
+    types.sort();
+    types
+}
+
+fn compared_functions(
+    path: &Path,
+    text: &str,
+    namespace: &str,
+    defined: &HashMap<&str, bool>,
+) -> Result<Vec<Compared>, SpecError> {
     let mut compared = Vec::new();
     for found in doc_comment_pattern().captures_iter(text) {
         let Some(code_line) = code_line_pattern().captures(&found[1]) else {
@@ -247,6 +333,10 @@ fn import_lines<'a>(modules: impl Iterator<Item = &'a str>) -> Vec<String> {
         }
     }
     lines
+}
+
+fn search_of(id: &str) -> String {
+    format!("open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible")
 }
 
 fn evaluation_of(function: &str) -> String {
@@ -358,12 +448,15 @@ impl LeanSpec {
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
-        let compared = compared_functions(path, &text, &code, &namespace, &blocks)?;
+        let defined = definitions(&code, &blocks);
+        let compared = compared_functions(path, &text, &namespace, &defined)?;
+        let sampled = sampled_types(&defined);
         Ok(Self {
             text,
             namespace,
             properties,
             compared,
+            sampled,
         })
     }
 
@@ -410,6 +503,47 @@ impl LeanSpec {
         format!("{}\n", lines.join("\n"))
     }
 
+    /// The cache key of the search for a counterexample to the property `id`.
+    #[must_use]
+    pub fn search_key(&self, id: &str) -> String {
+        lean_spec_search_key(&self.text, SEARCH_HELPERS, &search_of(id))
+    }
+
+    /// The file that searches each property in `ids` for a counterexample.
+    ///
+    /// The values of a type the spec lists samples of are drawn half from
+    /// those samples. Each search is one line, and Lean answers it on that line.
+    #[must_use]
+    pub fn search(&self, ids: &[&str]) -> Search {
+        let spec = self.text.trim_start_matches('\u{feff}');
+        let spec_imports = imports(spec);
+        let mut lines = import_lines(
+            std::iter::once(SEARCH_IMPORT)
+                .chain(spec_imports.iter().map(|import| import.module.as_str())),
+        );
+        lines.extend(blanked(spec, &spec_imports).split('\n').map(str::to_string));
+        lines.extend(SEARCH_HELPERS.split('\n').map(str::to_string));
+        let namespace = &self.namespace;
+        lines.extend(self.sampled.iter().map(|sampled| {
+            format!(
+                "open {namespace} in instance (priority := high) : Plausible.Arbitrary {sampled} := \
+                 ⟨FormalRefute.withSamples {namespace}.{sampled}.samples⟩"
+            )
+        }));
+        let mut searched = Vec::new();
+        for id in ids {
+            lines.push(search_of(id));
+            searched.push((
+                (*id).to_string(),
+                u32::try_from(lines.len()).unwrap_or(u32::MAX),
+            ));
+        }
+        Search {
+            lean_code: format!("{}\n", lines.join("\n")),
+            lines: searched,
+        }
+    }
+
     /// The file that checks `proof` against the property `id`.
     ///
     /// The imports of the spec and the proof come first, then the spec and a
@@ -442,6 +576,53 @@ impl LeanSpec {
             proof_lines: u32::try_from(body.split('\n').count()).unwrap_or(u32::MAX),
         }
     }
+}
+
+/// What Lean said on each line of `search`, one answer per line, in order.
+#[must_use]
+pub fn read_search(search: &Search, said: &[(u32, String)]) -> Vec<Answer> {
+    search
+        .lines
+        .iter()
+        .map(|(id, line)| {
+            let mut on_line = said.iter().filter(|(at, _)| at == line).peekable();
+            if on_line.peek().is_none() {
+                return Answer::Silent;
+            }
+            on_line
+                .find_map(|(_, data)| refutation(id, data))
+                .map_or(Answer::Unrefuted, Answer::Refuted)
+        })
+        .collect()
+}
+
+fn refutation(id: &str, data: &str) -> Option<Refutation> {
+    let (_, found) = data.split_once(COUNTEREXAMPLE_MARK)?;
+    let mut entries: Vec<String> = Vec::new();
+    for line in found.split('\n').filter(|line| !line.is_empty()) {
+        if line.starts_with('(') || line.starts_with('-') {
+            break;
+        }
+        match entries.last_mut() {
+            Some(entry) if line.starts_with(' ') => {
+                entry.push('\n');
+                entry.push_str(line);
+            }
+            _ => entries.push(line.to_string()),
+        }
+    }
+    let issue = entries
+        .iter()
+        .find_map(|entry| entry.strip_prefix("issue: "))?;
+    Some(Refutation {
+        id: id.to_string(),
+        counterexample: entries
+            .iter()
+            .filter(|entry| !entry.starts_with("issue: ") && !entry.starts_with("guard:"))
+            .cloned()
+            .collect(),
+        issue: issue.to_string(),
+    })
 }
 
 /// The answers the evaluation of `compared` printed, one per function.
@@ -921,6 +1102,115 @@ mod tests {
                 "{printed:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_type_with_samples_inside_the_namespace_is_sampled() {
+        let spec = with("def Char.samples : List Char := ['a']\ndef Nat.samples : List Nat := [0]")
+            .expect("it parses");
+        assert_eq!(spec.sampled, ["Char", "Nat"]);
+        assert_eq!(
+            parse(&format!("def Char.samples : List Char := ['a']\n{DEMO}"))
+                .expect("it parses")
+                .sampled,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn the_search_draws_from_the_samples_and_gives_each_property_its_own_line() {
+        let spec = with("def Char.samples : List Char := ['a']").expect("it parses");
+        let search = spec.search(&["Demo.double_even", "Demo.double_mono"]);
+        let lines: Vec<&str> = search.lean_code.split('\n').collect();
+        assert_eq!(lines[0], "import Plausible");
+        assert!(search.lean_code.contains(
+            "open Demo in instance (priority := high) : Plausible.Arbitrary Char := ⟨FormalRefute.withSamples Demo.Char.samples⟩"
+        ));
+        for (id, line) in &search.lines {
+            let at = usize::try_from(*line).expect("it fits") - 1;
+            assert_eq!(
+                lines[at],
+                format!(
+                    "open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible"
+                )
+            );
+        }
+    }
+
+    const SEARCHED: &str = "namespace Demo\n\ndef double (n : Nat) : Nat := n + n\n\ndef double_odd : Prop := ∀ n, double n % 2 = 1\n\ndef double_mono : Prop := ∀ a b, a ≤ b → double a ≤ double b\n\ndef Char.samples : List Char := ['\\u2028']\n\ndef space_free : Prop := ∀ s : List Char, ∀ c ∈ s, c.toNat < 128\n\nend Demo\n";
+
+    #[test]
+    fn what_lean_said_on_a_search_line_is_read_as_a_refutation_or_as_nothing_found() {
+        let spec = parse(SEARCHED).expect("it parses");
+        let search = spec.search(&["Demo.double_odd", "Demo.double_mono", "Demo.space_free"]);
+        let line = |at: usize| search.lines[at].1;
+        let said = [
+            (
+                line(0),
+                "\n===================\nFound a counter-example!\nn := 0\nissue: 0 = 1 does not hold\n(0 shrinks)\n-------------------".to_string(),
+            ),
+            (line(1), "Unable to find a counter-example".to_string()),
+            (line(1), "declaration uses `sorry`".to_string()),
+            (
+                line(2),
+                "\n===================\nFound a counter-example!\ns := ['\u{2028}']\nc := '\u{2028}'\nissue: 8232 < 128 does not hold\n(5 shrinks)\n-------------------".to_string(),
+            ),
+        ];
+        let refutation = |id: &str, counterexample: &[&str], issue: &str| {
+            Answer::Refuted(Refutation {
+                id: id.to_string(),
+                counterexample: counterexample.iter().map(ToString::to_string).collect(),
+                issue: issue.to_string(),
+            })
+        };
+        assert_eq!(
+            read_search(&search, &said),
+            [
+                refutation("Demo.double_odd", &["n := 0"], "0 = 1 does not hold"),
+                Answer::Unrefuted,
+                refutation(
+                    "Demo.space_free",
+                    &["s := ['\u{2028}']", "c := '\u{2028}'"],
+                    "8232 < 128 does not hold"
+                ),
+            ]
+        );
+        assert_eq!(
+            read_search(&search, &said[1..3]),
+            [Answer::Silent, Answer::Unrefuted, Answer::Silent]
+        );
+    }
+
+    #[test]
+    fn a_value_lean_wraps_over_several_lines_stays_one_value() {
+        let spec = demo();
+        let search = spec.search(&["Demo.double_even"]);
+        let line = search.lines[0].1;
+        let found = "\n===================\nFound a counter-example!\ns := [0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0]\nissue: 45 < 45 does not hold\n(211 shrinks)\n-------------------";
+        let read = read_search(&search, &[(line, found.to_string())]);
+        let [Answer::Refuted(refutation)] = read.as_slice() else {
+            panic!("one refutation, got {read:?}");
+        };
+        assert_eq!(
+            refutation.counterexample,
+            [
+                "s := [0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0,\n 0]"
+            ]
+        );
+        assert_eq!(refutation.issue, "45 < 45 does not hold");
+    }
+
+    #[test]
+    fn the_search_key_is_its_own() {
+        let spec = demo();
+        assert_ne!(
+            spec.search_key("Demo.double_even"),
+            spec.key("Demo.double_even")
+        );
+        assert_ne!(
+            spec.search_key("Demo.double_even"),
+            spec.search_key("Demo.double_mono")
+        );
     }
 
     #[test]

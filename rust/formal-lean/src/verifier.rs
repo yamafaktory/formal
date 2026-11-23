@@ -125,6 +125,25 @@ pub struct LeanResult {
     pub errors: Vec<LeanError>,
 }
 
+fn moved(line: &str, map: impl Fn(u32) -> Option<u32>) -> Option<String> {
+    let mut message: serde_json::Value = serde_json::from_str(line).ok()?;
+    let fields = message.as_object_mut()?;
+    for key in ["pos", "endPos"] {
+        if let Some(position) = fields
+            .get_mut(key)
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            let line = position
+                .get("line")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|line| u32::try_from(line).ok())
+                .and_then(&map);
+            position.insert("line".to_string(), line.into());
+        }
+    }
+    Some(message.to_string())
+}
+
 impl LeanResult {
     /// The same verdict with each line moved by `map`, and a column kept only with its line.
     #[must_use]
@@ -139,15 +158,38 @@ impl LeanResult {
             error.line = None;
             error.col = None;
         }
+        self.output = self
+            .output
+            .lines()
+            .map(|line| moved(line, &map).unwrap_or_else(|| line.to_string()))
+            .collect::<Vec<_>>()
+            .join("\n");
         self
+    }
+
+    /// Every message Lean gave on the checked file, in order.
+    #[must_use]
+    pub fn messages(&self) -> Vec<LeanError> {
+        self.output
+            .lines()
+            .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())
+            .collect()
+    }
+
+    /// Each message Lean gave on a line of the checked file, with that line.
+    #[must_use]
+    pub fn said(&self) -> Vec<(u32, String)> {
+        self.messages()
+            .into_iter()
+            .filter_map(|message| Some((message.position().0?, message.data)))
+            .collect()
     }
 
     /// What the checked file printed, one entry per information message.
     #[must_use]
     pub fn printed(&self) -> Vec<String> {
-        self.output
-            .lines()
-            .filter_map(|line| serde_json::from_str::<LeanError>(line).ok())
+        self.messages()
+            .into_iter()
             .filter(|message| message.severity == "information")
             .map(|message| message.data)
             .collect()
@@ -481,6 +523,23 @@ mod tests {
 
     fn table() -> &'static Table {
         Table::shipped().expect("the shipped table is valid")
+    }
+
+    #[test]
+    fn moving_the_lines_moves_every_message_lean_gave() {
+        let result = LeanResult {
+            output: [
+                r#"{"severity":"information","data":"found","pos":{"line":5,"column":2},"endPos":{"line":6,"column":0}}"#,
+                "not json",
+            ]
+            .join("\n"),
+            ..LeanResult::default()
+        }
+        .map_lines(|line| line.checked_sub(1));
+        let messages = result.messages();
+        assert_eq!(messages[0].position(), (Some(4), Some(2)));
+        assert_eq!(messages[0].data, "found");
+        assert!(result.output.ends_with("\nnot json"), "{}", result.output);
     }
 
     #[test]

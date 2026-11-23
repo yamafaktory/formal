@@ -4,6 +4,8 @@ def alphabet : List Char :=
   ['a', ' ', '\t', '\u00a0', '\x1f', '\n', '\x0b', '\x0c', '\x1c', '\x1d', '\x1e', '\r', '\x85',
     '\u2028', '\u2029']
 
+def Char.samples : List Char := alphabet
+
 def words : Nat → List (List Char)
   | 0 => [[]]
   | n + 1 => [] :: alphabet.flatMap fun c => (words n).map (c :: ·)

@@ -98,6 +98,12 @@ formal runs it when the session opens and caches the answers per spec text. The 
 runs its code and sends the answers to `POST /session/{id}/compare`. The evaluation
 prints JSON through `Lean.ToJson`, with a `List Char` as a string.
 
+`LeanSpec::search` builds one file that searches each property for a counterexample
+with Plausible, one property per line, and reads Lean's answer on that line. The file
+defines a `Testable` instance for `∀ x ∈ l`, and draws half of the values of each type
+the spec lists `<Type>.samples` for from that list. formal runs it when the session
+opens and caches each answer Lean gave. A refuted property stays work.
+
 `formal-service/tests/spec_sessions.rs` checks every proof of `spec/Pystr.lean` through
 a session, and holds the check to proofs that try to cheat. `formal-lean/tests/spec.rs`
 runs that evaluation on `spec/Pystr.lean` and compares the Rust with each answer. The

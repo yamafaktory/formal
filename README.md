@@ -304,6 +304,28 @@ The caller runs its own code on each input and sends the answers to
 the functions that `matched`. Each function that `differed` comes with the first input
 where the two disagree, the spec's answer and the code's answer.
 
+When the session opens, formal also searches each property for a counterexample with
+Plausible. A false property comes back under `refuted`, with the value of each variable
+and what does not hold. For this false property in a spec with the namespace `Demo`:
+
+```lean
+def double (n : Nat) : Nat := n + n
+
+def double_odd : Prop := ∀ n, double n % 2 = 1
+```
+
+the session answers:
+
+```json
+"refuted": [{"id": "Demo.double_odd", "counterexample": ["n := 0"], "issue": "0 = 1 does not hold"}]
+```
+
+The property stays under `work`. Fix the spec, and open the session again. A property the
+search cannot test refutes nothing, and its proof decides it. Random values rarely hit a
+rare input, so a spec can list values for a type, as `def <Type>.samples : List <Type>`.
+The search then draws half of the values of that type from that list. `spec/Pystr.lean`
+lists its `alphabet` as `Char.samples`.
+
 ### Stale properties
 
 A committed property can outlive its code. Each property records the function source it
