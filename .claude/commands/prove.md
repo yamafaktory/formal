@@ -16,11 +16,10 @@ what to aim at, and what not to break.
 
 ## What already exists
 
-`formal.properties.json` holds three properties, all against
-`rust/formal-core/src/proof_cache.rs`, with their Lean in `proofs/`:
-`normalise_code/length_non_increasing`, `framed/shifting_a_boundary_changes_the_payload`,
-`normalise_formal/word_operators_respect_boundaries`. Two of the three were written after
-formal found a real cache-key collision. Do not restate them.
+`formal.properties.json` holds formal's own properties, about functions in
+`rust/formal-lean/src/` and `rust/formal-core/src/`, with their Lean in `proofs/`. Two of
+them were written after formal found a real cache-key collision. Read the file before you
+write a property, and do not restate one.
 
 Everything else in the workspace is unproved.
 
@@ -81,9 +80,11 @@ filesystem; the sandbox; the server wiring. Not pure, not provable, not the poin
   `proofs/<function>_<short>.lean`, matching the three already there. Nothing reads
   the top level of `proofs/` — it is the committed record. `proofs/Pystr/` belongs to the
   spec, and `formal-service/tests/spec_sessions.rs` reads it.
-- **Do not touch the four judging files**: `tests/conformance/golden/responses.json`,
+- **Do not touch four of the judging files**: `tests/conformance/golden/responses.json`,
   `tests/fixtures/cache_keys.toml`, `tests/fixtures/hint_corpus.toml`,
-  `rust/formal-core/guidance/`.
+  `rust/formal-core/guidance/`. The fifth, `formal.properties.json`, takes new
+  properties. Its tests fail when a property is stale, or when its `function_code` does
+  not hold the function it names.
 - **Batch.** Every proof in one `check` request pays a single `import Mathlib` (~3.2s);
   one request per proof pays it each time. Read `/guide/tactics` before the first attempt
   — most first-attempt failures are already on that list.

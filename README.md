@@ -351,6 +351,9 @@ formal checks itself. `formal.properties.json` in this repository is formal's ow
 with the proofs in `proofs/`. Two of its properties guard against collisions that really
 happened in formal's cache key: an operator spelled as a word counts only at a word
 boundary, and no field of the key can imitate the boundary between two others.
+A test fails when one of these properties is stale, so a change to the code updates them in
+the same pull request. The tests do not check the proofs, so whoever updates a property
+checks its proof through formal again.
 
 The Python string rules the cache key depends on have a spec instead: `spec/Pystr.lean`.
 Their proofs are in `proofs/Pystr/`. The test `formal-service/tests/spec_sessions.rs` checks

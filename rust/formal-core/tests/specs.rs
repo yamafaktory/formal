@@ -183,6 +183,33 @@ mod loading {
 mod staleness {
     use super::*;
 
+    fn formal_itself() -> specs::SpecFile {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../formal.properties.json");
+        specs::load(&path.to_string_lossy(), None).expect("formal's own spec loads")
+    }
+
+    #[test]
+    fn every_property_of_formal_itself_still_describes_its_code() {
+        assert_eq!(formal_itself().stale_ids(), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn every_property_of_formal_itself_records_the_function_it_is_about() {
+        let loaded = formal_itself();
+        let elsewhere: Vec<&str> = loaded
+            .specs()
+            .into_iter()
+            .filter(|spec| {
+                !["(", "<"].iter().any(|open| {
+                    spec.function_code
+                        .contains(&format!("fn {}{open}", spec.function))
+                })
+            })
+            .map(|spec| spec.id.as_str())
+            .collect();
+        assert_eq!(elsewhere, Vec::<&str>::new());
+    }
+
     fn stale_entry(source_file: &str) -> Value {
         with(&[
             ("source_file", json!(source_file)),
