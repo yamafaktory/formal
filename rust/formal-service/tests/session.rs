@@ -1069,3 +1069,152 @@ mod exploring {
         assert_eq!(explorations(&fake), 2);
     }
 }
+
+mod inducting {
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::*;
+
+    const SPEC: &str = "namespace Cycle\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨if s.count = 2 then 0 else s.count + 1⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_is_not_five : State → Prop := fun s => s.count ≠ 5\n\nend Cycle\n";
+
+    const BOTH_BOUNDED: [&str; 2] = [
+        "formal-bounded Cycle.count_at_most_two.always bounded 10 3\n",
+        "formal-bounded Cycle.count_is_not_five.always bounded 10 3\n",
+    ];
+
+    const INDUCTION: [&str; 3] = [
+        "formal-inductive Cycle.count_at_most_two.always kept 120\n",
+        "formal-inductive Cycle.count_is_not_five.always broken\u{1f}{ count := 4 }\u{1f}Cycle.Action.inc\u{1f}{ count := 5 }\n",
+        "formal-inductive Cycle.count_at_most_two.always,Cycle.count_is_not_five.always kept 129\n",
+    ];
+
+    fn lean_spec(dir: &TempDir) -> LeanSpec {
+        let path = dir.path().join("Cycle.lean");
+        fs::write(&path, SPEC).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn printing(data: &[&str]) -> Fake {
+        let output: Vec<String> = data
+            .iter()
+            .map(|data| json!({ "severity": "information", "data": data }).to_string())
+            .collect();
+        Fake {
+            result: Some(LeanResult {
+                success: true,
+                output: output.join("\n"),
+                errors: Vec::new(),
+            }),
+            ..Fake::default()
+        }
+    }
+
+    fn inductions(fake: &Fake) -> usize {
+        fake.seen
+            .borrow()
+            .iter()
+            .filter(|code| code.contains("FormalInductive.search"))
+            .count()
+    }
+
+    #[test]
+    fn a_broken_step_is_not_inductive_and_a_kept_conjunction_is_inductive_together() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let lines: Vec<&str> = BOTH_BOUNDED.iter().chain(&INDUCTION).copied().collect();
+        let session = Sessions::default()
+            .open_spec(&printing(&lines), &cache(&dir), lean_spec(&dir))
+            .expect("the spec compares nothing");
+        let session = session.lock().expect("a fresh session");
+        let found: Vec<(&str, &str, &str, &str)> = session
+            .not_inductive
+            .iter()
+            .map(|found| {
+                (
+                    found.id.as_str(),
+                    found.state.as_str(),
+                    found.action.as_str(),
+                    found.next.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [(
+                "Cycle.count_is_not_five.always",
+                "{ count := 4 }",
+                "Cycle.Action.inc",
+                "{ count := 5 }"
+            )]
+        );
+        assert_eq!(
+            session.inductive_together,
+            [
+                "Cycle.count_at_most_two.always",
+                "Cycle.count_is_not_five.always"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refuted_invariant_is_not_tested_and_an_answer_is_not_asked_twice() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = printing(&[
+            "formal-bounded Cycle.count_at_most_two.always bounded 10 3\n",
+            "formal-bounded Cycle.count_is_not_five.always falsified [Cycle.Action.inc]\n",
+            "formal-inductive Cycle.count_at_most_two.always kept 120\n",
+        ]);
+        let sessions = Sessions::default();
+        for _ in 0..2 {
+            let session = sessions
+                .open_spec(&fake, &cache, lean_spec(&dir))
+                .expect("the spec compares nothing");
+            let session = session.lock().expect("a fresh session");
+            assert_eq!(session.not_inductive, []);
+            assert_eq!(session.inductive_together, Vec::<String>::new());
+        }
+        assert_eq!(inductions(&fake), 1);
+        let seen = fake.seen.borrow();
+        let induction = seen
+            .iter()
+            .find(|code| code.contains("FormalInductive.search"))
+            .expect("the induction ran");
+        assert!(
+            !induction.contains("\"Cycle.count_is_not_five.always\""),
+            "{induction}"
+        );
+        assert!(
+            induction.contains("\"Cycle.count_at_most_two.always\""),
+            "{induction}"
+        );
+    }
+
+    #[test]
+    fn a_test_no_drawn_state_reached_gives_no_answer_and_runs_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let lines: Vec<&str> = BOTH_BOUNDED
+            .iter()
+            .copied()
+            .chain([
+                "formal-inductive Cycle.count_at_most_two.always kept 120\n",
+                "formal-inductive Cycle.count_is_not_five.always broken\u{1f}{ count := 4 }\u{1f}Cycle.Action.inc\u{1f}{ count := 5 }\n",
+                "formal-inductive Cycle.count_at_most_two.always,Cycle.count_is_not_five.always kept 0\n",
+            ])
+            .collect();
+        let fake = printing(&lines);
+        let sessions = Sessions::default();
+        for _ in 0..2 {
+            let session = sessions
+                .open_spec(&fake, &cache, lean_spec(&dir))
+                .expect("the spec compares nothing");
+            assert_eq!(
+                session.lock().expect("a fresh session").inductive_together,
+                Vec::<String>::new()
+            );
+        }
+        assert_eq!(inductions(&fake), 2);
+    }
+}

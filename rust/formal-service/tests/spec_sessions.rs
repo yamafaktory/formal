@@ -530,3 +530,49 @@ fn a_replayed_machine_with_text_in_its_state_and_an_unrelated_type_still_opens()
         ]
     );
 }
+
+const CYCLE: &str = "namespace Cycle\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨if s.count = 2 then 0 else s.count + 1⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_is_not_five : State → Prop := fun s => s.count ≠ 5\n\nend Cycle\n";
+
+#[test]
+fn an_invariant_a_step_breaks_from_an_unreachable_state_comes_back_with_that_state() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Cycle.lean");
+    fs::write(&path, CYCLE).expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, load(&path))
+        .expect("the spec compares nothing");
+    let session = session.lock().expect("a fresh session");
+    assert_eq!(session.refuted, []);
+    let found: Vec<(&str, &str, &str, &str)> = session
+        .not_inductive
+        .iter()
+        .map(|found| {
+            (
+                found.id.as_str(),
+                found.state.as_str(),
+                found.action.as_str(),
+                found.next.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            "Cycle.count_is_not_five.always",
+            "{ count := 4 }",
+            "Cycle.Action.inc",
+            "{ count := 5 }"
+        )]
+    );
+    assert_eq!(
+        session.inductive_together,
+        [
+            "Cycle.count_at_most_two.always",
+            "Cycle.count_is_not_five.always"
+        ]
+    );
+}

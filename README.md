@@ -360,6 +360,20 @@ no argument crosses as its name, one with named arguments as `{"add": {"n": 1}}`
 one anonymous argument as `{"one": 1}`, and one with several as `{"two": [2, false]}`.
 `Option.none` crosses as `null`. A trace of `Char` actions crosses as a string.
 
+formal also tests whether each invariant the checks did not refute is inductive, the
+shape a proof by induction needs. It draws states where the invariant holds, takes every
+action, and checks the next state. A state where a step breaks it comes back under
+`not_inductive`, with the action and the next state, so its proof needs a stronger
+invariant. When several such invariants are kept by every step together,
+`inductive_together` names them, and one induction proves them all:
+
+```json
+"not_inductive": [{"id": "Cycle.count_is_not_five.always", "state": "{ count := 4 }", "action": "Cycle.Action.inc", "next": "{ count := 5 }"}],
+"inductive_together": ["Cycle.count_at_most_two.always", "Cycle.count_is_not_five.always"]
+```
+
+`<State>.samples` steers the drawn states, as `<Type>.samples` steers the search.
+
 When the session opens, formal also searches each property for a counterexample with
 Plausible. A false property comes back under `refuted`, with the value of each variable
 and what does not hold. For this false property in a spec with the namespace `Demo`:

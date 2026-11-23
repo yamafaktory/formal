@@ -55,6 +55,30 @@ const EXPLORATION_MARK: &str = "formal-bounded";
 
 const STATE_BUDGET: u32 = 100_000;
 
+const INDUCTION_MARK: &str = "formal-inductive";
+
+const INDUCTION_TRIES: u32 = 1_000;
+
+const INDUCTION_HELPERS: &str = "namespace FormalInductive
+
+def search {σ α : Type} (draw : Plausible.Gen σ) (step : σ → α → σ) (actions : List α)
+    (holds : σ → Bool) (tries : Nat) : IO (Option (σ × α × σ) × Nat) := do
+  let mut held := 0
+  for i in [0:tries] do
+    let s ← Plausible.Gen.run draw (i % 100)
+    if holds s then
+      held := held + 1
+      for a in actions do
+        let t := step s a
+        if !holds t then return (some (s, a, t), held)
+  return (none, held)
+
+def report {σ α : Type} [Repr σ] [Repr α] (mark key : String) : Option (σ × α × σ) × Nat → String
+  | (some (s, a, t), _) => s!\"{mark} {key} broken\\x1f{reprStr s}\\x1f{reprStr a}\\x1f{reprStr t}\"
+  | (none, held) => s!\"{mark} {key} kept {held}\"
+
+end FormalInductive";
+
 const DEFAULT_DEPTH: &str = "10";
 
 const EXPLORATION_HELPERS: &str = "namespace FormalBounded
@@ -187,6 +211,32 @@ impl Actions {
             Self::Samples(samples) => samples.clone(),
         }
     }
+}
+
+/// What the induction test found for one invariant, or for several together.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum Inductive {
+    /// A state where the invariants hold, an action, and the state after it, where they do not.
+    Broken {
+        /// The state, as Lean prints it.
+        state: String,
+        /// The action, as Lean prints it.
+        action: String,
+        /// The state after the action, as Lean prints it.
+        next: String,
+    },
+    /// The invariants held in some drawn states, and no action from them broke them.
+    Kept,
+}
+
+/// The file that tests induction, and the invariants each of its tests covers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Induction {
+    /// The file, ready for Lean.
+    pub lean_code: String,
+    /// The properties each test covers, in order: each one alone, then all of them
+    /// when there is more than one.
+    pub groups: Vec<Vec<String>>,
 }
 
 /// What the bounded check found for one invariant.
@@ -979,11 +1029,19 @@ impl LeanSpec {
         let namespace = &self.namespace;
         let depth = &machine.depth;
         format!(
-            "instance : DecidablePred {namespace}.{invariant} := fun s => by unfold {namespace}.{invariant}; infer_instance\n\
+            "{}\n\
              #eval IO.println (FormalBounded.report \"{EXPLORATION_MARK}\" \"{namespace}.{invariant}.{ALWAYS}\" \
              (FormalBounded.explore {namespace}.init {namespace}.step {} \
              (fun s => decide ({namespace}.{invariant} s)) {depth} {STATE_BUDGET}))",
+            self.decidable(invariant),
             actions.expression()
+        )
+    }
+
+    fn decidable(&self, invariant: &str) -> String {
+        let namespace = &self.namespace;
+        format!(
+            "instance : DecidablePred {namespace}.{invariant} := fun s => by unfold {namespace}.{invariant}; infer_instance"
         )
     }
 
@@ -1062,16 +1120,12 @@ impl LeanSpec {
         }
     }
 
-    /// The file that searches each property in `ids` for a counterexample.
-    ///
-    /// The values of a type the spec lists samples of are drawn half from
-    /// those samples. Each search is one line, and Lean answers it on that line.
-    #[must_use]
-    pub fn search(&self, ids: &[&str]) -> Search {
+    fn plausible_prelude(&self, extra: Option<&str>) -> Vec<String> {
         let spec = self.source.trim_start_matches('\u{feff}');
         let spec_imports = imports(spec);
         let mut lines = import_lines(
             std::iter::once(SEARCH_IMPORT)
+                .chain(extra)
                 .chain(spec_imports.iter().map(|import| import.module.as_str())),
         );
         lines.extend(blanked(spec, &spec_imports).split('\n').map(str::to_string));
@@ -1084,6 +1138,85 @@ impl LeanSpec {
                  ⟨FormalRefute.withSamples {namespace}.{sampled}.samples⟩"
             )
         }));
+        lines
+    }
+
+    fn induction_of(&self, actions: &Actions, invariants: &[&str], key: &str) -> String {
+        let namespace = &self.namespace;
+        let holds: Vec<String> = invariants
+            .iter()
+            .map(|invariant| format!("decide ({namespace}.{invariant} s)"))
+            .collect();
+        format!(
+            "#eval do IO.println (FormalInductive.report \"{INDUCTION_MARK}\" \"{key}\" \
+             (← FormalInductive.search Plausible.Arbitrary.arbitrary {namespace}.step {} \
+             (fun s => {}) {INDUCTION_TRIES}))",
+            actions.expression(),
+            holds.join(" && ")
+        )
+    }
+
+    /// The cache key of the induction test of `ids`, alone or together.
+    #[must_use]
+    pub fn induction_key(&self, ids: &[&str]) -> String {
+        let invariants: Vec<&str> = ids.iter().filter_map(|id| self.invariant_of(id)).collect();
+        let line = self
+            .explored()
+            .map(|(_, actions)| self.induction_of(actions, &invariants, &ids.join(",")))
+            .unwrap_or_default();
+        lean_spec_search_key(
+            &self.source,
+            &format!(
+                "{SEARCH_HELPERS}\n{EXPLORATION_HELPERS}\n{INDUCTION_HELPERS}\n{}",
+                self.derived().join("\n")
+            ),
+            &format!("inductive:{line}"),
+        )
+    }
+
+    /// The file that tests whether each invariant in `ids` is kept by every step, then
+    /// whether all of them are kept together.
+    #[must_use]
+    pub fn induction(&self, ids: &[&str]) -> Induction {
+        let mut lines = self.plausible_prelude(Some(EXPLORATION_IMPORT));
+        lines.push(EXPLORATION_HELPERS.to_string());
+        lines.push(INDUCTION_HELPERS.to_string());
+        let mut groups = Vec::new();
+        if let Some((_, actions)) = self.explored() {
+            let tested: Vec<(&str, &str)> = ids
+                .iter()
+                .filter_map(|id| Some((*id, self.invariant_of(id)?)))
+                .collect();
+            lines.extend(
+                tested
+                    .iter()
+                    .map(|(_, invariant)| self.decidable(invariant)),
+            );
+            for (id, invariant) in &tested {
+                lines.push(self.induction_of(actions, &[invariant], id));
+                groups.push(vec![(*id).to_string()]);
+            }
+            if tested.len() > 1 {
+                let all: Vec<String> = tested.iter().map(|(id, _)| (*id).to_string()).collect();
+                let invariants: Vec<&str> =
+                    tested.iter().map(|(_, invariant)| *invariant).collect();
+                lines.push(self.induction_of(actions, &invariants, &all.join(",")));
+                groups.push(all);
+            }
+        }
+        Induction {
+            lean_code: format!("{}\n", lines.join("\n")),
+            groups,
+        }
+    }
+
+    /// The file that searches each property in `ids` for a counterexample.
+    ///
+    /// The values of a type the spec lists samples of are drawn half from
+    /// those samples. Each search is one line, and Lean answers it on that line.
+    #[must_use]
+    pub fn search(&self, ids: &[&str]) -> Search {
+        let mut lines = self.plausible_prelude(None);
         let mut searched = Vec::new();
         for id in ids {
             lines.push(self.search_line(id));
@@ -1130,6 +1263,39 @@ impl LeanSpec {
             proof_lines: u32::try_from(body.split('\n').count()).unwrap_or(u32::MAX),
         }
     }
+}
+
+/// What the induction test printed for each group of `induction`, in order.
+///
+/// A group is left out when Lean printed nothing for it, or when no drawn state
+/// satisfied it, so nothing was tested.
+#[must_use]
+pub fn read_induction(induction: &Induction, printed: &[&str]) -> Vec<(Vec<String>, Inductive)> {
+    induction
+        .groups
+        .iter()
+        .filter_map(|group| {
+            let mark = format!("{INDUCTION_MARK} {} ", group.join(","));
+            let line = printed
+                .iter()
+                .find_map(|line| line.strip_prefix(&mark))?
+                .trim_end();
+            let found = if let Some(held) = line.strip_prefix("kept ") {
+                if held.parse::<u32>().ok()? == 0 {
+                    return None;
+                }
+                Inductive::Kept
+            } else {
+                let mut parts = line.strip_prefix("broken\u{1f}")?.split('\u{1f}');
+                Inductive::Broken {
+                    state: parts.next()?.to_string(),
+                    action: parts.next()?.to_string(),
+                    next: parts.next()?.to_string(),
+                }
+            };
+            Some((group.clone(), found))
+        })
+        .collect()
 }
 
 /// What the bounded check printed for each property of `exploration`, in order.
@@ -2037,6 +2203,62 @@ mod tests {
             matches!(unlisted, Err(SpecError::NoReplayActions(_))),
             "{unlisted:?}"
         );
+    }
+
+    const CYCLE: &str = "namespace Cycle\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨if s.count = 2 then 0 else s.count + 1⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\ndef count_is_not_five : State → Prop := fun s => s.count ≠ 5\n\nend Cycle\n";
+
+    #[test]
+    fn the_induction_tests_each_invariant_then_all_together_and_reads_back() {
+        let spec = parse(CYCLE).expect("it parses");
+        let ids = [
+            "Cycle.count_at_most_two.always",
+            "Cycle.count_is_not_five.always",
+        ];
+        let induction = spec.induction(&ids);
+        let group = |ids: &[&str]| ids.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            induction.groups,
+            [group(&ids[..1]), group(&ids[1..]), group(&ids)]
+        );
+        assert!(
+            induction
+                .lean_code
+                .starts_with("import Plausible\nimport Std.Data.HashSet\n")
+        );
+        assert!(induction.lean_code.contains(
+            "(fun s => decide (Cycle.count_at_most_two s) && decide (Cycle.count_is_not_five s)) 1000))"
+        ));
+        let read = read_induction(
+            &induction,
+            &[
+                "formal-inductive Cycle.count_at_most_two.always kept 120\n",
+                "formal-inductive Cycle.count_is_not_five.always broken\u{1f}{ count := 4 }\u{1f}Cycle.Action.inc\u{1f}{ count := 5 }\n",
+                "formal-inductive Cycle.count_at_most_two.always,Cycle.count_is_not_five.always kept 129\n",
+            ],
+        );
+        assert_eq!(
+            read,
+            [
+                (group(&ids[..1]), Inductive::Kept),
+                (
+                    group(&ids[1..]),
+                    Inductive::Broken {
+                        state: "{ count := 4 }".to_string(),
+                        action: "Cycle.Action.inc".to_string(),
+                        next: "{ count := 5 }".to_string(),
+                    }
+                ),
+                (group(&ids), Inductive::Kept),
+            ]
+        );
+        assert_eq!(
+            read_induction(
+                &induction,
+                &["formal-inductive Cycle.count_at_most_two.always kept 0\n"]
+            ),
+            []
+        );
+        assert_ne!(spec.induction_key(&ids[..1]), spec.induction_key(&ids));
     }
 
     #[test]

@@ -127,7 +127,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 15] = [
+const LEAN_SPEC: [&str; 16] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -171,6 +171,10 @@ const LEAN_SPEC: [&str; 15] = [
      string. A constructor with no argument is its name. One with named arguments is \
      `{\"add\": {\"n\": 1}}`, one with one anonymous argument `{\"one\": 1}`, and one with several \
      `{\"two\": [2, false]}`. `none` is `null`, and a trace of `Char` actions is a string.",
+    "formal also tests whether each invariant the checks did not refute is inductive: a state where it \
+     holds and an action whose next state breaks it come back under not_inductive, so its proof needs a \
+     stronger invariant. When such invariants are kept by every step together, inductive_together names \
+     them: prove them in one induction. `<State>.samples` steers the states.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \
