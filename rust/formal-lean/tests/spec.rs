@@ -65,14 +65,22 @@ fn text(input: &Value) -> &str {
     input.as_str().expect("every input of the specs is text")
 }
 
+fn character(input: &Value) -> char {
+    let mut chars = text(input).chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        panic!("{input} is not one character");
+    };
+    c
+}
+
 fn answer(code: &str, input: &Value) -> Value {
     match code {
-        "rust/formal-core/src/pystr.rs is_space" => {
-            let mut chars = text(input).chars();
-            let (Some(c), None) = (chars.next(), chars.next()) else {
-                panic!("{input} is not one character");
-            };
-            json!(pystr::is_space(c))
+        "rust/formal-core/src/pystr.rs is_space" => json!(pystr::is_space(character(input))),
+        "rust/formal-core/src/proof_cache.rs is_word_char" => {
+            json!(proof_cache::is_word_char(character(input)))
+        }
+        "rust/formal-core/src/proof_cache.rs normalise_kind" => {
+            json!(proof_cache::normalise_kind(text(input)))
         }
         "rust/formal-core/src/pystr.rs strip" => json!(pystr::strip(text(input))),
         "rust/formal-core/src/pystr.rs rstrip" => json!(pystr::rstrip(text(input))),
@@ -100,8 +108,16 @@ fn the_specs_compare_these_functions() {
             "rust/formal-core/src/proof_cache.rs normalise_code",
         ),
         (
+            "ProofCache.isWordChar",
+            "rust/formal-core/src/proof_cache.rs is_word_char",
+        ),
+        (
             "ProofCache.normaliseFormal",
             "rust/formal-core/src/proof_cache.rs normalise_formal",
+        ),
+        (
+            "ProofCache.normaliseKind",
+            "rust/formal-core/src/proof_cache.rs normalise_kind",
         ),
         ("Pystr.isSpace", "rust/formal-core/src/pystr.rs is_space"),
         ("Pystr.rstrip", "rust/formal-core/src/pystr.rs rstrip"),
@@ -162,7 +178,9 @@ fn the_rust_answers_what_each_spec_answers() {
         counts,
         [
             ("ProofCache.normaliseCode", 54_241),
-            ("ProofCache.normaliseFormal", 16_123),
+            ("ProofCache.isWordChar", 1_112_064),
+            ("ProofCache.normaliseFormal", 22_643),
+            ("ProofCache.normaliseKind", 4_681),
             ("Pystr.isSpace", 1_112_064),
             ("Pystr.rstrip", 54_241),
             ("Pystr.strip", 54_241),
