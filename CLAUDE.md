@@ -35,7 +35,7 @@ anything the cache key touches — reaching for `str::lines` or
 Four things decide whether a change is allowed to land. All are data, and none of
 them mention an implementation.
 
-- `tests/conformance/golden/responses.json` — the HTTP surface. 37 steps, status
+- `tests/conformance/golden/responses.json` — the HTTP surface. 39 steps, status
   codes everywhere including the refusals, bodies where formal writes them.
   Driven by `formal-server/tests/conformance.rs`, which can also judge an
   already-running server:
@@ -103,6 +103,15 @@ with that code. `def <name>.inputs` lists the inputs, and a spec without it is r
 formal runs it when the session opens and caches the answers per spec text. The caller
 runs its code and sends the answers to `POST /session/{id}/compare`. The evaluation
 prints JSON through `Lean.ToJson`, with a `List Char` as a string.
+
+A spec with `def init : <State>`, `def step` and at least one invariant in its
+namespace describes a state machine. `LeanSpec::source` then ends with what formal defines for it: `run`, the fold of
+`step` from `init`, and `<name>.always : Prop := ∀ actions, <name> (run actions)` for each
+`def <name> : <State> → Prop` or `def <name> (s : <State>) : Prop`. Each
+`<name>.always` is a property, written from the root, so an unclosed namespace changes
+nothing. The search derives
+`Repr`, `Arbitrary` and `Shrinkable` for the spec's types, so a broken invariant comes back
+as a trace.
 
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file

@@ -531,6 +531,32 @@ impl Run {
         .await;
     }
 
+    /// Opening a session on a Lean spec that describes a state machine, and on one that defines `run`.
+    async fn lean_spec_machines(&mut self) {
+        let machine = "namespace Bounded\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef count_at_most_two : State → Prop := fun s => s.count ≤ 2\n\nend Bounded\n";
+        let spec = self.write("Bounded.lean", machine);
+        let with_run = self.write(
+            "OwnRun.lean",
+            &machine.replace(
+                "end Bounded",
+                "def run (actions : List Action) : State := actions.foldl step init\n\nend Bounded",
+            ),
+        );
+        self.open_session(
+            "session_open_from_lean_spec_with_a_machine",
+            json!({ "spec": spec }),
+            "<machine-session>",
+        )
+        .await;
+        self.step(
+            "session_open_lean_spec_with_a_machine_that_defines_run",
+            "POST",
+            "/session",
+            Some(json!({ "spec": with_run })),
+        )
+        .await;
+    }
+
     /// Drive one server through the whole surface and return what it answered.
     async fn all(&mut self) {
         let spec_path = self.workspace.join("conformance.properties.json");
@@ -551,6 +577,7 @@ impl Run {
         let (session, spec_session) = self.sessions(&spec_path, &missing_path).await;
         self.lean_specs(&spec_path).await;
         self.lean_spec_imports().await;
+        self.lean_spec_machines().await;
         self.checks(&session).await;
         self.proofs(&session).await;
         self.closing(&session, &spec_session).await;
@@ -653,7 +680,7 @@ async fn the_http_surface_still_answers_what_was_recorded() {
     );
     assert_eq!(
         run.recorded.len(),
-        37,
+        39,
         "every step the golden file records was exercised"
     );
 }
@@ -695,7 +722,7 @@ fn a_missing_step_and_an_unexpected_one_are_both_reported() {
 
 #[test]
 fn the_golden_file_still_names_the_whole_surface() {
-    assert_eq!(golden().len(), 37);
+    assert_eq!(golden().len(), 39);
 }
 
 /// The golden file lives outside the crate, so nothing rebuilds when it changes.
