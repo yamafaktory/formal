@@ -354,7 +354,7 @@ becomes stale, and its `function_code` needs the new indentation. A property wit
 
 ### formal's own properties
 
-formal checks itself, and its own code moves from `formal.properties.json` to Lean specs.
+formal checks itself through Lean specs, one per module of its own code.
 
 - `spec/Pystr.lean` specifies the Python string rules the cache key depends on.
 - `spec/ProofCache.lean` imports it and specifies the cache key. Two of its properties
@@ -369,15 +369,13 @@ formal checks itself, and its own code moves from `formal.properties.json` to Le
   Lean and a failure here, and the first error Lean reported stays first.
 - `spec/Specs.lean` imports `spec/ProofCache.lean` and specifies how formal reads a spec
   file: when a property is stale, when two ids clash, and which fields are missing.
+- `spec/Verifier.lean` specifies how formal prepares a proof: imports split from the body,
+  proofs batched into one file with each error traced back to its proof, the pre-check, and
+  the rewrites that try an automatic tactic.
 
 Their proofs are in `proofs/<Namespace>/`. The test `formal-service/tests/spec_sessions.rs`
 checks every proof of every spec, and `formal-lean/tests/spec.rs` compares the code in
 Rust with each spec that names its code in a `code:` line.
-
-`formal.properties.json` holds the properties not moved yet, with their proofs in
-`proofs/`. A test fails when one of them is stale, so a change to the code updates them in
-the same pull request. The tests do not check those proofs, so whoever updates a property
-checks its proof through formal again.
 
 ## What a result means
 

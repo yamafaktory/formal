@@ -17,7 +17,10 @@ use formal_core::{
     proof_cache,
     pystr,
 };
-use formal_lean::run::Runner;
+use formal_lean::{
+    run::Runner,
+    verifier,
+};
 use serde_json::{
     Value,
     json,
@@ -76,6 +79,16 @@ fn character(input: &Value) -> char {
 fn answer(code: &str, input: &Value) -> Value {
     match code {
         "rust/formal-core/src/pystr.rs is_space" => json!(pystr::is_space(character(input))),
+        "core char::is_whitespace" => json!(character(input).is_whitespace()),
+        "rust/formal-lean/src/verifier.rs replace_proof" => {
+            let pair = input
+                .as_array()
+                .expect("an input of replace_proof is a pair");
+            json!(verifier::replace_proof(text(&pair[0]), text(&pair[1])))
+        }
+        "rust/formal-lean/src/verifier.rs with_auto_tactics" => {
+            json!(verifier::with_auto_tactics(text(input)))
+        }
         "rust/formal-core/src/proof_cache.rs is_word_char" => {
             json!(proof_cache::is_word_char(character(input)))
         }
@@ -125,6 +138,15 @@ fn the_specs_compare_these_functions() {
         (
             "Pystr.splitlines",
             "rust/formal-core/src/pystr.rs splitlines",
+        ),
+        ("Verifier.isWhitespace", "core char::is_whitespace"),
+        (
+            "Verifier.replaceProofOn",
+            "rust/formal-lean/src/verifier.rs replace_proof",
+        ),
+        (
+            "Verifier.withAutoTactics",
+            "rust/formal-lean/src/verifier.rs with_auto_tactics",
         ),
     ];
 
@@ -185,6 +207,9 @@ fn the_rust_answers_what_each_spec_answers() {
             ("Pystr.rstrip", 54_241),
             ("Pystr.strip", 54_241),
             ("Pystr.splitlines", 54_241),
+            ("Verifier.isWhitespace", 1_112_064),
+            ("Verifier.replaceProofOn", 16_105),
+            ("Verifier.withAutoTactics", 4_681),
         ]
     );
     assert!(differences.is_empty(), "{}", differences.join("\n"));

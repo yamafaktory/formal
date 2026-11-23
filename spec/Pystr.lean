@@ -6,9 +6,12 @@ def alphabet : List Char :=
 
 def Char.samples : List Char := alphabet
 
-def wordsOver (letters : List Char) : Nat → List (List Char)
+def sentences (fragments : List (List Char)) : Nat → List (List Char)
   | 0 => [[]]
-  | n + 1 => [] :: letters.flatMap fun c => (wordsOver letters n).map (c :: ·)
+  | n + 1 => [] :: fragments.flatMap fun fragment => (sentences fragments n).map (fragment ++ ·)
+
+def wordsOver (letters : List Char) (n : Nat) : List (List Char) :=
+  sentences (letters.map ([·])) n
 
 def words (n : Nat) : List (List Char) := wordsOver alphabet n
 
