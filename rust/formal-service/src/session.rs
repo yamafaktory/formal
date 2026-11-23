@@ -24,12 +24,15 @@ use std::{
 use formal_core::{
     lean_spec::{
         Answer,
+        Bound,
         Compared,
         Difference,
         Evaluated,
+        Explored,
         LeanSpec,
         Refutation,
         read_evaluation,
+        read_exploration,
         read_search,
     },
     property::{
@@ -176,6 +179,15 @@ pub struct Session {
     pub evaluated: Vec<Evaluated>,
     /// The properties of the Lean spec the search found a counterexample to.
     pub refuted: Vec<Refutation>,
+    /// The invariants the bounded check found to hold in every state up to its depth.
+    pub bounded: Vec<Bound>,
+}
+
+#[derive(Default)]
+struct Checked {
+    evaluated: Vec<Evaluated>,
+    refuted: Vec<Refutation>,
+    bounded: Vec<Bound>,
 }
 
 impl Session {
@@ -374,6 +386,68 @@ struct Searched {
     refutation: Option<Refutation>,
 }
 
+/// What the bounded check found for each invariant of `spec`, from the cache or from Lean.
+///
+/// A falsified invariant comes back as a refutation with its shortest trace, and an
+/// invariant that held as a bound. An invariant Lean cannot decide, or a Lean that
+/// never ran, gives neither, and only an answer Lean gave is cached.
+pub fn explore<V: Verifier>(
+    verifier: &V,
+    cache: &ProofCache,
+    spec: &LeanSpec,
+) -> (Vec<Refutation>, Vec<Bound>) {
+    let ids = spec.explorable();
+    let mut found: Vec<Option<Explored>> = ids
+        .iter()
+        .map(|id| {
+            cache
+                .load::<Answered>(&spec.exploration_key(id))
+                .map(|answered| answered.explored)
+        })
+        .collect();
+    let missing: Vec<&str> = ids
+        .iter()
+        .zip(&found)
+        .filter(|(_, found)| found.is_none())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    if !missing.is_empty() {
+        let exploration = spec.exploration(&missing);
+        let printed = verifier.verify(&exploration.lean_code, None).printed();
+        let printed: Vec<&str> = printed.iter().map(String::as_str).collect();
+        for (id, explored) in read_exploration(&exploration, &printed) {
+            cache.save(
+                &spec.exploration_key(&id),
+                &Answered {
+                    explored: explored.clone(),
+                },
+            );
+            if let Some(slot) = ids.iter().position(|known| *known == id) {
+                found[slot] = Some(explored);
+            }
+        }
+    }
+    let mut refuted = Vec::new();
+    let mut bounded = Vec::new();
+    for (id, explored) in ids.into_iter().zip(found) {
+        match explored {
+            Some(Explored::Falsified(trace)) => refuted.push(Refutation {
+                counterexample: vec![format!("actions := {trace}")],
+                issue: "the invariant does not hold after these actions".to_string(),
+                id,
+            }),
+            Some(Explored::Bounded { depth, states }) => bounded.push(Bound { id, depth, states }),
+            None => {}
+        }
+    }
+    (refuted, bounded)
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Answered {
+    explored: Explored,
+}
+
 /// The properties of `spec` that have a counterexample, from the cache or from Lean.
 ///
 /// The search only advises: a property it cannot test, or a Lean that never
@@ -544,7 +618,12 @@ impl Sessions {
         spec: LeanSpec,
     ) -> Result<Arc<Mutex<Session>>, CompareError> {
         let evaluated = evaluate(verifier, cache, &spec)?;
-        let refuted = search(verifier, cache, &spec);
+        let (falsified, bounded) = explore(verifier, cache, &spec);
+        let searched: Vec<Refutation> = search(verifier, cache, &spec)
+            .into_iter()
+            .filter(|found| falsified.iter().all(|known| known.id != found.id))
+            .collect();
+        let refuted: Vec<Refutation> = falsified.into_iter().chain(searched).collect();
         let keys = spec
             .properties
             .iter()
@@ -556,7 +635,14 @@ impl Sessions {
             spec.property_specs(),
             keys,
             Vec::new(),
-            Some((spec, evaluated, refuted)),
+            Some((
+                spec,
+                Checked {
+                    evaluated,
+                    refuted,
+                    bounded,
+                },
+            )),
         ))
     }
 
@@ -582,13 +668,18 @@ impl Sessions {
         specs: Vec<PropertySpec>,
         keys: HashMap<String, String>,
         stale: Vec<String>,
-        spec: Option<(LeanSpec, Vec<Evaluated>, Vec<Refutation>)>,
+        spec: Option<(LeanSpec, Checked)>,
     ) -> Arc<Mutex<Session>> {
         self.evict_expired();
-        let (lean_spec, evaluated, refuted) = spec.map_or(
-            (None, Vec::new(), Vec::new()),
-            |(spec, evaluated, refuted)| (Some(spec), evaluated, refuted),
+        let (lean_spec, checked) = spec.map_or_else(
+            || (None, Checked::default()),
+            |(spec, checked)| (Some(spec), checked),
         );
+        let Checked {
+            evaluated,
+            refuted,
+            bounded,
+        } = checked;
 
         let mut session = Session {
             id,
@@ -603,6 +694,7 @@ impl Sessions {
             lean_spec,
             evaluated,
             refuted,
+            bounded,
         };
 
         for spec in session.specs.clone() {

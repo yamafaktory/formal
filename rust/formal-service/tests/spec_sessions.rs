@@ -327,3 +327,122 @@ fn an_invariant_of_a_machine_holds_in_every_reachable_state_and_a_false_one_neve
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn opening_a_session_on_a_machine_explores_it_to_its_depth() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Bounded.lean");
+    fs::write(&path, BOUNDED).expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, load(&path))
+        .expect("the spec compares nothing");
+    let session = session.lock().expect("a fresh session");
+    let bounded: Vec<(&str, u32, u32)> = session
+        .bounded
+        .iter()
+        .map(|bound| (bound.id.as_str(), bound.depth, bound.states))
+        .collect();
+    assert_eq!(bounded, [("Bounded.count_at_most_two.always", 10, 3)]);
+    let refuted: Vec<(&str, &[String])> = session
+        .refuted
+        .iter()
+        .map(|refutation| (refutation.id.as_str(), refutation.counterexample.as_slice()))
+        .collect();
+    assert_eq!(
+        refuted,
+        [(
+            "Bounded.count_below_two.always",
+            &["actions := [Bounded.Action.inc, Bounded.Action.inc]".to_string()][..]
+        )]
+    );
+}
+
+type Bounds = Vec<(String, u32, u32)>;
+
+type Refutations = Vec<(String, Vec<String>)>;
+
+fn explored(runner: &Runner, text: &str) -> (Bounds, Refutations) {
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join("Explored.lean");
+    fs::write(&path, text).expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(runner, &cache, load(&path))
+        .expect("the spec compares nothing");
+    let session = session.lock().expect("a fresh session");
+    (
+        session
+            .bounded
+            .iter()
+            .map(|bound| (bound.id.clone(), bound.depth, bound.states))
+            .collect(),
+        session
+            .refuted
+            .iter()
+            .map(|refutation| (refutation.id.clone(), refutation.counterexample.clone()))
+            .collect(),
+    )
+}
+
+#[test]
+fn the_exploration_answers_every_shape_of_machine_it_reads() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let gap = BOUNDED
+        .replace("  | reset\n", "  | reset\n\n  | jump\n")
+        .replace("  | .reset => ⟨0⟩", "  | .reset => ⟨0⟩\n  | .jump => ⟨5⟩")
+        .replace(
+            "def count_below_two : State → Prop := fun s => s.count < 2\n\n",
+            "",
+        );
+    assert_eq!(
+        explored(&runner, &gap).1,
+        [(
+            "Bounded.count_at_most_two.always".to_string(),
+            vec!["actions := [Bounded.Action.jump]".to_string()]
+        )]
+    );
+
+    let sampled = BOUNDED
+        .replace("  | inc\n", "  | add (n : Nat)\n")
+        .replace("  | .inc => ⟨min (s.count + 1) 2⟩", "  | .add n => ⟨min (s.count + n) 2⟩")
+        .replace(
+            "end Bounded",
+            "def Action.samples : List Action := [.add 1, .add 2, .reset]\n\ndef depth : Nat := 3\n\nend Bounded",
+        );
+    let (bounded, refuted) = explored(&runner, &sampled);
+    assert_eq!(
+        bounded,
+        [("Bounded.count_at_most_two.always".to_string(), 3, 3)]
+    );
+    assert_eq!(
+        refuted,
+        [(
+            "Bounded.count_below_two.always".to_string(),
+            vec!["actions := [Bounded.Action.add 2]".to_string()]
+        )]
+    );
+
+    let false_at_init = BOUNDED.replace("def init : State := ⟨0⟩", "def init : State := ⟨3⟩");
+    let refuted = explored(&runner, &false_at_init).1;
+    assert!(
+        refuted.contains(&(
+            "Bounded.count_below_two.always".to_string(),
+            vec!["actions := []".to_string()]
+        )),
+        "{refuted:?}"
+    );
+
+    let wide = "namespace Wide\n\ninductive Action where\n  | a\n  | b\n  | c\n  | d\n  | e\n  | f\n\nstructure State where\n  history : List Nat\n\ndef init : State := ⟨[]⟩\n\ndef step (s : State) : Action → State\n  | .a => ⟨0 :: s.history⟩\n  | .b => ⟨1 :: s.history⟩\n  | .c => ⟨2 :: s.history⟩\n  | .d => ⟨3 :: s.history⟩\n  | .e => ⟨4 :: s.history⟩\n  | .f => ⟨5 :: s.history⟩\n\ndef short : State → Prop := fun s => s.history.length ≤ 20\n\nend Wide\n";
+    let bounded = explored(&runner, wide).0;
+    let [(id, depth, states)] = bounded.as_slice() else {
+        panic!("one bound, got {bounded:?}");
+    };
+    assert_eq!(id, "Wide.short.always");
+    assert!(*depth < 10 && *states > 100_000, "{bounded:?}");
+}

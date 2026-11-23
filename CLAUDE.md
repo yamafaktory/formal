@@ -113,6 +113,14 @@ nothing. The search derives
 `Repr`, `Arbitrary` and `Shrinkable` for the spec's types, so a broken invariant comes back
 as a trace.
 
+`LeanSpec::exploration` builds one file that walks the machine breadth first from
+`init`, up to the spec's `depth` (10 by default), once per invariant, and visits each state
+once. The actions are the constructors of the action type, or `<Action>.samples`. formal
+runs it when the session opens. A violation becomes a refutation with a shortest trace,
+an invariant that held becomes a bound, and each answer Lean gave is cached. The walk stops
+after 100,000 states and reports the depth it finished, and Lean proves a list of
+constructors complete before the walk uses it.
+
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file
 defines a `Testable` instance for `∀ x ∈ l`, and draws half of the values of each type

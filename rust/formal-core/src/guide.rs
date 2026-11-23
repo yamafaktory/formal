@@ -127,7 +127,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 11] = [
+const LEAN_SPEC: [&str; 13] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -158,6 +158,12 @@ const LEAN_SPEC: [&str; 11] = [
      `∀ actions, <name> (run actions)`. Its proof declares \
      `theorem <Namespace>.<name>.always.holds : <Namespace>.<name>.always`. The search derives the \
      generators for the spec's types, so a broken invariant comes back with the trace that breaks it.",
+    "When the actions of a machine are known, formal also explores every state up to a depth, 10 unless \
+     the spec defines `def depth : Nat`. The actions are the constructors of the action type when none \
+     takes an argument, else `<Action>.samples`. A violation comes back under refuted with its shortest \
+     trace, and an invariant that held comes back under bounded.",
+    "The check stops after 100000 states. bounded then gives the last depth it explored in full, which \
+     can be less than the depth asked for.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \
