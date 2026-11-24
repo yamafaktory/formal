@@ -1,0 +1,4 @@
+results/
+hidden/typescript/node_modules/
+hidden/python/.venv/
+__pycache__/
