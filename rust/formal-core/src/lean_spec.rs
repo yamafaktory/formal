@@ -25,6 +25,7 @@ use crate::{
         lean_spec_search_key,
     },
     property::PropertySpec,
+    pystr,
     specs::{
         SpecError,
         expanduser,
@@ -122,6 +123,165 @@ def report {α : Type} [Repr α] (mark id : String) : Option (List α) × Nat ×
 
 end FormalBounded";
 
+const LASSO_HELPERS: &str = r#"namespace FormalLasso
+
+structure Graph (σ α : Type) where
+  states : Array σ
+  parent : Array (Option (Nat × α))
+  edges : Array (Array (α × Nat))
+  layers : Nat
+  complete : Bool
+
+def build {σ α : Type} [BEq σ] [Hashable σ] (init : σ) (step : σ → α → σ) (actions : List α)
+    (depth budget : Nat) : Graph σ α := Id.run do
+  let mut index : Std.HashMap σ Nat := (∅ : Std.HashMap σ Nat).insert init 0
+  let mut states : Array σ := #[init]
+  let mut parent : Array (Option (Nat × α)) := #[none]
+  let mut edges : Array (Array (α × Nat)) := #[#[]]
+  let mut frontier : Array (Nat × σ) := #[(0, init)]
+  let mut layers := 0
+  for _ in [0:depth] do
+    let mut next : Array (Nat × σ) := #[]
+    for (i, s) in frontier do
+      for a in actions do
+        let t := step s a
+        match index.get? t with
+        | some j => edges := edges.modify i (·.push (a, j))
+        | none =>
+          if states.size > budget then
+            return { states, parent, edges, layers, complete := false }
+          let j := states.size
+          index := index.insert t j
+          states := states.push t
+          parent := parent.push (some (i, a))
+          edges := (edges.modify i (·.push (a, j))).push #[]
+          next := next.push (j, t)
+    frontier := next
+    layers := layers + 1
+  return { states, parent, edges, layers, complete := frontier.isEmpty }
+
+def reach {α : Type} (edges : Array (Array (α × Nat))) (allowed : Array Bool) (sources : List Nat) :
+    Array (Option (Option (Nat × α))) × Array Nat := Id.run do
+  let mut seen : Array (Option (Option (Nat × α))) := Array.replicate edges.size none
+  let mut queue : Array Nat := #[]
+  for s in sources do
+    if allowed[s]! && seen[s]!.isNone then
+      seen := seen.set! s (some none)
+      queue := queue.push s
+  let mut head := 0
+  while head < queue.size do
+    let i := queue[head]!
+    head := head + 1
+    for (a, j) in edges[i]! do
+      if allowed[j]! && seen[j]!.isNone then
+        seen := seen.set! j (some (some (i, a)))
+        queue := queue.push j
+  return (seen, queue)
+
+def back {α : Type} (seen : Array (Option (Option (Nat × α)))) (i : Nat) : Nat × List α := Id.run do
+  let mut acc : List α := []
+  let mut j := i
+  for _ in [0:seen.size] do
+    match seen[j]? with
+    | some (some (some (k, a))) =>
+      acc := a :: acc
+      j := k
+    | _ => break
+  return (j, acc)
+
+def components {α : Type} (edges : Array (Array (α × Nat))) (allowed : Array Bool) (roots : Array Nat) :
+    Array Nat := Id.run do
+  let n := edges.size
+  let mut index : Array Nat := Array.replicate n n
+  let mut low : Array Nat := Array.replicate n n
+  let mut onStack : Array Bool := Array.replicate n false
+  let mut stack : Array Nat := #[]
+  let mut comp : Array Nat := Array.replicate n n
+  let mut counter := 0
+  let mut count := 0
+  for root in roots do
+    if index[root]! != n then continue
+    index := index.set! root counter
+    low := low.set! root counter
+    counter := counter + 1
+    stack := stack.push root
+    onStack := onStack.set! root true
+    let mut calls : Array (Nat × Nat) := #[(root, 0)]
+    while !calls.isEmpty do
+      let (v, e) := calls.back!
+      match edges[v]![e]? with
+      | some (_, w) =>
+        calls := calls.set! (calls.size - 1) (v, e + 1)
+        if !allowed[w]! then continue
+        if index[w]! == n then
+          index := index.set! w counter
+          low := low.set! w counter
+          counter := counter + 1
+          stack := stack.push w
+          onStack := onStack.set! w true
+          calls := calls.push (w, 0)
+        else if onStack[w]! then
+          low := low.set! v (min low[v]! index[w]!)
+      | none =>
+        calls := calls.pop
+        if let some (u, _) := calls.back? then
+          low := low.set! u (min low[u]! low[v]!)
+        if low[v]! == index[v]! then
+          let mut more := true
+          while more do
+            let w := stack.back!
+            stack := stack.pop
+            onStack := onStack.set! w false
+            comp := comp.set! w count
+            more := w != v
+          count := count + 1
+  return comp
+
+def search {σ α : Type} [BEq σ] [Hashable σ] [BEq α] (init : σ) (step : σ → α → σ)
+    (actions fair : List α) (start : Option (σ → Bool)) (goal : σ → Bool) (depth budget : Nat) :
+    Option (List α × List α) × Bool × Nat × Nat := Id.run do
+  if fair.any (! actions.contains ·) then return (none, false, 0, 0)
+  let g := build init step actions depth budget
+  let n := g.states.size
+  let good := g.states.map (! goal ·)
+  let sources := match start with
+    | none => [0]
+    | some p =>
+      let starting := g.states.map p
+      (List.range n).filter fun i => starting[i]! && good[i]!
+  let (seen, order) := reach g.edges good sources
+  let comp := components g.edges good order
+  let hops : List (α → Bool) := if fair.isEmpty then [fun _ => true] else fair.map (· == ·)
+  let mut fairComp : Array Bool := Array.replicate n true
+  for takes in hops do
+    let mut has : Array Bool := Array.replicate n false
+    for v in order do
+      for (b, w) in g.edges[v]! do
+        if comp[w]! == comp[v]! && takes b then
+          has := has.set! comp[v]! true
+    fairComp := fairComp.zipWith (· && ·) has
+  let some x := order.find? (fun i => fairComp[comp[i]!]!) | return (none, g.complete, g.layers, n)
+  let (s, toLoop) := back seen x
+  let inside := comp.map (· == comp[x]!)
+  let mut cur := x
+  let mut loop : List α := []
+  for takes in hops do
+    let (near, around) := reach g.edges inside [cur]
+    let hop := around.findSome? fun u =>
+      (g.edges[u]!.find? fun (b, w) => inside[w]! && takes b).map (u, ·)
+    if let some (u, (a, w)) := hop then
+      loop := loop ++ (back near u).2 ++ [a]
+      cur := w
+  let (near, _) := reach g.edges inside [cur]
+  return (some ((back (g.parent.map some) s).2 ++ toLoop, loop ++ (back near x).2), g.complete, g.layers, n)
+
+def report {α : Type} [Repr α] (mark id : String) : Option (List α × List α) × Bool × Nat × Nat → String
+  | (some (pre, loop), _, _, _) => s!"{mark} {id} lasso\x1f{reprStr pre}\x1f{reprStr loop}"
+  | (none, true, layers, states) => s!"{mark} {id} bounded {layers} {states}"
+  | (none, false, _, _) => s!"{mark} {id} unsettled"
+
+end FormalLasso"#;
+
 const SEARCH_HELPERS: &str = "namespace FormalRefute
 open Plausible
 
@@ -177,7 +337,8 @@ pub struct LeanSpec {
     pub machine: Option<Machine>,
 }
 
-/// A state machine: an `init : <State>`, a `step`, and at least one invariant.
+/// A state machine: an `init : <State>`, a `step`, and at least one invariant or liveness
+/// property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Machine {
     /// Each `def <name> : <State> → Prop` or `def <name> (<s> : <State>) : Prop`, in the
@@ -190,6 +351,31 @@ pub struct Machine {
     pub actions: Option<Actions>,
     /// How deep the bounded check explores: the spec's `depth`, or the default.
     pub depth: String,
+    /// Each property written as `Temporal.leadsTo` or `Temporal.eventually` over the
+    /// spec's `init` and `step`, under fairness alone, in the spec's order.
+    pub liveness: Vec<Liveness>,
+}
+
+/// A liveness property the lasso check can refute.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Liveness {
+    /// The property's name in the spec.
+    pub name: String,
+    /// The actions the property assumes fair, as the spec writes them.
+    pub fair: Vec<String>,
+    /// Where the property starts: `p` of `leadsTo`, nothing for `eventually`.
+    pub start: Option<Predicate>,
+    /// What must follow: `q` of `leadsTo`, or of `eventually`.
+    pub goal: Predicate,
+}
+
+/// A state predicate a liveness property names.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Predicate {
+    /// A definition of the spec, by its name in the namespace.
+    Named(String),
+    /// A term in parentheses, as the spec writes it.
+    Term(String),
 }
 
 /// Where the bounded check takes its actions from.
@@ -244,7 +430,18 @@ pub struct Induction {
 pub enum Explored {
     /// A shortest list of actions after which the invariant does not hold.
     Falsified(String),
-    /// The invariant holds in every state reached within `depth` actions.
+    /// A run the liveness property fails on: these actions, then the loop forever.
+    Lasso {
+        /// The actions to the loop, as Lean prints them.
+        prefix: String,
+        /// The actions the loop repeats, as Lean prints them.
+        cycle: String,
+    },
+    /// A liveness property the check did not refute on a walk that missed part of the
+    /// machine: cut at its depth or its state budget, or without a fair action.
+    Unsettled,
+    /// The invariant holds in every state reached within `depth` actions, or the
+    /// liveness property holds on every reachable state.
     Bounded {
         /// How deep the check explored.
         depth: u32,
@@ -274,6 +471,10 @@ pub struct Exploration {
 }
 
 impl Machine {
+    fn runs(&self) -> bool {
+        !self.invariants.is_empty()
+    }
+
     /// What formal adds after the spec: `run`, and one property per invariant.
     fn definitions(&self, namespace: &str) -> String {
         let mut lines = vec![format!(
@@ -575,6 +776,7 @@ fn machine(
     blocks: &[(String, usize, usize)],
     defined: &HashMap<&str, bool>,
     namespace: &str,
+    stated: &[(&str, usize)],
 ) -> Option<Machine> {
     if defined.get("step") != Some(&true) {
         return None;
@@ -607,7 +809,11 @@ fn machine(
     ))
     .expect("the pattern is built from literals");
     let invariants = captured_in_block(&invariant, code, blocks);
-    if invariants.is_empty() {
+    let liveness: Vec<Liveness> = stated
+        .iter()
+        .filter_map(|(name, end)| liveness(name, declaration(code, *end), namespace))
+        .collect();
+    if invariants.is_empty() && liveness.is_empty() {
         return None;
     }
     Some(Machine {
@@ -615,7 +821,154 @@ fn machine(
         types: captured_in_block(declared_type_pattern(), code, blocks),
         actions,
         depth,
+        liveness,
     })
+}
+
+fn declaration(code: &str, from: usize) -> &str {
+    let rest = &code[from..];
+    let first = rest.find('\n').map_or(rest.len(), |index| index + 1);
+    let body: usize = rest[first..]
+        .split_inclusive('\n')
+        .take_while(|line| !ends_declaration(line))
+        .map(str::len)
+        .sum();
+    &rest[..first + body]
+}
+
+fn ends_declaration(line: &str) -> bool {
+    let line = pystr::strip(line);
+    line.starts_with('#') || declaration_start_pattern().is_match(line)
+}
+
+fn declaration_start_pattern() -> &'static Regex {
+    static PATTERN: OnceLock<Regex> = OnceLock::new();
+    pattern(&PATTERN, || {
+        r"^(?:@\[|(?:private|protected|noncomputable|partial|def|abbrev|theorem|lemma|instance|example|structure|inductive|class|namespace|section|end|open|variable|deriving|set_option|attribute|axiom|opaque|universe|mutual|notation|macro|syntax|local|scoped)\b)".to_string()
+    })
+}
+
+fn arguments(text: &str) -> Option<Vec<&str>> {
+    let mut found = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    for (at, c) in text.char_indices() {
+        match c {
+            '(' | '[' | '⟨' | '{' => {
+                depth += 1;
+                start.get_or_insert(at);
+            }
+            ')' | ']' | '⟩' | '}' => depth = depth.checked_sub(1)?,
+            c if pystr::is_space(c) && depth == 0 => {
+                if let Some(begin) = start.take() {
+                    found.push(&text[begin..at]);
+                }
+            }
+            _ => {
+                start.get_or_insert(at);
+            }
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    if let Some(begin) = start {
+        found.push(&text[begin..]);
+    }
+    Some(found)
+}
+
+fn parenthesized(argument: &str) -> Option<&str> {
+    let inner = argument.strip_prefix('(')?.strip_suffix(')')?;
+    (arguments(inner).is_some()).then_some(pystr::strip(inner))
+}
+
+fn fairness(assumed: &str) -> Option<Vec<String>> {
+    let inner = parenthesized(assumed)?;
+    if let ["Temporal.fair", action] = arguments(inner)?.as_slice() {
+        return Some(vec![(*action).to_string()]);
+    }
+    let (binder, body) = inner.strip_prefix("fun ")?.split_once("=>")?;
+    let binder = pystr::strip(binder);
+    let words = arguments(body)?;
+    if words == ["True"] {
+        return Some(Vec::new());
+    }
+    words
+        .split(|word| *word == "∧")
+        .map(|part| match part {
+            ["Temporal.fair", action, run] if *run == binder => Some((*action).to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn predicate(argument: &str, namespace: &str) -> Option<Predicate> {
+    if parenthesized(argument).is_some() {
+        return Some(Predicate::Term(argument.to_string()));
+    }
+    let named = argument
+        .strip_prefix(&format!("{namespace}."))
+        .unwrap_or(argument);
+    identifier_pattern()
+        .is_match(named)
+        .then(|| Predicate::Named(named.to_string()))
+}
+
+fn liveness(name: &str, body: &str, namespace: &str) -> Option<Liveness> {
+    let words = arguments(body)?;
+    let own = |word: &str, name: &str| word == name || word == format!("{namespace}.{name}");
+    let (init, step, assumed, start, goal) = match words.as_slice() {
+        ["Temporal.leadsTo", init, step, assumed, start, goal] => {
+            (init, step, assumed, Some(start), goal)
+        }
+        ["Temporal.eventually", init, step, assumed, goal] => (init, step, assumed, None, goal),
+        _ => return None,
+    };
+    if !own(init, "init") || !own(step, "step") {
+        return None;
+    }
+    Some(Liveness {
+        name: name.to_string(),
+        fair: fairness(assumed)?,
+        start: start.map_or(Some(None), |start| predicate(start, namespace).map(Some))?,
+        goal: predicate(goal, namespace)?,
+    })
+}
+
+fn stated_properties<'a>(
+    path: &Path,
+    code: &'a str,
+    blocks: &[(String, usize, usize)],
+) -> Result<Vec<(&'a str, usize)>, SpecError> {
+    let mut stated = Vec::new();
+    for found in prop_definition_pattern().captures_iter(code) {
+        let whole = found.get(0).map_or(0..0, |whole| whole.range());
+        let line_start = code[..whole.start].rfind('\n').map_or(0, |index| index + 1);
+        let block = blocks
+            .iter()
+            .find(|(_, start, end)| *start <= whole.start && whole.start < *end);
+        let (_, [kind, name]) = found.extract();
+        let registrable = kind == "def"
+            && code[line_start..whole.start].trim().is_empty()
+            && identifier_pattern().is_match(name);
+        match block {
+            Some(_) if registrable => stated.push((name, whole.end)),
+            _ => {
+                let line_end = code[whole.end..]
+                    .find('\n')
+                    .map_or(code.len(), |index| whole.end + index);
+                return Err(SpecError::UnregisteredProperty {
+                    path: path.to_path_buf(),
+                    line: code[line_start..line_end]
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                });
+            }
+        }
+    }
+    Ok(stated)
 }
 
 fn sampled_types(defined: &HashMap<&str, bool>) -> Vec<String> {
@@ -864,34 +1217,7 @@ impl LeanSpec {
             blocks.push((namespace, start, code.len()));
         }
 
-        let mut properties = Vec::new();
-        for found in prop_definition_pattern().captures_iter(&code) {
-            let whole = found.get(0).map_or(0..0, |whole| whole.range());
-            let line_start = code[..whole.start].rfind('\n').map_or(0, |index| index + 1);
-            let block = blocks
-                .iter()
-                .find(|(_, start, end)| *start <= whole.start && whole.start < *end);
-            let registrable = &found[1] == "def"
-                && code[line_start..whole.start].trim().is_empty()
-                && identifier_pattern().is_match(&found[2]);
-            match block {
-                Some((namespace, _, _)) if registrable => {
-                    properties.push(format!("{namespace}.{}", &found[2]));
-                }
-                _ => {
-                    let line_end = code[whole.end..]
-                        .find('\n')
-                        .map_or(code.len(), |index| whole.end + index);
-                    return Err(SpecError::UnregisteredProperty {
-                        path: path.to_path_buf(),
-                        line: code[line_start..line_end]
-                            .split_whitespace()
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    });
-                }
-            }
-        }
+        let stated = stated_properties(path, &code, &blocks)?;
         let namespace = match namespaces.as_slice() {
             [] => return Err(SpecError::NoNamespace(path.to_path_buf())),
             [namespace] => namespace.clone(),
@@ -902,9 +1228,14 @@ impl LeanSpec {
                 });
             }
         };
+        let mut properties: Vec<String> = stated
+            .iter()
+            .map(|(name, _)| format!("{namespace}.{name}"))
+            .collect();
         let defined = definitions(&code, &blocks);
-        let machine = machine(&code, &blocks, &defined, &namespace);
-        if let Some(machine) = &machine {
+        let machine = machine(&code, &blocks, &defined, &namespace, &stated);
+        let running = machine.as_ref().filter(|machine| machine.runs());
+        if let Some(machine) = running {
             if defined.contains_key("run") {
                 return Err(SpecError::MachineRun(path.to_path_buf()));
             }
@@ -918,11 +1249,11 @@ impl LeanSpec {
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
-        let compared = compared_functions(path, &text, &namespace, &defined, machine.as_ref())?;
+        let compared = compared_functions(path, &text, &namespace, &defined, running)?;
         let sampled = sampled_types(&defined);
         let imported = imported_specs(path, &text)?;
         let mut source = source(text, &imported);
-        if let Some(machine) = &machine {
+        if let Some(machine) = running {
             source.push('\n');
             source.push_str(&machine.definitions(&namespace));
             source.push('\n');
@@ -970,12 +1301,13 @@ impl LeanSpec {
         let namespace = &self.namespace;
         let Some((machine, actions)) = self
             .explored()
-            .filter(|_| function == format!("{namespace}.run"))
+            .filter(|(machine, _)| machine.runs() && function == format!("{namespace}.run"))
         else {
             return Vec::new();
         };
         let mut lines = vec![EXPLORATION_HELPERS.to_string()];
         lines.extend(self.deriving(
+            Some(machine),
             &["BEq", "Hashable", "Lean.ToJson"],
             "open FormalCompare in ",
         ));
@@ -1033,10 +1365,10 @@ impl LeanSpec {
         }
     }
 
-    fn deriving(&self, classes: &[&str], scope: &str) -> Vec<String> {
+    fn deriving(&self, machine: Option<&Machine>, classes: &[&str], scope: &str) -> Vec<String> {
         let namespace = &self.namespace;
-        self.machine
-            .iter()
+        machine
+            .into_iter()
             .flat_map(|machine| &machine.types)
             .flat_map(|declared| {
                 classes.iter().map(move |class| {
@@ -1047,19 +1379,29 @@ impl LeanSpec {
     }
 
     fn derived(&self) -> Vec<String> {
-        self.deriving(&["Repr", "Plausible.Shrinkable", "Plausible.Arbitrary"], "")
+        self.deriving(
+            self.machine.as_ref().filter(|machine| machine.runs()),
+            &["Repr", "Plausible.Shrinkable", "Plausible.Arbitrary"],
+            "",
+        )
     }
 
     fn exploration_of(&self, machine: &Machine, actions: &Actions, invariant: &str) -> String {
         let namespace = &self.namespace;
         let depth = &machine.depth;
+        let (instance, decided) = self.decision(invariant);
         format!(
-            "{}\n\
+            "{instance}\n\
              #eval IO.println (FormalBounded.report \"{EXPLORATION_MARK}\" \"{namespace}.{invariant}.{ALWAYS}\" \
-             (FormalBounded.explore {namespace}.init {namespace}.step {} \
-             (fun s => decide ({namespace}.{invariant} s)) {depth} {STATE_BUDGET}))",
-            self.decidable(invariant),
+             (FormalBounded.explore {namespace}.init {namespace}.step {} {decided} {depth} {STATE_BUDGET}))",
             actions.expression()
+        )
+    }
+
+    fn decision(&self, name: &str) -> (String, String) {
+        (
+            self.decidable(name),
+            format!("(fun s => decide ({}.{name} s))", self.namespace),
         )
     }
 
@@ -1075,22 +1417,63 @@ impl LeanSpec {
         Some((machine, machine.actions.as_ref()?))
     }
 
-    fn explored_types(&self) -> Vec<String> {
-        self.deriving(&["Repr", "BEq", "Hashable"], "")
+    fn exploration_helpers(&self) -> Vec<String> {
+        [EXPLORATION_HELPERS, LASSO_HELPERS]
+            .into_iter()
+            .map(ToString::to_string)
+            .chain(self.deriving(self.machine.as_ref(), &["Repr", "BEq", "Hashable"], ""))
+            .collect()
+    }
+
+    fn lasso_of(&self, machine: &Machine, actions: &Actions, liveness: &Liveness) -> String {
+        let namespace = &self.namespace;
+        let mut lines = Vec::new();
+        let mut decision = |predicate: &Predicate| match predicate {
+            Predicate::Term(term) => format!("(fun s => decide ({term} s))"),
+            Predicate::Named(name) => {
+                let (instance, decided) = self.decision(name);
+                lines.push(instance);
+                decided
+            }
+        };
+        let start = liveness.start.as_ref().map_or_else(
+            || "none".to_string(),
+            |start| format!("(some {})", decision(start)),
+        );
+        let goal = decision(&liveness.goal);
+        lines.push(format!(
+            "namespace {namespace}\n#eval IO.println (FormalLasso.report \"{EXPLORATION_MARK}\" \"{namespace}.{}\" \
+             (FormalLasso.search {namespace}.init {namespace}.step {} [{}] {start} {goal} {} {STATE_BUDGET}))\nend {namespace}",
+            liveness.name,
+            actions.expression(),
+            liveness.fair.join(", "),
+            machine.depth
+        ));
+        lines.join("\n")
+    }
+
+    fn liveness_of(&self, id: &str) -> Option<&Liveness> {
+        let name = id.strip_prefix(&format!("{}.", self.namespace))?;
+        self.machine
+            .as_ref()?
+            .liveness
+            .iter()
+            .find(|liveness| liveness.name == name)
+    }
+
+    fn exploration_line(&self, id: &str) -> Option<String> {
+        let (machine, actions) = self.explored()?;
+        if let Some(invariant) = self.invariant_of(id) {
+            return Some(self.exploration_of(machine, actions, invariant));
+        }
+        Some(self.lasso_of(machine, actions, self.liveness_of(id)?))
     }
 
     /// The cache key of the bounded check of the property `id`.
     #[must_use]
     pub fn exploration_key(&self, id: &str) -> String {
-        let line = self
-            .explored()
-            .zip(self.invariant_of(id))
-            .map(|((machine, actions), invariant)| self.exploration_of(machine, actions, invariant))
-            .unwrap_or_default();
-        let helpers = std::iter::once(EXPLORATION_HELPERS.to_string())
-            .chain(self.explored_types())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let line = self.exploration_line(id).unwrap_or_default();
+        let helpers = self.exploration_helpers().join("\n");
         lean_spec_search_key(&self.source, &helpers, &format!("bounded:{line}"))
     }
 
@@ -1104,15 +1487,23 @@ impl LeanSpec {
             })
     }
 
-    /// The invariants the bounded check can explore: those of a machine whose actions are known.
+    /// The properties the bounded check can explore, those of a machine whose actions
+    /// are known: each invariant, then each liveness property.
     #[must_use]
     pub fn explorable(&self) -> Vec<String> {
         self.explored()
             .map(|(machine, _)| {
+                let namespace = &self.namespace;
                 machine
                     .invariants
                     .iter()
-                    .map(|invariant| format!("{}.{invariant}.{ALWAYS}", self.namespace))
+                    .map(|invariant| format!("{namespace}.{invariant}.{ALWAYS}"))
+                    .chain(
+                        machine
+                            .liveness
+                            .iter()
+                            .map(|liveness| format!("{namespace}.{}", liveness.name)),
+                    )
                     .collect()
             })
             .unwrap_or_default()
@@ -1128,15 +1519,12 @@ impl LeanSpec {
                 .chain(spec_imports.iter().map(|import| import.module.as_str())),
         );
         lines.push(blanked(spec, &spec_imports));
-        lines.push(EXPLORATION_HELPERS.to_string());
-        lines.extend(self.explored_types());
+        lines.extend(self.exploration_helpers());
         let mut explored = Vec::new();
-        if let Some((machine, actions)) = self.explored() {
-            for id in ids {
-                if let Some(invariant) = self.invariant_of(id) {
-                    lines.push(self.exploration_of(machine, actions, invariant));
-                    explored.push((*id).to_string());
-                }
+        for id in ids {
+            if let Some(line) = self.exploration_line(id) {
+                lines.push(line);
+                explored.push((*id).to_string());
             }
         }
         Exploration {
@@ -1335,10 +1723,20 @@ pub fn read_exploration(exploration: &Exploration, printed: &[&str]) -> Vec<(Str
         .iter()
         .filter_map(|id| {
             let mark = format!("{EXPLORATION_MARK} {id} ");
-            let line = printed.iter().find_map(|line| line.strip_prefix(&mark))?;
+            let line = printed
+                .iter()
+                .find_map(|line| line.strip_prefix(mark.as_str()))?;
             let line = line.trim_end();
             let explored = if let Some(trace) = line.strip_prefix("falsified ") {
                 Explored::Falsified(trace.to_string())
+            } else if let Some(lasso) = line.strip_prefix("lasso\u{1f}") {
+                let (prefix, cycle) = lasso.split_once('\u{1f}')?;
+                Explored::Lasso {
+                    prefix: prefix.to_string(),
+                    cycle: cycle.to_string(),
+                }
+            } else if line == "unsettled" {
+                Explored::Unsettled
             } else {
                 let mut words = line.strip_prefix("bounded ")?.split(' ');
                 Explored::Bounded {
@@ -1989,6 +2387,7 @@ mod tests {
                     "[Counter.Action.inc, Counter.Action.reset]".to_string()
                 )),
                 depth: "10".to_string(),
+                liveness: Vec::new(),
             })
         );
         assert_eq!(
@@ -2352,6 +2751,183 @@ mod tests {
             "{}",
             composed.lean_code
         );
+    }
+
+    const LIVE: &str = include_str!("../../../tests/fixtures/lean_spec/Live.lean");
+
+    #[test]
+    fn a_liveness_property_under_fairness_alone_is_checked_and_any_other_is_left_to_its_proof() {
+        let spec = parse(LIVE).expect("it parses");
+        let liveness = spec
+            .machine
+            .expect("a liveness property makes a machine")
+            .liveness;
+        let found: Vec<(&str, Vec<&str>, Option<&Predicate>, &Predicate)> = liveness
+            .iter()
+            .map(|live| {
+                (
+                    live.name.as_str(),
+                    live.fair.iter().map(String::as_str).collect(),
+                    live.start.as_ref(),
+                    &live.goal,
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    "a_fair_reset_empties_it",
+                    vec!["Action.reset"],
+                    Some(&Predicate::Named("positive".to_string())),
+                    &Predicate::Term("(fun s => s.count = 0)".to_string())
+                ),
+                (
+                    "two_comes",
+                    vec!["Action.inc", "Action.reset"],
+                    None,
+                    &Predicate::Term("(fun s => s.count = 2)".to_string())
+                ),
+                (
+                    "unfair",
+                    vec![],
+                    Some(&Predicate::Term("(fun s => 0 < s.count)".to_string())),
+                    &Predicate::Term("(fun s => s.count = 0)".to_string())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_liveness_property_is_explored_on_the_machine_s_graph_and_its_lasso_read_back() {
+        let spec = parse(LIVE).expect("it parses");
+        assert_eq!(
+            spec.explorable(),
+            [
+                "Live.positive.always",
+                "Live.a_fair_reset_empties_it",
+                "Live.two_comes",
+                "Live.unfair"
+            ]
+        );
+        let ids = [
+            "Live.a_fair_reset_empties_it",
+            "Live.two_comes",
+            "Live.unfair",
+        ];
+        let exploration = spec.exploration(&ids);
+        assert_eq!(exploration.ids, ids);
+        assert!(exploration.lean_code.contains(
+            "instance : DecidablePred Live.positive := fun s => by unfold Live.positive; infer_instance\nnamespace Live\n#eval IO.println (FormalLasso.report \"formal-bounded\" \"Live.a_fair_reset_empties_it\" (FormalLasso.search Live.init Live.step (FormalBounded.complete [Live.Action.inc, Live.Action.reset] (by intro a; cases a <;> simp)) [Action.reset] (some (fun s => decide (Live.positive s))) (fun s => decide ((fun s => s.count = 0) s)) 10 100000))\nend Live"
+        ), "{}", exploration.lean_code);
+        assert!(exploration.lean_code.contains(
+            "[Action.inc, Action.reset] none (fun s => decide ((fun s => s.count = 2) s))"
+        ));
+        assert_ne!(spec.exploration_key(ids[0]), spec.exploration_key(ids[1]));
+        let read = read_exploration(
+            &exploration,
+            &[
+                "formal-bounded Live.a_fair_reset_empties_it bounded 10 3\n",
+                "formal-bounded Live.two_comes lasso\u{1f}[]\u{1f}[Live.Action.inc, Live.Action.reset]\n",
+                "formal-bounded Live.unfair lasso\u{1f}[Live.Action.inc, Live.Action.inc]\u{1f}[Live.Action.inc]\n",
+            ],
+        );
+        assert_eq!(
+            read,
+            [
+                (
+                    ids[0].to_string(),
+                    Explored::Bounded {
+                        depth: 10,
+                        states: 3
+                    }
+                ),
+                (
+                    ids[1].to_string(),
+                    Explored::Lasso {
+                        prefix: "[]".to_string(),
+                        cycle: "[Live.Action.inc, Live.Action.reset]".to_string(),
+                    }
+                ),
+                (
+                    ids[2].to_string(),
+                    Explored::Lasso {
+                        prefix: "[Live.Action.inc, Live.Action.inc]".to_string(),
+                        cycle: "[Live.Action.inc]".to_string(),
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_machine_with_liveness_alone_leaves_run_to_the_spec() {
+        let live = liveness_alone().replace(
+            "end Live",
+            "def run (actions : List Action) : State := actions.foldl step init\n\nend Live",
+        );
+        let spec = parse(&live).expect("a spec with no invariant may define run");
+        let machine = spec
+            .machine
+            .as_ref()
+            .expect("its liveness properties make a machine");
+        assert_eq!(machine.invariants, Vec::<String>::new());
+        assert_eq!(machine.liveness.len(), 3);
+        assert!(!spec.source.contains("_root_.Live.run"), "{}", spec.source);
+    }
+
+    fn liveness_alone() -> String {
+        LIVE.replace(
+            "def positive : State → Prop := fun s => 0 < s.count\n\n",
+            "",
+        )
+        .replace("positive (", "(fun s => 0 < s.count) (")
+    }
+
+    #[test]
+    fn a_machine_with_liveness_alone_compares_its_own_run_and_derives_nothing_for_the_search() {
+        let spec = parse(&liveness_alone().replace(
+            "end Live",
+            "/-- Runs.\n\n  code: src/live.rs run\n-/\ndef run (actions : List Action) : State := actions.foldl step init\n\ndef run.inputs : List (List Action) := [[], [.inc]]\n\nend Live",
+        ))
+        .expect("a spec with no invariant may compare its own run");
+        let evaluation = spec.evaluation(&["Live.run"]);
+        assert!(!evaluation.contains("FormalBounded.traces"), "{evaluation}");
+        let search = spec.search(&["Live.two_comes"]).lean_code;
+        assert!(!search.contains("deriving instance"), "{search}");
+    }
+
+    #[test]
+    fn a_liveness_property_whose_body_holds_a_blank_or_comment_line_is_read_whole() {
+        let spec = parse(&liveness_alone().replace(
+            "def unfair : Prop :=",
+            "def or_small : Prop :=\n  Temporal.eventually init step (fun _ => True) (fun s => s.count = 2)\n\n  -- or it stays small\n  ∨ Temporal.always init step (fun s => s.count ≤ 2)\n\ndef unfair : Prop :=",
+        ))
+        .expect("it parses");
+        let names: Vec<String> = spec
+            .machine
+            .expect("its liveness properties make a machine")
+            .liveness
+            .into_iter()
+            .map(|live| live.name)
+            .collect();
+        assert_eq!(names, ["a_fair_reset_empties_it", "two_comes", "unfair"]);
+    }
+
+    #[test]
+    fn a_liveness_property_in_an_indented_namespace_ends_at_the_next_declaration() {
+        let spec = parse(
+            "namespace Live\n\n  inductive Action where\n    | inc\n\n  def init : Nat := 0\n\n  def step (n : Nat) : Action → Nat\n    | .inc => n + 1\n\n  def one_comes : Prop :=\n    Temporal.eventually init step (Temporal.fair Action.inc) (fun n => n = 1)\n  def two_comes : Prop :=\n    Temporal.eventually init step\n      (Temporal.fair Action.inc) (fun n => n = 2)\n  theorem unrelated : True := trivial\n\nend Live\n",
+        )
+        .expect("it parses");
+        let names: Vec<String> = spec
+            .machine
+            .expect("its liveness properties make a machine")
+            .liveness
+            .into_iter()
+            .map(|live| live.name)
+            .collect();
+        assert_eq!(names, ["one_comes", "two_comes"]);
     }
 
     #[test]

@@ -1218,3 +1218,100 @@ mod inducting {
         assert_eq!(inductions(&fake), 2);
     }
 }
+
+mod lasso {
+    use std::fs;
+
+    use serde_json::json;
+
+    use super::*;
+
+    const SPEC: &str = include_str!("../../../tests/fixtures/lean_spec/Live.lean");
+
+    fn lean_spec(dir: &TempDir) -> LeanSpec {
+        let path = dir.path().join("Live.lean");
+        fs::write(&path, SPEC).expect("the spec is written");
+        LeanSpec::load(path.to_str().expect("the path is text")).expect("the spec loads")
+    }
+
+    fn printing(data: &[&str]) -> Fake {
+        let output: Vec<String> = data
+            .iter()
+            .map(|data| json!({ "severity": "information", "data": data }).to_string())
+            .collect();
+        Fake {
+            result: Some(LeanResult {
+                success: true,
+                output: output.join("\n"),
+                errors: Vec::new(),
+            }),
+            ..Fake::default()
+        }
+    }
+
+    #[test]
+    fn a_lasso_is_refuted_a_complete_walk_is_a_bound_and_nothing_runs_twice() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = printing(&[
+            "formal-bounded Live.positive.always falsified []\n",
+            "formal-bounded Live.a_fair_reset_empties_it bounded 10 3\n",
+            "formal-bounded Live.two_comes lasso\u{1f}[]\u{1f}[Live.Action.inc, Live.Action.reset]\n",
+            "formal-bounded Live.unfair lasso\u{1f}[Live.Action.inc, Live.Action.inc]\u{1f}[Live.Action.inc]\n",
+        ]);
+        let sessions = Sessions::default();
+        for _ in 0..2 {
+            let session = sessions
+                .open_spec(&fake, &cache, lean_spec(&dir))
+                .expect("the spec compares nothing");
+            let session = session.lock().expect("a fresh session");
+            let refuted: Vec<(&str, Vec<&str>)> = session
+                .refuted
+                .iter()
+                .map(|refutation| {
+                    (
+                        refutation.id.as_str(),
+                        refutation
+                            .counterexample
+                            .iter()
+                            .map(String::as_str)
+                            .collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                refuted,
+                [
+                    ("Live.positive.always", vec!["actions := []"]),
+                    (
+                        "Live.two_comes",
+                        vec![
+                            "actions := []",
+                            "then forever := [Live.Action.inc, Live.Action.reset]"
+                        ]
+                    ),
+                    (
+                        "Live.unfair",
+                        vec![
+                            "actions := [Live.Action.inc, Live.Action.inc]",
+                            "then forever := [Live.Action.inc]"
+                        ]
+                    ),
+                ]
+            );
+            let bounded: Vec<(&str, u32, u32)> = session
+                .bounded
+                .iter()
+                .map(|bound| (bound.id.as_str(), bound.depth, bound.states))
+                .collect();
+            assert_eq!(bounded, [("Live.a_fair_reset_empties_it", 10, 3)]);
+        }
+        let explorations = fake
+            .seen
+            .borrow()
+            .iter()
+            .filter(|code| code.contains("FormalLasso.search Live"))
+            .count();
+        assert_eq!(explorations, 1);
+    }
+}

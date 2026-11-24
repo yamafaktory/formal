@@ -104,8 +104,9 @@ formal runs it when the session opens and caches the answers per spec text. The 
 runs its code and sends the answers to `POST /session/{id}/compare`. The evaluation
 prints JSON through `Lean.ToJson`, with a `List Char` as a string.
 
-A spec with `def init : <State>`, `def step` and at least one invariant in its
-namespace describes a state machine. `LeanSpec::source` then ends with what formal defines for it: `run`, the fold of
+A spec with `def init : <State>`, `def step`, and at least one invariant or liveness
+property in its namespace describes a state machine. When the machine has an invariant,
+`LeanSpec::source` ends with what formal defines for it: `run`, the fold of
 `step` from `init`, and `<name>.always : Prop := ∀ actions, <name> (run actions)` for each
 `def <name> : <State> → Prop` or `def <name> (s : <State>) : Prop`. Each
 `<name>.always` is a property, written from the root, so an unclosed namespace changes
@@ -133,6 +134,14 @@ entry, and a conjunction that holds while one of its parts does not becomes
 puts before the spec as it does a spec import. It is part of formal's trusted base: core
 Lean, with its rules proved in the file, and every proof that uses it is checked against it.
 A `Formal.` import formal does not ship is refused.
+
+A liveness property is a `def <name> : Prop` written as `Temporal.leadsTo init step A p q`
+or `Temporal.eventually init step A q`, where `A` is `Temporal.fair a`, several of them
+joined with `∧`, or `fun _ => True`. `LeanSpec::exploration` checks each one on the graph
+of the same walk: a reachable loop that takes every fair action and never reaches `q`
+becomes a refutation, with the actions to the loop and then the loop. A property that held
+becomes a bound only when the walk reached every state. On a walk cut at its depth, or with
+a fair action the actions leave out, it gets no answer. Any other shape is left to its proof.
 
 `LeanSpec::search` builds one file that searches each property for a counterexample
 with Plausible, one property per line, and reads Lean's answer on that line. The file

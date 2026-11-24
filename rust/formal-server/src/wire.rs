@@ -111,7 +111,8 @@ pub struct SessionResponse {
     pub compare: Vec<CompareOut>,
     /// The properties of the Lean spec the search found a counterexample to.
     pub refuted: Vec<RefutationOut>,
-    /// The invariants that held in every state the bounded check reached.
+    /// The invariants that held in every state the bounded check reached, and the liveness
+    /// properties that held on a walk that reached every state.
     pub bounded: Vec<BoundOut>,
     /// The invariants a step can break from a state where they hold, so their proofs need stronger ones.
     pub not_inductive: Vec<NotInductiveOut>,
@@ -132,10 +133,11 @@ pub struct NotInductiveOut {
     pub next: String,
 }
 
-/// An invariant that held in every state the bounded check reached.
+/// A property that held on the states the bounded check reached.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct BoundOut {
-    /// The property, as `<Namespace>.<name>.always`.
+    /// The property: `<Namespace>.<name>.always` for an invariant, `<Namespace>.<name>` for a
+    /// liveness property.
     pub id: String,
     /// How many actions deep the check explored.
     pub depth: u32,

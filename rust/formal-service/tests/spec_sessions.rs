@@ -675,3 +675,111 @@ fn no_temporal_property_holds_for_want_of_a_run() {
         ["Empty.init_breaks_it", "Empty.seven_comes_with_no_run"]
     );
 }
+
+fn liveness_answers(
+    runner: &Runner,
+    name: &str,
+    spec: &str,
+) -> (Vec<(String, Vec<String>)>, Vec<String>) {
+    let dir = TempDir::new().expect("a temporary directory");
+    let path = dir.path().join(format!("{name}.lean"));
+    fs::write(&path, spec).expect("written");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let session = Sessions::default()
+        .open_spec(runner, &cache, load(&path))
+        .expect("the spec compares nothing");
+    let session = session.lock().expect("a fresh session");
+    (
+        session
+            .refuted
+            .iter()
+            .map(|refutation| (refutation.id.clone(), refutation.counterexample.clone()))
+            .collect(),
+        session
+            .bounded
+            .iter()
+            .map(|bound| bound.id.clone())
+            .collect(),
+    )
+}
+
+#[test]
+fn a_false_liveness_property_comes_back_with_a_fair_run_that_never_reaches_its_goal() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let live = "import Formal.Temporal\n\nnamespace Live\n\ninductive Action where\n  | inc\n  | reset\n\nstructure State where\n  count : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .inc => ⟨min (s.count + 1) 2⟩\n  | .reset => ⟨0⟩\n\ndef a_fair_reset_empties_the_count : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.reset) (fun s => 0 < s.count) (fun s => s.count = 0)\n\ndef a_reset_empties_the_count_without_fairness : Prop :=\n  Temporal.leadsTo init step (fun _ => True) (fun s => 0 < s.count) (fun s => s.count = 0)\n\nend Live\n";
+    let (refuted, bounded) = liveness_answers(&runner, "Live", live);
+    assert_eq!(
+        refuted,
+        [(
+            "Live.a_reset_empties_the_count_without_fairness".to_string(),
+            vec![
+                "actions := [Live.Action.inc, Live.Action.inc]".to_string(),
+                "then forever := [Live.Action.inc]".to_string()
+            ]
+        )]
+    );
+    assert_eq!(bounded, ["Live.a_fair_reset_empties_the_count"]);
+}
+
+#[test]
+fn a_liveness_property_on_a_walk_cut_at_its_depth_gets_no_answer() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let climb = "import Formal.Temporal\n\nnamespace Climb\n\ninductive Action where\n  | up\n\nstructure State where\n  height : Nat\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .up => ⟨s.height + 1⟩\n\ndef the_top_comes : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.up) (fun s => s.height < 1000) (fun s => s.height = 1000)\n\nend Climb\n";
+    let (refuted, bounded) = liveness_answers(&runner, "Climb", climb);
+    assert_eq!(refuted, Vec::<(String, Vec<String>)>::new());
+    assert_eq!(bounded, Vec::<String>::new());
+}
+
+#[test]
+fn a_liveness_property_over_thousands_of_states_naming_the_spec_s_own_max_is_bounded() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let climb = "import Formal.Temporal\n\nnamespace Climb\n\ninductive Action where\n  | up\n\nstructure State where\n  height : Nat\n\ndef max : Nat := 5000\n\ndef depth : Nat := 5100\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .up => ⟨min (s.height + 1) max⟩\n\ndef the_top_comes : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.up) (fun s => s.height < max) (fun s => s.height = max)\n\nend Climb\n";
+    let (refuted, bounded) = liveness_answers(&runner, "Climb", climb);
+    assert_eq!(refuted, Vec::<(String, Vec<String>)>::new());
+    assert_eq!(bounded, ["Climb.the_top_comes"]);
+}
+
+#[test]
+fn a_liveness_property_whose_fair_action_the_samples_leave_out_is_not_bounded() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let add = "import Formal.Temporal\n\nnamespace Add\n\ninductive Action where\n  | add (n : Nat)\n  | reset\n\nstructure State where\n  count : Nat\n\ndef Action.samples : List Action := [Action.reset]\n\ndef init : State := ⟨0⟩\n\ndef step (s : State) : Action → State\n  | .add n => ⟨min (s.count + n) 3⟩\n  | .reset => ⟨0⟩\n\ndef two_comes : Prop :=\n  Temporal.eventually init step (Temporal.fair (Action.add 1)) (fun s => s.count = 2)\n\nend Add\n";
+    let (_, bounded) = liveness_answers(&runner, "Add", add);
+    assert_eq!(bounded, Vec::<String>::new());
+}
+
+#[test]
+fn a_lasso_is_reached_through_other_states_and_takes_every_fair_action_beside_an_invariant() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let mix = "import Formal.Temporal\n\nnamespace Mix\n\ninductive Action where\n  | down\n  | bounce\n\nstructure State where\n  n : Nat\n\ndef init : State := ⟨5⟩\n\ndef step (s : State) : Action → State\n  | .down => ⟨s.n - 1⟩\n  | .bounce => ⟨if s.n = 2 then 3 else s.n - 1⟩\n\ndef at_most_five (s : State) : Prop := s.n ≤ 5\n\ndef a_fair_bounce_empties_it : Prop :=\n  Temporal.leadsTo init step (Temporal.fair Action.bounce) (fun s => s.n = 5) (fun s => s.n = 0)\n\ndef fair_down_and_bounce_empty_it : Prop :=\n  Temporal.eventually init step (fun run => Temporal.fair Action.down run ∧ Temporal.fair Action.bounce run)\n    (fun s => s.n = 0)\n\nend Mix\n";
+    let (refuted, bounded) = liveness_answers(&runner, "Mix", mix);
+    assert_eq!(
+        refuted,
+        [
+            (
+                "Mix.a_fair_bounce_empties_it".to_string(),
+                vec![
+                    "actions := [Mix.Action.down, Mix.Action.down]".to_string(),
+                    "then forever := [Mix.Action.bounce, Mix.Action.bounce]".to_string()
+                ]
+            ),
+            (
+                "Mix.fair_down_and_bounce_empty_it".to_string(),
+                vec![
+                    "actions := [Mix.Action.down, Mix.Action.down]".to_string(),
+                    "then forever := [Mix.Action.down, Mix.Action.bounce]".to_string()
+                ]
+            ),
+        ]
+    );
+    assert_eq!(bounded, ["Mix.at_most_five.always"]);
+}
