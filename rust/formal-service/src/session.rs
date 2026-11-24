@@ -181,7 +181,8 @@ pub struct Session {
     pub evaluated: Vec<Evaluated>,
     /// The properties of the Lean spec the search found a counterexample to.
     pub refuted: Vec<Refutation>,
-    /// The invariants the bounded check found to hold in every state up to its depth.
+    /// The invariants the bounded check found to hold in every state up to its depth, and the
+    /// liveness properties that held on a walk that reached every state.
     pub bounded: Vec<Bound>,
     /// The invariants a step can break from a state where they hold, with that state.
     pub not_inductive: Vec<NotInductive>,
@@ -407,11 +408,13 @@ struct Searched {
     refutation: Option<Refutation>,
 }
 
-/// What the bounded check found for each invariant of `spec`, from the cache or from Lean.
+/// What the bounded check found for each invariant and liveness property of `spec`, from
+/// the cache or from Lean.
 ///
-/// A falsified invariant comes back as a refutation with its shortest trace, and an
-/// invariant that held as a bound. An invariant Lean cannot decide, or a Lean that
-/// never ran, gives neither, and only an answer Lean gave is cached.
+/// A falsified invariant comes back as a refutation with its shortest trace, and a broken
+/// liveness property with its lasso. A property that held comes back as a bound. A property
+/// Lean cannot decide, or a Lean that never ran, gives neither, and only an answer Lean gave
+/// is cached.
 pub fn explore<V: Verifier>(
     verifier: &V,
     cache: &ProofCache,
@@ -457,8 +460,16 @@ pub fn explore<V: Verifier>(
                 issue: "the invariant does not hold after these actions".to_string(),
                 id,
             }),
+            Some(Explored::Lasso { prefix, cycle }) => refuted.push(Refutation {
+                counterexample: vec![
+                    format!("actions := {prefix}"),
+                    format!("then forever := {cycle}"),
+                ],
+                issue: "on this fair run, what the property promises never comes".to_string(),
+                id,
+            }),
             Some(Explored::Bounded { depth, states }) => bounded.push(Bound { id, depth, states }),
-            None => {}
+            Some(Explored::Unsettled) | None => {}
         }
     }
     (refuted, bounded)

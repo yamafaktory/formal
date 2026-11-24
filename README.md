@@ -423,6 +423,22 @@ The library is core Lean, in `rust/formal-core/lean/Temporal.lean`. To compile a
 without formal, paste the file in place of the import. formal refuses any other `Formal.`
 import, and leaves out a `Formal.` or `Spec.` import that a proof repeats.
 
+When the session opens, formal also looks for a run that breaks each liveness property. It
+checks a property written as `Temporal.leadsTo init step A p q` or
+`Temporal.eventually init step A q`, where `A` is `Temporal.fair a`, several of them joined
+with `∧`, or `fun _ => True`. On the states the bounded walk reaches, a violation is a loop
+that takes every fair action and never reaches `q`. It comes back under `refuted`:
+
+```json
+{"id": "Live.a_reset_empties_the_count_without_fairness", "counterexample": ["actions := [Live.Action.inc, Live.Action.inc]", "then forever := [Live.Action.inc]"], "issue": "on this fair run, what the property promises never comes"}
+```
+
+A property that held comes back under `bounded` only when the walk reached every state its
+actions lead to. A
+walk cut at its depth gives no answer, since the loop may lie past it. A fair action that
+`<Action>.samples` leaves out also gives no answer, since the walk never takes it. Any other
+shape is left to its proof.
+
 When the session opens, formal also searches each property for a counterexample with
 Plausible. A false property comes back under `refuted`, with the value of each variable
 and what does not hold. For this false property in a spec with the namespace `Demo`:
