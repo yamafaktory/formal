@@ -1,0 +1,49 @@
+[py-bisect-left]
+file = "bisect.py"
+find = "            if a[mid] < x:\n                lo = mid + 1"
+replace = "            if a[mid] <= x:\n                lo = mid + 1"
+
+[py-leapdays]
+file = "calendar.py"
+find = "    y1 -= 1\n    y2 -= 1\n"
+replace = "    y1 -= 1\n"
+
+[py-median-high]
+file = "statistics.py"
+find = "raise StatisticsError(\"no median for empty data\")\n    return data[n // 2]"
+replace = "raise StatisticsError(\"no median for empty data\")\n    return data[(n - 1) // 2]"
+
+[rs-mod-floor]
+file = "num-integer/src/lib.rs"
+find = "                    r + *other\n"
+replace = "                    r - *other\n"
+
+[rs-div-ceil]
+file = "num-integer/src/lib.rs"
+find = "if (r > 0 && *other > 0) || (r < 0 && *other < 0) {"
+replace = "if (r > 0 && *other > 0) || (r < 0 && *other > 0) {"
+
+[rs-gcd]
+file = "num-integer/src/lib.rs"
+find = "return (m | n).abs();"
+replace = "return (m & n).abs();"
+
+[ts-chunk]
+file = "chunk.ts"
+find = "Math.ceil(arr.length / size)"
+replace = "Math.floor(arr.length / size)"
+
+[ts-in-range]
+file = "inRange.ts"
+find = "return minimum <= value && value < maximum;"
+replace = "return minimum <= value && value <= maximum;"
+
+[ts-windowed]
+file = "windowed.ts"
+find = "arr.length - size + 1"
+replace = "arr.length - size"
+
+[ts-take-while]
+file = "takeWhile.ts"
+find = "      break;"
+replace = "      continue;"

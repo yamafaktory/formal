@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "fast-check": "4.11.0"
+  }
+}

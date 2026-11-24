@@ -1,0 +1,139 @@
+[[task]]
+id = "py-bisect-left"
+language = "python"
+files = ["cpython/bisect.py"]
+function = "`bisect_left` in `bisect.py`, called with its defaults for `lo`, `hi` and `key`"
+property = "For every list `a` of integers sorted in ascending order and every integer `x`, with `i = bisect_left(a, x)`: every `e` in `a[:i]` has `e < x`, and every `e` in `a[i:]` has `e >= x`."
+
+[[task]]
+id = "py-bisect-right"
+language = "python"
+files = ["cpython/bisect.py"]
+function = "`bisect_right` in `bisect.py`, called with its defaults for `lo`, `hi` and `key`"
+property = "For every list `a` of integers sorted in ascending order and every integer `x`, with `i = bisect_right(a, x)`: every `e` in `a[:i]` has `e <= x`, and every `e` in `a[i:]` has `e > x`."
+
+[[task]]
+id = "py-leapdays"
+language = "python"
+files = ["cpython/calendar.py"]
+function = "`leapdays` in `calendar.py`"
+property = "For all integers `y1 <= y2`, `leapdays(y1, y2)` equals the number of years `y` with `y1 <= y < y2` for which `isleap(y)` is true."
+
+[[task]]
+id = "py-median"
+language = "python"
+files = ["cpython/statistics.py"]
+function = "`median` in `statistics.py`"
+property = "For every non-empty list of integers whose absolute values are at most `2**52`, `median` returns the middle value of the sorted list when its length is odd, and the mean of the two middle values when its length is even."
+
+[[task]]
+id = "py-median-low"
+language = "python"
+files = ["cpython/statistics.py"]
+function = "`median_low` in `statistics.py`"
+property = "For every non-empty list of integers, `median_low` returns the middle value of the sorted list when its length is odd, and the smaller of the two middle values when its length is even."
+
+[[task]]
+id = "py-median-high"
+language = "python"
+files = ["cpython/statistics.py"]
+function = "`median_high` in `statistics.py`"
+property = "For every non-empty list of integers, `median_high` returns the middle value of the sorted list when its length is odd, and the larger of the two middle values when its length is even."
+
+[[task]]
+id = "rs-div-floor"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::div_floor` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `b != 0`, except `a = i64::MIN` with `b = -1`, `a.div_floor(&b)` equals the floor of the exact quotient `a / b`."
+
+[[task]]
+id = "rs-mod-floor"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::mod_floor` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `b != 0`, except `a = i64::MIN` with `b = -1`, `a.mod_floor(&b)` equals `a - b * q`, where `q` is the floor of the exact quotient `a / b`."
+
+[[task]]
+id = "rs-div-ceil"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::div_ceil` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `b != 0`, except `a = i64::MIN` with `b = -1`, `a.div_ceil(&b)` equals the ceiling of the exact quotient `a / b`."
+
+[[task]]
+id = "rs-gcd"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::gcd` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `|a| < 2^62` and `|b| < 2^62`, `a.gcd(&b)` is non-negative, divides both `a` and `b`, and is divided by every common divisor of `a` and `b`."
+
+[[task]]
+id = "rs-lcm"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::lcm` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `|a| < 2^31` and `|b| < 2^31`, `a.lcm(&b)` is non-negative, is a multiple of both `a` and `b`, and divides every common multiple of `a` and `b`."
+
+[[task]]
+id = "rs-binomial"
+language = "rust"
+files = ["num-integer"]
+function = "`binomial` for `u64`, in `num-integer/src/lib.rs`"
+property = "For all `u64` values `n <= 60` and `k`, `binomial(n, k)` equals `n! / (k! * (n - k)!)` when `k <= n`, and `0` when `k > n`."
+
+[[task]]
+id = "rs-sqrt"
+language = "rust"
+files = ["num-integer"]
+function = "`Roots::sqrt` for `u64`, in `num-integer/src/roots.rs`"
+property = "For every `u64` value `n`, `r = n.sqrt()` satisfies `r * r <= n < (r + 1) * (r + 1)`, computed without overflow."
+
+[[task]]
+id = "ts-chunk"
+language = "typescript"
+files = ["es-toolkit/chunk.ts"]
+function = "`chunk` in `chunk.ts`"
+property = "For every array `arr` and every integer `size > 0`, the chunks of `chunk(arr, size)` concatenated in order equal `arr`, every chunk but the last has exactly `size` elements, and the last chunk has between 1 and `size` elements."
+
+[[task]]
+id = "ts-clamp"
+language = "typescript"
+files = ["es-toolkit/clamp.ts"]
+function = "`clamp` in `clamp.ts`, called with three arguments"
+property = "For all finite numbers `value`, `minimum` and `maximum` with `minimum <= maximum`, `clamp(value, minimum, maximum)` equals `minimum` when `value < minimum`, `maximum` when `value > maximum`, and `value` otherwise."
+
+[[task]]
+id = "ts-in-range"
+language = "typescript"
+files = ["es-toolkit/inRange.ts"]
+function = "`inRange` in `inRange.ts`, called with three arguments"
+property = "For all finite numbers `value`, `minimum` and `maximum` with `minimum < maximum`, `inRange(value, minimum, maximum)` is true exactly when `minimum <= value` and `value < maximum`."
+
+[[task]]
+id = "ts-range"
+language = "typescript"
+files = ["es-toolkit/range.ts"]
+function = "`range` in `range.ts`, called with three arguments"
+property = "For all integers `start` and `end` with absolute values at most `10**6`, and every non-zero integer `step`, `range(start, end, step)` lists `start + i * step` for `i = 0, 1, 2, …` for as long as the value lies strictly before `end` in the direction of `step`: below `end` when `step > 0`, above `end` when `step < 0`."
+
+[[task]]
+id = "ts-windowed"
+language = "typescript"
+files = ["es-toolkit/windowed.ts"]
+function = "`windowed` in `windowed.ts`, called without options"
+property = "For every array `arr` and all integers `size > 0` and `step > 0`, `windowed(arr, size, step)` returns `arr.slice(i, i + size)` for each `i = 0, step, 2 * step, …` with `i + size <= arr.length`, in that order, and nothing else."
+
+[[task]]
+id = "ts-take-while"
+language = "typescript"
+files = ["es-toolkit/takeWhile.ts"]
+function = "`takeWhile` in `takeWhile.ts`"
+property = "For every array `arr` and every predicate `p`, `takeWhile(arr, p)` returns the longest prefix of `arr` whose elements all satisfy `p`."
+
+[[task]]
+id = "ts-zip"
+language = "typescript"
+files = ["es-toolkit/zip.ts"]
+function = "`zip` in `zip.ts`, called with two arrays"
+property = "For all arrays `a` and `b`, `zip(a, b)` has length `max(a.length, b.length)`, and its row `i` is `[a[i], b[i]]`, with `undefined` in place of an element past the end of the shorter array."

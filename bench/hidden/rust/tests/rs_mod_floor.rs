@@ -1,0 +1,22 @@
+use num_integer::Integer;
+use proptest::prelude::*;
+
+fn floor(a: i128, b: i128) -> i128 {
+    let q = a / b;
+    if (a % b != 0) && ((a < 0) != (b < 0)) { q - 1 } else { q }
+}
+
+proptest! {
+    #[test]
+    fn property(a in any::<i64>(), b in any::<i64>().prop_filter("b != 0", |b| *b != 0)) {
+        prop_assume!(!(a == i64::MIN && b == -1));
+        let expected = i128::from(a) - i128::from(b) * floor(a.into(), b.into());
+        prop_assert_eq!(i128::from(a.mod_floor(&b)), expected);
+    }
+
+    #[test]
+    fn small(a in -50i64..50, b in (-9i64..9).prop_filter("b != 0", |b| *b != 0)) {
+        let expected = i128::from(a) - i128::from(b) * floor(a.into(), b.into());
+        prop_assert_eq!(i128::from(a.mod_floor(&b)), expected);
+    }
+}

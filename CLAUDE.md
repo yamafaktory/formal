@@ -174,6 +174,17 @@ cargo test -p formal-service --test spec_sessions  # every proof of the spec hol
 CI runs all seven in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
+## Benchmark
+
+`bench/` measures whether formal reduces wrong "verified" claims (#24). It is outside
+CI and outside the Rust workspace. `bench/README.md` says how to run it.
+
+- `bench/tasks.toml` lists the tasks, and `bench/vendor/` holds their upstream code.
+  Copy a new function from its project at a pinned commit, never write one.
+- `bench/hidden/` is what the agent never sees: the seeds and the property tests.
+  `uv run bench/bench.py check` must pass after any change there.
+- `uv run --with pytest pytest bench/test_bench.py` tests the script.
+
 ## Releases
 
 Every pull request is a release. It bumps `version` in `rust/Cargo.toml` (and
