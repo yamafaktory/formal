@@ -1,0 +1,12 @@
+✗ Discount.never_negative  proofs/Discount/never_negative.lean:6:2
+    linarith failed to find a contradiction
+    price rate : ℤ
+    hp : 0 ≤ price
+    h0 : 0 ≤ rate
+    h1 : rate ≤ 1
+    a✝ : price * (1 - rate) < 0
+    ⊢ False
+    failed
+  hint: The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. `nlinarith` reports its failures as `linarith` too: if the proof already used it, give it the products it needs as hypotheses, such as `mul_nonneg ha hb`.
+    The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.
+0 of 1 properties hold

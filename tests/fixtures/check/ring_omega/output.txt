@@ -1,0 +1,13 @@
+✗ Ring.in_range  proofs/Ring/in_range.lean:4:2
+    omega could not prove the goal:
+    a possible counterexample may satisfy the constraints
+      b ≤ -1
+      a ≥ 1
+    where
+     a := size
+     b := (index, size).fst.fmod (index, size).snd
+  hint: `omega` reasons about linear integer arithmetic only — every other subterm is an opaque variable to it, which is why the counterexample it prints mentions terms you expected to have been reduced away.
+    Look at the `where` block in the error: if the same value appears under two different names (typically an unreduced projection such as `(a, b).2` alongside the `b` it should have become), omega cannot know they are equal. Reduce it before calling omega — `simp` the projection away, rewrite with the lemma that states the equality, or prove the arithmetic fact as a standalone `have` over the already-reduced form and close the goal with `simpa using` it.
+    Adding more hypotheses to omega will not help while the terms remain opaque.
+✓ Ring.wrap  matches ring.py wrap
+0 of 1 properties hold, 1 of 1 functions match the code

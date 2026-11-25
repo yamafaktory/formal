@@ -95,6 +95,7 @@ jobs:
           --test lean --test warm --test audit --test guide_lemmas --test confinement --test spec
           -- --test-threads=1
       - run: cargo +stable test --locked -p formal-service --test spec_sessions -- --test-threads=1
+      - run: cargo +stable test --locked -p formal-cli budget -- --test-threads=1
 
   msrv:
     runs-on: ubuntu-latest

@@ -32,7 +32,7 @@ anything the cache key touches — reaching for `str::lines` or
 
 ## The files that judge changes
 
-Four things decide whether a change is allowed to land. All are data, and none of
+Five things decide whether a change is allowed to land. All are data, and none of
 them mention an implementation.
 
 - `tests/conformance/golden/responses.json` — the HTTP surface. 40 steps, status
@@ -53,6 +53,11 @@ them mention an implementation.
 
 - `tests/fixtures/hint_corpus.toml` — every hint pinned to its text, and every
   rule in the table reached by a sample.
+
+- `tests/fixtures/check/` — what `formal check` prints. Each case is a spec with a
+  wrong proof, its output recorded from a real Lean run. `budget.toml` caps the bytes of
+  all the outputs together. An answer that gets shorter lowers it. Raise it only with a
+  reason, because an agent pays for every byte.
 
 - `rust/formal-core/guidance/` — the text formal serves. Its four topic bodies
   are pinned by digest inside `responses.json`, so an edit there moves a golden
@@ -169,9 +174,10 @@ cargo test -p formal-lean --test confinement   # bubblewrap confines what it cla
 cargo test -p formal-lean --test guide_lemmas  # every lemma the guide names still exists
 cargo test -p formal-lean --test spec          # the Rust answers what the spec answers
 cargo test -p formal-service --test spec_sessions  # every proof of the spec holds, and no cheat does
+cargo test -p formal-cli budget                    # formal check prints what was recorded
 ```
 
-CI runs all seven in the `lean` job, sandboxed, and fails before them if Lean or
+CI runs all eight in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
 ## Benchmark

@@ -1,0 +1,8 @@
+✗ Lists.append_lengths  proofs/Lists/append_lengths.lean:1:61
+    unsolved goals
+    a b c d : List Nat
+    h1 : a.length = b.length
+    h2 : c.length = d.length
+    ⊢ a.length + c.length = b.length + d.length
+  hint: Review Lean 4 syntax and ensure all imports are present.
+0 of 1 properties hold
