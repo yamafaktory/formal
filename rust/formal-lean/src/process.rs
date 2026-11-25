@@ -376,14 +376,15 @@ mod tests {
 
     /// A process whose command line names formal, as the real server's does.
     ///
-    /// A script rather than `sh -c`: a shell running one command execs it and is
-    /// replaced, so whatever the script says would not survive into the cmdline.
+    /// A script that `sh` reads rather than `sh -c`: a shell running one command
+    /// execs it and is replaced, so whatever the script says would not survive into
+    /// the cmdline.
     fn ours(dir: &TempDir) -> Command {
         let script = dir.path().join("formal-stub");
-        fs::write(&script, "#!/bin/sh\nsleep 20\n").expect("writable");
-        fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .expect("the mode is settable");
-        Command::new(script)
+        fs::write(&script, "sleep 20\n:\n").expect("writable");
+        let mut command = Command::new("/bin/sh");
+        command.arg(script);
+        command
     }
 
     #[test]
