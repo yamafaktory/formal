@@ -86,16 +86,21 @@ const TOPICS: &[(&str, &str)] = &[
         "tactics",
         "tactic rules that prevent the common failures, and what to do when Lean rejects a proof",
     ),
+    (
+        "machines",
+        "Lean specs of state machines: invariants, the bounded walk, replayed traces and liveness",
+    ),
 ];
 
 const WORKFLOW: &[&str] = &[
     "Read the source file you intend to check.",
-    "GET /guide/extract, and GET /guide/formalize and /guide/tactics too before you commit to anything: what is \
-     practically provable in Lean is what decides which properties belong in the spec file, and the spec file is the \
-     thing you commit.",
-    "Identify the pure functions and the properties worth proving about them.",
-    "Write those properties to a spec file (see spec_file below), adding source_file and function_code to each. Commit \
-     it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
+    "When you still have to choose what to prove, GET /guide/extract. It says how to find the pure functions and the \
+     properties worth proving. Skip it when the function and the property are given.",
+    "To check the code and not only your model of it, write a Lean spec (lean_spec below) rather than a spec \
+     file. A proof about a model says nothing about the code where the two differ. Name the code in a `code:` line, \
+     list the inputs, run the code on them, and send its answers to POST /session/{session_id}/compare.",
+    "Otherwise, write the properties to a spec file (see spec_file below), adding source_file and function_code to \
+     each. Commit it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
     "If a spec file already exists, use it as it stands rather than regenerating it — its ids and wordings are what \
      the cached proofs are keyed on, and rewriting them throws every hit away. Add to it; do not replace it.",
     "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are already cached, which \
@@ -127,7 +132,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 18] = [
+const LEAN_SPEC: [&str; 10] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -150,40 +155,7 @@ const LEAN_SPEC: [&str; 18] = [
     "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads \
      `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted \
      name from a subdirectory. Properties come only from that spec.",
-    "A spec can describe a state machine: `def init : <State>` and `def step : <State> → <Action> → <State>` \
-     in its namespace, with at least one invariant `def <name> : <State> → Prop` or \
-     `def <name> (s : <State>) : Prop`. formal then defines `run`, the fold of `step` over a list of actions \
-     from `init`, so the spec must not define `run`.",
-    "formal registers each invariant as `<Namespace>.<name>.always`, which states \
-     `∀ actions, <name> (run actions)`. Its proof declares \
-     `theorem <Namespace>.<name>.always.holds : <Namespace>.<name>.always`. The search derives the \
-     generators for the spec's types, so a broken invariant comes back with the trace that breaks it.",
-    "When the actions of a machine are known, formal also explores every state up to a depth, 10 unless \
-     the spec defines `def depth : Nat`. The actions are the constructors of the action type when none \
-     takes an argument, else `<Action>.samples`. A violation comes back under refuted with its shortest \
-     trace, and an invariant that held comes back under bounded.",
-    "The check stops after 100000 states. bounded then gives the last depth it explored in full, which \
-     can be less than the depth asked for.",
-    "A `code:` line on `step` replays the machine against the code. The session lists `<Namespace>.run` \
-     under compare, with one trace of actions per state the bounded walk reached. Replay each trace on the \
-     code and send the last state.",
-    "Actions and states cross in Lean's derived JSON. A structure is an object of its fields, and text a \
-     string. A constructor with no argument is its name. One with named arguments is \
-     `{\"add\": {\"n\": 1}}`, one with one anonymous argument `{\"one\": 1}`, and one with several \
-     `{\"two\": [2, false]}`. `none` is `null`, and a trace of `Char` actions is a string.",
-    "formal also tests whether each invariant the checks did not refute is inductive: a state where it \
-     holds and an action whose next state breaks it come back under not_inductive, so its proof needs a \
-     stronger invariant. When such invariants are kept by every step together, inductive_together names \
-     them: prove them in one induction. `<State>.samples` steers the states.",
-    "`import Formal.Temporal` gives a spec `Temporal.always`, `eventually` and `leadsTo` over `init` \
-     and `step`, and `Temporal.fair a`. Fairness holds only where a property states it, and some run must \
-     satisfy it: `fair_constant` or `fair_cycle` gives one. The rules are `always_of_inductive`, \
-     `leadsTo_of_measure`, `leadsTo_of_fair_step`, `leadsTo_trans`, `leadsTo_or` and \
-     `eventually_of_leadsTo`.",
-    "formal checks a liveness property written as `Temporal.leadsTo init step A p q` or \
-     `Temporal.eventually init step A q`, with `A` made of `Temporal.fair` or `fun _ => True`, on the states the walk \
-     reached. A loop that takes every fair action and never reaches `q` comes back under refuted, as the \
-     actions to the loop, then the loop. It is bounded only when the walk reached every state.",
+    "A spec that describes a state machine has its own rules: GET /guide/machines.",
 ];
 
 const OPENAPI: &str = "GET /openapi.json is the full schema of every endpoint and response, including field types. \
@@ -401,6 +373,7 @@ pub fn topic(name: &str) -> Option<String> {
         "extract" => Some(extract()),
         "formalize" => Some(formalize()),
         "tactics" => Some(tactics()),
+        "machines" => Some(prompts::text("machines").to_string()),
         _ => None,
     }
 }

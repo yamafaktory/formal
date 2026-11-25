@@ -1,7 +1,7 @@
 //! The guide held to the digests the conformance suite recorded.
 //!
 //! `tests/conformance/golden/responses.json` pins every response over 400
-//! characters as a SHA-256 and a character count, so the three topic bodies are
+//! characters as a SHA-256 and a character count, so the four topic bodies are
 //! already frozen there — 32KB of prose that has to come back byte for byte
 //! through the placeholder substitution, the kinds table, and every join between
 //! the pieces. Getting one separator wrong moves the digest and nothing else.
