@@ -60,10 +60,13 @@ const INDUCTION_MARK: &str = "formal-inductive";
 
 const INDUCTION_TRIES: u32 = 1_000;
 
+const SEED: u32 = 0;
+
 const INDUCTION_HELPERS: &str = "namespace FormalInductive
 
 def search {σ α : Type} (draw : Plausible.Gen σ) (step : σ → α → σ) (actions : List α)
-    (holds : σ → Bool) (tries : Nat) : IO (Option (σ × α × σ) × Nat) := do
+    (holds : σ → Bool) (tries seed : Nat) : IO (Option (σ × α × σ) × Nat) := do
+  IO.setRandSeed seed
   let mut held := 0
   for i in [0:tries] do
     let s ← Plausible.Gen.run draw (i % 100)
@@ -1146,7 +1149,9 @@ fn import_lines<'a>(modules: impl Iterator<Item = &'a str>) -> Vec<String> {
 }
 
 fn search_of(id: &str) -> String {
-    format!("open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible")
+    format!(
+        "open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible (config := {{ randomSeed := some {SEED} }})"
+    )
 }
 
 fn evaluation_of(function: &str) -> String {
@@ -1367,7 +1372,7 @@ impl LeanSpec {
         match self.invariant_of(id) {
             Some(invariant) => format!(
                 "open FormalRefute in example : _root_.{id} := by \
-                 unfold _root_.{id} _root_.{}.{invariant}; plausible",
+                 unfold _root_.{id} _root_.{}.{invariant}; plausible (config := {{ randomSeed := some {SEED} }})",
                 self.namespace
             ),
             None => search_of(id),
@@ -1572,7 +1577,7 @@ impl LeanSpec {
         format!(
             "#eval do IO.println (FormalInductive.report \"{INDUCTION_MARK}\" \"{key}\" \
              (← FormalInductive.search Plausible.Arbitrary.arbitrary {namespace}.step {} \
-             (fun s => {}) {INDUCTION_TRIES}))",
+             (fun s => {}) {INDUCTION_TRIES} {SEED}))",
             actions.expression(),
             holds.join(" && ")
         )
@@ -2325,7 +2330,7 @@ mod tests {
             assert_eq!(
                 lines[at],
                 format!(
-                    "open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible"
+                    "open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible (config := {{ randomSeed := some 0 }})"
                 )
             );
         }
@@ -2672,7 +2677,7 @@ mod tests {
                 .starts_with("import Plausible\nimport Std.Data.HashSet\n")
         );
         assert!(induction.lean_code.contains(
-            "(fun s => decide (Cycle.count_at_most_two s) && decide (Cycle.count_is_not_five s)) 1000))"
+            "(fun s => decide (Cycle.count_at_most_two s) && decide (Cycle.count_is_not_five s)) 1000 0))"
         ));
         let read = read_induction(
             &induction,
@@ -2971,7 +2976,7 @@ mod tests {
             "deriving instance Plausible.Arbitrary for Counter.Action",
             "deriving instance Plausible.Shrinkable for Counter.State",
             "deriving instance Repr for Counter.Action",
-            "open FormalRefute in example : _root_.Counter.count_below_three.always := by unfold _root_.Counter.count_below_three.always _root_.Counter.count_below_three; plausible",
+            "open FormalRefute in example : _root_.Counter.count_below_three.always := by unfold _root_.Counter.count_below_three.always _root_.Counter.count_below_three; plausible (config := { randomSeed := some 0 })",
         ] {
             assert!(search.lean_code.contains(line), "{line}");
         }
