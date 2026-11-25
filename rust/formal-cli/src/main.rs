@@ -1,6 +1,7 @@
 //! Command-line entry point — runs the server and reports on the installation.
 
 use std::{
+    path::PathBuf,
     process::{
         Command,
         ExitCode,
@@ -27,6 +28,7 @@ use formal_lean::{
 };
 use formal_server::AppState;
 
+mod check;
 mod setup;
 mod status;
 
@@ -61,6 +63,21 @@ enum Action {
     /// Install the Lean toolchain and Mathlib.
     Setup,
 
+    /// Check a Lean spec in one run: search, compare and prove, then exit.
+    Check {
+        /// The Lean spec.
+        spec: PathBuf,
+        /// Where the proofs are, as `<dir>/<Namespace>/<name>.lean`, from the current directory.
+        #[arg(long, default_value = "proofs")]
+        proofs: PathBuf,
+        /// The code's answers, as `{"<function>": [answers]}`.
+        #[arg(long)]
+        answers: Option<PathBuf>,
+        /// Write the inputs of each compared function here, as `{"<function>": [inputs]}`.
+        #[arg(long)]
+        inputs: Option<PathBuf>,
+    },
+
     /// Stop a server started with --background.
     Stop {
         /// The interface it listens on.
@@ -73,10 +90,10 @@ enum Action {
 }
 
 /// The exit code for a command that could not do what it was asked.
-const FAILED: u8 = 1;
+pub(crate) const FAILED: u8 = 1;
 
 /// The exit code for a refusal that is the caller's to fix.
-const REFUSED: u8 = 2;
+pub(crate) const REFUSED: u8 = 2;
 
 fn endpoint(env: &Env, host: Option<String>, port: Option<u16>) -> Endpoint {
     let resolved = Endpoint::resolve(env);
@@ -197,6 +214,20 @@ fn main() -> ExitCode {
             background,
         } => cmd_serve(&env, host, port, background),
         Action::Setup => cmd_setup(&env),
+        Action::Check {
+            spec,
+            proofs,
+            answers,
+            inputs,
+        } => check::run(
+            &env,
+            &check::Paths {
+                spec: &spec,
+                proofs: &proofs,
+                answers: answers.as_deref(),
+                inputs: inputs.as_deref(),
+            },
+        ),
         Action::Stop { host, port } => cmd_stop(&env, host, port),
     }
 }

@@ -46,6 +46,10 @@ use serde_json::{
 use crate::{
     audit,
     env::Env,
+    logger::{
+        Tag,
+        log,
+    },
     run::{
         Captured,
         kill_group,
@@ -393,7 +397,10 @@ impl Warm {
             Ok(session) => Some(session),
             Err(reason) => {
                 if self.enabled.swap(false, Ordering::Relaxed) {
-                    eprintln!("[LEAN] warm Lean unavailable, checking cold: {reason}");
+                    log(
+                        Tag::Lean,
+                        &format!("warm Lean unavailable, checking cold: {reason}"),
+                    );
                 }
                 None
             }

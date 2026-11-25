@@ -93,10 +93,7 @@ fn specs() -> Vec<LeanSpec> {
 }
 
 fn proof_path(spec: &LeanSpec, id: &str) -> PathBuf {
-    repository()
-        .join("proofs")
-        .join(&spec.namespace)
-        .join(format!("{}.lean", name(spec, id)))
+    spec.proof_path(&repository().join("proofs"), id)
 }
 
 #[test]

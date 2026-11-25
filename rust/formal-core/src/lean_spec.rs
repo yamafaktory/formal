@@ -1281,6 +1281,15 @@ impl LeanSpec {
             .collect()
     }
 
+    /// Where the proof of a property lives under `root`: `<root>/<Namespace>/<name>.lean`.
+    #[must_use]
+    pub fn proof_path(&self, root: &Path, id: &str) -> PathBuf {
+        let name = id
+            .strip_prefix(&format!("{}.", self.namespace))
+            .unwrap_or(id);
+        root.join(&self.namespace).join(format!("{name}.lean"))
+    }
+
     /// The cache key of a property, which covers the whole spec.
     #[must_use]
     pub fn key(&self, id: &str) -> String {
@@ -1852,6 +1861,18 @@ mod tests {
 
     fn demo() -> LeanSpec {
         parse(DEMO).expect("the demo spec parses")
+    }
+
+    #[test]
+    fn a_proof_lives_under_its_namespace_by_the_name_after_it() {
+        assert_eq!(
+            demo().proof_path(Path::new("proofs"), "Demo.double_even"),
+            PathBuf::from("proofs/Demo/double_even.lean")
+        );
+        assert_eq!(
+            demo().proof_path(Path::new("proofs"), "Demo.inv.always"),
+            PathBuf::from("proofs/Demo/inv.always.lean")
+        );
     }
 
     #[test]
