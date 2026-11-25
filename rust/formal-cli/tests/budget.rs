@@ -1,20 +1,15 @@
+//! What formal check prints on the recorded cases, held to its budget.
+
 use std::{
     fs,
     path::{
         Path,
         PathBuf,
     },
+    process::Command,
 };
 
-use formal_lean::{
-    env::Env,
-    paths::Paths,
-};
-
-use crate::check::{
-    Paths as CheckPaths,
-    check,
-};
+use formal_lean::paths::Paths;
 
 fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/check")
@@ -39,7 +34,7 @@ fn lean_is_set_up() -> bool {
     project.join("lakefile.toml").is_file() && project.join(".lake").is_dir()
 }
 
-fn checked(case: &Path, scratch: &Path) -> String {
+fn check(case: &Path, scratch: &Path) -> (String, Option<i32>) {
     let spec = fs::read_dir(case)
         .expect("the case is readable")
         .map(|entry| entry.expect("an entry").path())
@@ -48,28 +43,21 @@ fn checked(case: &Path, scratch: &Path) -> String {
                 .is_some_and(|extension| extension == "lean")
         })
         .expect("the case has a spec");
-    let answers = case.join("answers.json");
-    let env = Env::from_pairs(std::env::vars().chain([
-        (
-            "PROOF_CACHE_DIR".to_string(),
-            scratch.join("cache").to_string_lossy().to_string(),
-        ),
-        (
-            "FORMAL_RESULTS_DIR".to_string(),
-            scratch.join("results").to_string_lossy().to_string(),
-        ),
-    ]));
-    let (report, _) = check(
-        &env,
-        &CheckPaths {
-            spec: &spec,
-            proofs: &case.join("proofs"),
-            answers: answers.is_file().then_some(answers.as_path()),
-            inputs: None,
-        },
+    let mut command = Command::new(env!("CARGO_BIN_EXE_formal"));
+    command
+        .current_dir(case)
+        .arg("check")
+        .arg(spec.file_name().expect("a file name"))
+        .env("PROOF_CACHE_DIR", scratch.join("cache"))
+        .env("FORMAL_RESULTS_DIR", scratch.join("results"));
+    if case.join("answers.json").is_file() {
+        command.args(["--answers", "answers.json"]);
+    }
+    let output = command.output().expect("formal runs");
+    (
+        String::from_utf8(output.stdout).expect("the output is text"),
+        output.status.code(),
     )
-    .expect("the case runs");
-    format!("{report}\n").replace(&format!("{}/", case.display()), "")
 }
 
 #[test]
@@ -80,11 +68,11 @@ fn every_case_prints_what_was_recorded() {
     let mut differences = Vec::new();
     for case in cases() {
         let scratch = tempfile::tempdir().expect("a temporary directory");
-        let got = checked(&case, scratch.path());
+        let (got, code) = check(&case, scratch.path());
         let want = recorded(&case);
-        if got != want {
+        if got != want || code != Some(1) {
             differences.push(format!(
-                "{}\n--- got\n{got}--- want\n{want}",
+                "{} exited {code:?}\n--- got\n{got}--- want\n{want}",
                 case.display()
             ));
         }
@@ -93,16 +81,21 @@ fn every_case_prints_what_was_recorded() {
 }
 
 #[test]
-fn every_case_together_stays_within_the_budget() {
+fn the_budget_is_what_every_case_prints_together() {
     let budget: toml::Table = fs::read_to_string(fixtures().join("budget.toml"))
         .expect("the budget is readable")
         .parse()
         .expect("the budget is TOML");
-    let allowed = budget["bytes"].as_integer().expect("bytes is a number");
+    let budget = budget["bytes"].as_integer().expect("bytes is a number");
     let printed: usize = cases().iter().map(|case| recorded(case).len()).sum();
+    let printed = i64::try_from(printed).expect("it fits");
     assert!(
-        i64::try_from(printed).expect("it fits") <= allowed,
-        "formal check prints {printed} bytes over the cases, above the budget of {allowed}"
+        printed <= budget,
+        "formal check prints {printed} bytes over the cases, above the budget of {budget}"
+    );
+    assert_eq!(
+        printed, budget,
+        "the outputs shrank to {printed} bytes: lower the budget to match"
     );
 }
 

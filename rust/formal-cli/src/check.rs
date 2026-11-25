@@ -65,7 +65,7 @@ pub(crate) fn run(env: &Env, paths: &Paths<'_>) -> ExitCode {
     }
 }
 
-pub(crate) fn check(env: &Env, paths: &Paths<'_>) -> Result<(String, bool), String> {
+fn check(env: &Env, paths: &Paths<'_>) -> Result<(String, bool), String> {
     let path =
         fs::canonicalize(paths.spec).map_err(|e| format!("{}: {e}", paths.spec.display()))?;
     let spec = LeanSpec::load(&path.to_string_lossy()).map_err(|e| e.to_string())?;

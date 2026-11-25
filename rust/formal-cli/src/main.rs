@@ -28,8 +28,6 @@ use formal_lean::{
 };
 use formal_server::AppState;
 
-#[cfg(test)]
-mod budget;
 mod check;
 mod setup;
 mod status;

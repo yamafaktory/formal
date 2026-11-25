@@ -1148,9 +1148,10 @@ fn import_lines<'a>(modules: impl Iterator<Item = &'a str>) -> Vec<String> {
     lines
 }
 
-fn search_of(id: &str) -> String {
+fn search_of(id: &str, unfolded: &str) -> String {
     format!(
-        "open FormalRefute in example : _root_.{id} := by unfold _root_.{id}; plausible (config := {{ randomSeed := some {SEED} }})"
+        "open FormalRefute in example : _root_.{id} := by unfold {unfolded}; \
+         plausible (config := {{ randomSeed := some {SEED} }})"
     )
 }
 
@@ -1370,12 +1371,11 @@ impl LeanSpec {
 
     fn search_line(&self, id: &str) -> String {
         match self.invariant_of(id) {
-            Some(invariant) => format!(
-                "open FormalRefute in example : _root_.{id} := by \
-                 unfold _root_.{id} _root_.{}.{invariant}; plausible (config := {{ randomSeed := some {SEED} }})",
-                self.namespace
+            Some(invariant) => search_of(
+                id,
+                &format!("_root_.{id} _root_.{}.{invariant}", self.namespace),
             ),
-            None => search_of(id),
+            None => search_of(id, &format!("_root_.{id}")),
         }
     }
 
