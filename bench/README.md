@@ -16,13 +16,20 @@ test breaks the property. That is the number formal must bring down.
 
 ## The corpus
 
-`tasks.toml` lists 20 functions from well-known open-source projects: six in
+`tasks.toml` lists 22 tasks on 20 functions from well-known open-source projects: six in
 Python, seven in Rust and seven in TypeScript. `vendor/` holds their code, pinned
 to one commit, and `vendor/README.md` says where each file comes from.
 
 Each task states its property in plain words, from the function's own
 documentation. In 10 tasks, the code breaks its property in one place:
 `hidden/seeds.toml` plants that bug before the agent sees the code.
+
+Two more tasks, `rs-div-ceil-rare` and `ts-clamp-rare`, reuse a function and
+its property, with a bug that only rare inputs reach. In `rs-div-ceil-rare`,
+`-a` overflows only at `a = i64::MIN`. In `ts-clamp-rare`, the float rounding
+of `value - minimum` changes the result, but integer inputs never show it. Over
+`ℤ` or `ℝ`, both seeded functions satisfy their property. So an agent that
+proves the property about an ideal model of the code reaches a wrong verified.
 
 `hidden/` holds one property test per task: Hypothesis for Python, proptest for
 Rust and fast-check for TypeScript.

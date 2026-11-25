@@ -137,3 +137,17 @@ language = "typescript"
 files = ["es-toolkit/zip.ts"]
 function = "`zip` in `zip.ts`, called with two arrays"
 property = "For all arrays `a` and `b`, `zip(a, b)` has length `max(a.length, b.length)`, and its row `i` is `[a[i], b[i]]`, with `undefined` in place of an element past the end of the shorter array."
+
+[[task]]
+id = "rs-div-ceil-rare"
+language = "rust"
+files = ["num-integer"]
+function = "`Integer::div_ceil` for `i64`, in `num-integer/src/lib.rs`"
+property = "For all `i64` values `a` and `b` with `b != 0`, except `a = i64::MIN` with `b = -1`, `a.div_ceil(&b)` equals the ceiling of the exact quotient `a / b`."
+
+[[task]]
+id = "ts-clamp-rare"
+language = "typescript"
+files = ["es-toolkit/clamp.ts"]
+function = "`clamp` in `clamp.ts`, called with three arguments"
+property = "For all finite numbers `value`, `minimum` and `maximum` with `minimum <= maximum`, `clamp(value, minimum, maximum)` equals `minimum` when `value < minimum`, `maximum` when `value > maximum`, and `value` otherwise."
