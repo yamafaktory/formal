@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "formal-cli"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "clap",
  "formal-core",
@@ -281,7 +281,7 @@ dependencies = [
 
 [[package]]
 name = "formal-core"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "regex",
  "regex-syntax",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "formal-lean"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "formal-core",
  "regex",
@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "formal-server"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "axum",
  "formal-core",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "formal-service"
-version = "1.12.0"
+version = "1.12.1"
 dependencies = [
  "formal-core",
  "formal-lean",
