@@ -1,7 +1,7 @@
 //! The text formal serves, kept beside the code rather than inside it.
 //!
 //! Nothing here is executed: formal does not call a model. These files are the
-//! accumulated guidance for the three judgements it cannot make for you, rendered
+//! accumulated guidance for the judgements it cannot make for you, rendered
 //! by [`crate::guide`] and reachable at `GET /guide/{topic}`.
 //!
 //! They live as files because they change on someone else's schedule. Lean
@@ -24,6 +24,7 @@ guidance![
     "decompose_user",
     "filter_and_partition",
     "finite_case_analysis",
+    "machines",
     "proof_generation_system",
     "proof_generation_user",
     "proof_retry_user",

@@ -114,9 +114,9 @@
    "workflow": [
     "Read the source file you intend to check.",
     "When you still have to choose what to prove, GET /guide/extract. It says how to find the pure functions and the properties worth proving. Skip it when the function and the property are given.",
-    "Write those properties to a spec file (see spec_file below), adding source_file and function_code to each. Commit it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
+    "To check the code and not only your model of it, write a Lean spec (lean_spec below) rather than a spec file. A proof about a model says nothing about the code where the two differ. Name the code in a `code:` line, list the inputs, run the code on them, and send its answers to POST /session/{session_id}/compare.",
+    "Otherwise, write the properties to a spec file (see spec_file below), adding source_file and function_code to each. Commit it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
     "If a spec file already exists, use it as it stands rather than regenerating it — its ids and wordings are what the cached proofs are keyed on, and rewriting them throws every hit away. Add to it; do not replace it.",
-    "To check the code and not only your model of it, write a Lean spec instead (lean_spec below). A proof about a model says nothing about the code where the two differ. Name the code in a `code:` line, list the inputs, run the code on them, and send its answers to POST /session/{session_id}/compare.",
     "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are already cached, which need proving, and which are stale. The path must be absolute: the server resolves it, and its working directory is not yours.",
     "GET /guide/formalize, then write a Lean 4 theorem and proof for each id under 'work' — that field is a list of bare id strings, while 'cached' is a list of objects. GET /guide/tactics too — most first-attempt failures are one of the rules it lists.",
     "POST /session/{session_id}/check with {'proof_files': {'<id>': '<absolute path to .lean>'}} — the server reads them, so you do not have to load and escape each file into JSON. {'proofs': {'<id>': '<lean>'}} still works when the proof is not on the server's disk.",
