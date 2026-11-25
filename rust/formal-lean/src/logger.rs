@@ -1,10 +1,23 @@
 //! Tagged lines on stderr, coloured when someone is there to see them.
 
-use std::io::{
-    IsTerminal,
-    Write,
-    stderr,
+use std::{
+    io::{
+        IsTerminal,
+        Write,
+        stderr,
+    },
+    sync::atomic::{
+        AtomicBool,
+        Ordering,
+    },
 };
+
+static SILENT: AtomicBool = AtomicBool::new(false);
+
+/// Stop writing log lines, for a command whose output an agent reads.
+pub fn silence() {
+    SILENT.store(true, Ordering::Relaxed);
+}
 
 /// What a line is about, which decides its label and its colour.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,6 +82,9 @@ pub fn line(tag: Tag, message: &str, coloured: bool) -> String {
 
 /// Say something on stderr, and say nothing about it if that fails.
 pub fn log(tag: Tag, message: &str) {
+    if SILENT.load(Ordering::Relaxed) {
+        return;
+    }
     let _ = writeln!(stderr(), "{}", line(tag, message, coloured()));
 }
 

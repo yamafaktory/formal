@@ -274,6 +274,36 @@ Three things keep the loop cheap:
   `decide`, `simp`), then with a premise search (`exact?`). A proof recovered this way
   appears under `recovered` and never goes back to the agent.
 
+### One command: `formal check`
+
+`formal check <spec>` runs the whole loop on a Lean spec in one process, with no server.
+It runs the counterexample search, checks each proof it finds at
+`proofs/<Namespace>/<name>.lean`, compares the code's answers when you pass them, and
+exits. It prints one line per property and per compared function, and no log lines. The
+exit code is 0 when everything holds, 1 when something does not, and 2 when formal cannot
+read the spec or the answers.
+
+On the spec of the [worked example](#a-worked-example), before any proof or answer:
+
+```
+$ formal check Ring.lean
+· Ring.in_range  no proof: write proofs/Ring/in_range.lean declaring `theorem Ring.in_range.holds : Ring.in_range`
+· Ring.wrap  compare: run ring.py wrap on [[7,3],[-7,3],[0,3],[7,-3],[-7,-3]], then pass --answers <file> holding {"Ring.wrap": [answers]}
+0 of 1 properties hold, 0 of 1 functions match the code
+```
+
+Once the proof and the answers are in place:
+
+```
+$ formal check Ring.lean --answers answers.json
+✓ Ring.in_range  verified
+✓ Ring.wrap  matches ring.py wrap
+1 of 1 properties hold, 1 of 1 functions match the code
+```
+
+`--proofs <dir>` reads the proofs from another directory. A hint that already appeared in
+the run appears again as `hint: as above`.
+
 ### The spec file
 
 Properties live in a JSON file that you commit next to the code. For example, this file

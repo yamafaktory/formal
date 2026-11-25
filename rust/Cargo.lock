@@ -269,8 +269,11 @@ name = "formal-cli"
 version = "1.11.1"
 dependencies = [
  "clap",
+ "formal-core",
  "formal-lean",
  "formal-server",
+ "formal-service",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",

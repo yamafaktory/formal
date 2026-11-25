@@ -59,6 +59,10 @@ use crate::{
         Audit,
     },
     env::Env,
+    logger::{
+        Tag,
+        log,
+    },
     paths::Paths,
     sandbox::{
         NotInstalled,
@@ -465,7 +469,7 @@ impl Runner {
         if let Some(warning) = warning
             && !self.warned.swap(true, Ordering::Relaxed)
         {
-            eprintln!("[LEAN] {warning}");
+            log(Tag::Lean, warning);
         }
     }
 
