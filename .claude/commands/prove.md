@@ -45,7 +45,7 @@ POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}}
 ```
 
 `spec` must be absolute — the server's working directory is not yours.
-`/guide/{topic}` takes exactly `extract`, `formalize`, `tactics`.
+`/guide/{topic}` takes exactly `extract`, `formalize`, `tactics`, `machines`.
 
 ## Where to aim
 

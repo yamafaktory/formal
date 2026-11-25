@@ -289,7 +289,7 @@ pub struct TopicOut {
 
 #[utoipa::path(
     get, path = "/guide/{topic}",
-    params(("topic" = String, Path, description = "extract, formalize or tactics")),
+    params(("topic" = String, Path, description = "extract, formalize, tactics or machines")),
     responses(
         (status = 200, description = "The instructions for that phase", body = TopicOut),
         (status = 404, description = "No such topic", body = Detail),

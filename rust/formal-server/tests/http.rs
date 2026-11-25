@@ -144,7 +144,7 @@ mod unauthenticated_reads {
         let dir = TempDir::new().expect("a temporary directory");
         let (status, body) = call(&app(&dir), "GET", "/guide", None).await;
         assert_eq!(status, StatusCode::OK);
-        for topic in ["extract", "formalize", "tactics"] {
+        for topic in ["extract", "formalize", "tactics", "machines"] {
             assert!(body["topics"][topic].is_string(), "{topic}");
         }
         assert!(
@@ -158,7 +158,7 @@ mod unauthenticated_reads {
     async fn every_topic_is_servable() {
         let dir = TempDir::new().expect("a temporary directory");
         let app = app(&dir);
-        for topic in ["extract", "formalize", "tactics"] {
+        for topic in ["extract", "formalize", "tactics", "machines"] {
             let (status, body) = call(&app, "GET", &format!("/guide/{topic}"), None).await;
             assert_eq!(status, StatusCode::OK, "{topic}");
             assert_eq!(body["topic"], topic);
@@ -177,7 +177,7 @@ mod unauthenticated_reads {
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(
             body["detail"],
-            "No such topic: no-such-topic. Try: extract, formalize, tactics"
+            "No such topic: no-such-topic. Try: extract, formalize, tactics, machines"
         );
     }
 }

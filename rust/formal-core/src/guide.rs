@@ -86,18 +86,23 @@ const TOPICS: &[(&str, &str)] = &[
         "tactics",
         "tactic rules that prevent the common failures, and what to do when Lean rejects a proof",
     ),
+    (
+        "machines",
+        "Lean specs of state machines: invariants, the bounded walk, replayed traces and liveness",
+    ),
 ];
 
 const WORKFLOW: &[&str] = &[
     "Read the source file you intend to check.",
-    "GET /guide/extract, and GET /guide/formalize and /guide/tactics too before you commit to anything: what is \
-     practically provable in Lean is what decides which properties belong in the spec file, and the spec file is the \
-     thing you commit.",
-    "Identify the pure functions and the properties worth proving about them.",
+    "When you still have to choose what to prove, GET /guide/extract. It says how to find the pure functions and the \
+     properties worth proving. Skip it when the function and the property are given.",
     "Write those properties to a spec file (see spec_file below), adding source_file and function_code to each. Commit \
      it: it is reviewable, and identical bytes each run are what let the proof cache work at all.",
     "If a spec file already exists, use it as it stands rather than regenerating it — its ids and wordings are what \
      the cached proofs are keyed on, and rewriting them throws every hit away. Add to it; do not replace it.",
+    "To check the code and not only your model of it, write a Lean spec instead (lean_spec below). A proof about a \
+     model says nothing about the code where the two differ. Name the code in a `code:` line, list the inputs, run \
+     the code on them, and send its answers to POST /session/{session_id}/compare.",
     "POST /session with {'spec_file': '<absolute path>'}. The reply says which properties are already cached, which \
      need proving, and which are stale. The path must be absolute: the server resolves it, and its working directory \
      is not yours.",
@@ -127,7 +132,7 @@ const STALE_ADVICE: &str = "A stale id means the function changed since the prop
      describe anything. Re-read that function, rewrite the property, and update its function_code in the spec file. \
      Stale properties are never proved.";
 
-const LEAN_SPEC: [&str; 18] = [
+const LEAN_SPEC: [&str; 10] = [
     "POST /session with {\"spec\": \"/abs/path/Spec.lean\"} instead of a spec file. A Lean spec defines the model \
      of the code inside one namespace, and states each property as `def <name> : Prop := ...`.",
     "Each property is registered as <Namespace>.<name>. Its proof declares \
@@ -150,6 +155,10 @@ const LEAN_SPEC: [&str; 18] = [
     "A spec can reuse another spec's definitions with `import Spec.<Name>` in its header. formal reads \
      `<Name>.lean` from the directory of the spec the session opens on, for nested imports too, and a dotted \
      name from a subdirectory. Properties come only from that spec.",
+    "A spec that describes a state machine has its own rules: GET /guide/machines.",
+];
+
+const MACHINES: [&str; 9] = [
     "A spec can describe a state machine: `def init : <State>` and `def step : <State> → <Action> → <State>` \
      in its namespace, with at least one invariant `def <name> : <State> → Prop` or \
      `def <name> (s : <State>) : Prop`. formal then defines `run`, the fold of `step` over a list of actions \
@@ -401,6 +410,7 @@ pub fn topic(name: &str) -> Option<String> {
         "extract" => Some(extract()),
         "formalize" => Some(formalize()),
         "tactics" => Some(tactics()),
+        "machines" => Some(MACHINES.join("\n\n")),
         _ => None,
     }
 }

@@ -247,7 +247,7 @@ impl Run {
     async fn guide(&mut self) {
         self.step("health", "GET", "/health", None).await;
         self.step("guide_index", "GET", "/guide", None).await;
-        for topic in ["extract", "formalize", "tactics"] {
+        for topic in ["extract", "formalize", "tactics", "machines"] {
             self.step(
                 &format!("guide_{topic}"),
                 "GET",
@@ -680,7 +680,7 @@ async fn the_http_surface_still_answers_what_was_recorded() {
     );
     assert_eq!(
         run.recorded.len(),
-        39,
+        40,
         "every step the golden file records was exercised"
     );
 }
@@ -722,7 +722,7 @@ fn a_missing_step_and_an_unexpected_one_are_both_reported() {
 
 #[test]
 fn the_golden_file_still_names_the_whole_surface() {
-    assert_eq!(golden().len(), 39);
+    assert_eq!(golden().len(), 40);
 }
 
 /// The golden file lives outside the crate, so nothing rebuilds when it changes.

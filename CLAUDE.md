@@ -35,7 +35,7 @@ anything the cache key touches — reaching for `str::lines` or
 Four things decide whether a change is allowed to land. All are data, and none of
 them mention an implementation.
 
-- `tests/conformance/golden/responses.json` — the HTTP surface. 39 steps, status
+- `tests/conformance/golden/responses.json` — the HTTP surface. 40 steps, status
   codes everywhere including the refusals, bodies where formal writes them.
   Driven by `formal-server/tests/conformance.rs`, which can also judge an
   already-running server:
@@ -54,7 +54,7 @@ them mention an implementation.
 - `tests/fixtures/hint_corpus.toml` — every hint pinned to its text, and every
   rule in the table reached by a sample.
 
-- `rust/formal-core/guidance/` — the text formal serves. Its three topic bodies
+- `rust/formal-core/guidance/` — the text formal serves. Its four topic bodies
   are pinned by digest inside `responses.json`, so an edit there moves a golden
   entry and has to be re-recorded on purpose.
 

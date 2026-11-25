@@ -226,6 +226,7 @@ GET  /guide/extract              how to find pure functions and their properties
 POST /session {"spec_file": …}   → {cached, work, stale}
 GET  /guide/formalize            how to state a property in Lean, and how to check the statement
 GET  /guide/tactics              the proof failures that come up most, and how to avoid them
+GET  /guide/machines             how to specify a state machine, its invariants and its liveness
 POST /session/{id}/check         {"proofs": {"<id>": "<lean>"}} or {"proof_files": {"<id>": "<path>"}}
      → {verified, recovered, failed, remaining, complete}
      fix the failures, send only those ids again, repeat
@@ -620,7 +621,7 @@ is not the property you meant.
 | `GET /health` | Answers when the server is up |
 | `GET /openapi.json` | The full schema |
 | `GET /guide` | The workflow, the spec file schema and the topic list |
-| `GET /guide/{extract\|formalize\|tactics}` | The instructions for one phase |
+| `GET /guide/{extract\|formalize\|tactics\|machines}` | The instructions for one phase |
 | `POST /session` | `{"spec_file": path, "root"?: path}`, `{"spec": path}`, or `{"properties": [...]}` |
 | `GET /session/{id}` | The current state of a session |
 | `POST /session/{id}/check` | `{"proofs": {id: lean}}`, or `{"proof_files": {id: path}}` |
