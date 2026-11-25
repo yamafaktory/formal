@@ -67,12 +67,15 @@ enum Action {
     Check {
         /// The Lean spec.
         spec: PathBuf,
-        /// Where the proofs are, as `<dir>/<Namespace>/<name>.lean`.
+        /// Where the proofs are, as `<dir>/<Namespace>/<name>.lean`, from the current directory.
         #[arg(long, default_value = "proofs")]
         proofs: PathBuf,
         /// The code's answers, as `{"<function>": [answers]}`.
         #[arg(long)]
         answers: Option<PathBuf>,
+        /// Write the inputs of each compared function here, as `{"<function>": [inputs]}`.
+        #[arg(long)]
+        inputs: Option<PathBuf>,
     },
 
     /// Stop a server started with --background.
@@ -215,7 +218,16 @@ fn main() -> ExitCode {
             spec,
             proofs,
             answers,
-        } => check::run(&env, &spec, &proofs, answers.as_deref()),
+            inputs,
+        } => check::run(
+            &env,
+            &check::Paths {
+                spec: &spec,
+                proofs: &proofs,
+                answers: answers.as_deref(),
+                inputs: inputs.as_deref(),
+            },
+        ),
         Action::Stop { host, port } => cmd_stop(&env, host, port),
     }
 }

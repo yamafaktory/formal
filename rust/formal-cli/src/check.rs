@@ -38,9 +38,18 @@ struct Proof {
     found: bool,
 }
 
-pub(crate) fn run(env: &Env, spec: &Path, proofs: &Path, answers: Option<&Path>) -> ExitCode {
+const INLINE_INPUTS: usize = 200;
+
+pub(crate) struct Paths<'a> {
+    pub(crate) spec: &'a Path,
+    pub(crate) proofs: &'a Path,
+    pub(crate) answers: Option<&'a Path>,
+    pub(crate) inputs: Option<&'a Path>,
+}
+
+pub(crate) fn run(env: &Env, paths: &Paths<'_>) -> ExitCode {
     logger::silence();
-    match check(env, spec, proofs, answers) {
+    match check(env, paths) {
         Ok((report, true)) => {
             println!("{report}");
             ExitCode::SUCCESS
@@ -56,15 +65,16 @@ pub(crate) fn run(env: &Env, spec: &Path, proofs: &Path, answers: Option<&Path>)
     }
 }
 
-fn check(
-    env: &Env,
-    spec: &Path,
-    proofs: &Path,
-    answers: Option<&Path>,
-) -> Result<(String, bool), String> {
-    let path = fs::canonicalize(spec).map_err(|e| format!("{}: {e}", spec.display()))?;
+fn check(env: &Env, paths: &Paths<'_>) -> Result<(String, bool), String> {
+    let path =
+        fs::canonicalize(paths.spec).map_err(|e| format!("{}: {e}", paths.spec.display()))?;
     let spec = LeanSpec::load(&path.to_string_lossy()).map_err(|e| e.to_string())?;
-    let answers = answers.map(read_answers).transpose()?;
+    let answers = paths.answers.map(read_answers).transpose()?;
+    let layout: Vec<(String, PathBuf)> = spec
+        .properties
+        .iter()
+        .map(|id| (id.clone(), spec.proof_path(paths.proofs, id)))
+        .collect();
     let state = AppState::resolve(env).map_err(|e| e.to_string())?;
     let session = state
         .sessions
@@ -74,7 +84,15 @@ fn check(
         .lock()
         .map_err(|_| "the session lock is poisoned".to_string())?;
 
-    let files = proof_files(&session, proofs);
+    let comparison = answers
+        .map(|answers| session.compare(&answers))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    if let Some(file) = paths.inputs {
+        write_inputs(&session, file)?;
+    }
+
+    let files = proof_files(&session, &layout);
     let submitted: Vec<(String, String)> = files
         .iter()
         .filter(|proof| proof.found)
@@ -91,55 +109,61 @@ fn check(
             &submitted,
         )
         .map_err(|e| e.to_string())?;
-    let comparison = answers
-        .map(|answers| session.compare(&answers))
-        .transpose()
-        .map_err(|e| e.to_string())?;
 
     Ok((
-        render(&session, &outcomes, comparison.as_ref(), &files),
+        render(
+            &session,
+            &outcomes,
+            comparison.as_ref(),
+            &files,
+            paths.inputs,
+        ),
         passed(&session, comparison.as_ref()),
     ))
 }
 
 fn read_answers(path: &Path) -> Result<Vec<(String, Vec<Value>)>, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let parsed: serde_json::Map<String, Value> = serde_json::from_str(&text).map_err(|e| {
-        format!(
-            "{}: {e}: expected {{\"<function>\": [answers]}}",
-            path.display()
-        )
-    })?;
+    parse_answers(&text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn parse_answers(text: &str) -> Result<Vec<(String, Vec<Value>)>, String> {
+    let parsed: serde_json::Map<String, Value> = serde_json::from_str(text)
+        .map_err(|e| format!("{e}: expected {{\"<function>\": [answers]}}"))?;
     parsed
         .into_iter()
         .map(|(function, answers)| match answers {
             Value::Array(answers) => Ok((function, answers)),
-            _ => Err(format!(
-                "{}: the answers for {function} are not a list",
-                path.display()
-            )),
+            _ => Err(format!("the answers for {function} are not a list")),
         })
         .collect()
 }
 
-fn proof_files(session: &Session, proofs: &Path) -> Vec<Proof> {
-    let Some(spec) = &session.lean_spec else {
-        return Vec::new();
-    };
-    session
-        .work_ids()
-        .into_iter()
-        .filter(|id| session.refuted.iter().all(|refuted| refuted.id != *id))
-        .map(|id| {
-            let name = id
-                .strip_prefix(&format!("{}.", spec.namespace))
-                .unwrap_or(id);
-            let path = proofs.join(&spec.namespace).join(format!("{name}.lean"));
-            Proof {
-                id: id.to_string(),
-                found: path.is_file(),
-                path,
-            }
+fn write_inputs(session: &Session, file: &Path) -> Result<(), String> {
+    let inputs: serde_json::Map<String, Value> = session
+        .evaluated
+        .iter()
+        .map(|function| {
+            (
+                function.function.clone(),
+                Value::Array(function.inputs.clone()),
+            )
+        })
+        .collect();
+    fs::write(file, Value::Object(inputs).to_string())
+        .map_err(|e| format!("{}: {e}", file.display()))
+}
+
+fn proof_files(session: &Session, layout: &[(String, PathBuf)]) -> Vec<Proof> {
+    let work = session.work_ids();
+    layout
+        .iter()
+        .filter(|(id, _)| work.contains(&id.as_str()))
+        .filter(|(id, _)| session.refuted.iter().all(|refuted| refuted.id != *id))
+        .map(|(id, path)| Proof {
+            id: id.clone(),
+            found: path.is_file(),
+            path: path.clone(),
         })
         .collect()
 }
@@ -148,7 +172,7 @@ fn passed(session: &Session, comparison: Option<&Comparison>) -> bool {
     let compared = session.evaluated.iter().all(|function| {
         comparison.is_some_and(|comparison| comparison.matched.contains(&function.function))
     });
-    session.complete() && session.refuted.is_empty() && compared
+    session.complete() && compared
 }
 
 fn render(
@@ -156,6 +180,7 @@ fn render(
     outcomes: &[Outcome],
     comparison: Option<&Comparison>,
     files: &[Proof],
+    inputs: Option<&Path>,
 ) -> String {
     let mut lines = Vec::new();
     let mut hints: Vec<&str> = Vec::new();
@@ -181,7 +206,7 @@ fn render(
             session.inductive_together.join(", ")
         ));
     }
-    compared(session, comparison, &mut lines);
+    compared(session, comparison, inputs, &mut lines);
     lines.push(summary(session, comparison));
     lines.join("\n")
 }
@@ -245,7 +270,12 @@ fn property<'a>(
     }
 }
 
-fn compared(session: &Session, comparison: Option<&Comparison>, lines: &mut Vec<String>) {
+fn compared(
+    session: &Session,
+    comparison: Option<&Comparison>,
+    inputs: Option<&Path>,
+    lines: &mut Vec<String>,
+) {
     for function in &session.evaluated {
         let name = &function.function;
         let differed =
@@ -259,10 +289,24 @@ fn compared(session: &Session, comparison: Option<&Comparison>, lines: &mut Vec<
         } else if matched {
             lines.push(format!("✓ {name}  matches {}", function.code));
         } else {
+            let count = function.inputs.len();
+            let inline = Value::Array(function.inputs.clone()).to_string();
+            let what = match inputs {
+                Some(file) => format!(
+                    "run {} on the {count} inputs in {}",
+                    function.code,
+                    file.display()
+                ),
+                None if inline.len() <= INLINE_INPUTS => {
+                    format!("run {} on {inline}", function.code)
+                }
+                None => format!(
+                    "{count} inputs: write them with --inputs <file>, run {} on each",
+                    function.code
+                ),
+            };
             lines.push(format!(
-                "· {name}  compare: run {} on {}, then pass --answers <file> holding {{\"{name}\": [answers]}}",
-                function.code,
-                Value::Array(function.inputs.clone())
+                "· {name}  compare: {what}, then pass --answers <file> holding {{\"{name}\": [answers]}}"
             ));
         }
     }
@@ -359,7 +403,7 @@ mod tests {
         let mut session = session(&["R.p"]);
         session.verified.insert("R.p".to_string(), String::new());
         assert_eq!(
-            render(&session, &[], None, &[]),
+            render(&session, &[], None, &[], None),
             "✓ R.p  verified\n1 of 1 properties hold"
         );
         assert!(passed(&session, None));
@@ -373,6 +417,7 @@ mod tests {
             &[failure("R.p", "reduce the term first")],
             None,
             &[file("R.p", true)],
+            None,
         );
         assert_eq!(
             report,
@@ -389,6 +434,7 @@ mod tests {
             &[failure("R.p", "reduce it"), failure("R.q", "reduce it")],
             None,
             &[file("R.p", true), file("R.q", true)],
+            None,
         );
         assert_eq!(report.matches("reduce it").count(), 1, "{report}");
         assert!(report.contains("  hint: as above"), "{report}");
@@ -397,7 +443,7 @@ mod tests {
     #[test]
     fn a_missing_proof_names_the_file_and_the_theorem() {
         let session = session(&["R.p"]);
-        let report = render(&session, &[], None, &[file("R.p", false)]);
+        let report = render(&session, &[], None, &[file("R.p", false)], None);
         assert!(
             report.starts_with(
                 "· R.p  no proof: write proofs/R/p.lean declaring `theorem R.p.holds : R.p`"
@@ -414,7 +460,7 @@ mod tests {
             counterexample: vec!["x := 0".to_string()],
             issue: "0 < 0 does not hold".to_string(),
         });
-        let report = render(&session, &[], None, &[]);
+        let report = render(&session, &[], None, &[], None);
         assert!(
             report.starts_with("✗ R.p  refuted: x := 0\n  0 < 0 does not hold"),
             "{report}"
@@ -430,7 +476,7 @@ mod tests {
             depth: 10,
             states: 42,
         });
-        let report = render(&session, &[], None, &[file("R.inv.always", false)]);
+        let report = render(&session, &[], None, &[file("R.inv.always", false)], None);
         assert!(
             report.contains("\n  held in every state up to depth 10 (42 states)"),
             "{report}"
@@ -441,12 +487,74 @@ mod tests {
     fn a_function_without_answers_asks_for_them_and_fails_the_run() {
         let mut session = session(&[]);
         session.evaluated.push(wrap());
-        let report = render(&session, &[], None, &[]);
+        let report = render(&session, &[], None, &[], None);
         assert!(
             report.starts_with("· R.wrap  compare: run ring.py wrap on [[7,-3]], then pass --answers <file> holding {\"R.wrap\": [answers]}"),
             "{report}"
         );
         assert!(!passed(&session, None));
+    }
+
+    #[test]
+    fn many_inputs_are_counted_rather_than_printed() {
+        let mut session = session(&[]);
+        let mut many = wrap();
+        many.inputs = (0..1000).map(|n| json!([n, 3])).collect();
+        session.evaluated.push(many);
+        let report = render(&session, &[], None, &[], None);
+        assert!(report.len() < 400, "{report}");
+        assert!(report.contains("1000 inputs"), "{report}");
+    }
+
+    #[test]
+    fn inputs_written_to_a_file_are_named_by_that_file() {
+        let mut session = session(&[]);
+        session.evaluated.push(wrap());
+        let report = render(&session, &[], None, &[], Some(Path::new("inputs.json")));
+        assert!(
+            report
+                .starts_with("· R.wrap  compare: run ring.py wrap on the 1 inputs in inputs.json,"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn answers_are_read_by_function() {
+        assert_eq!(
+            parse_answers(r#"{"R.wrap": [1, -2]}"#),
+            Ok(vec![("R.wrap".to_string(), vec![json!(1), json!(-2)])])
+        );
+    }
+
+    #[test]
+    fn answers_that_are_not_a_list_are_refused() {
+        assert_eq!(
+            parse_answers(r#"{"R.wrap": 1}"#),
+            Err("the answers for R.wrap are not a list".to_string())
+        );
+    }
+
+    #[test]
+    fn only_work_that_is_not_refuted_looks_for_a_proof() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let written = dir.path().join("p.lean");
+        fs::write(&written, "").expect("the proof is written");
+        let mut session = session(&["R.p", "R.q", "R.r"]);
+        session.verified.insert("R.q".to_string(), String::new());
+        session.refuted.push(Refutation {
+            id: "R.r".to_string(),
+            counterexample: Vec::new(),
+            issue: String::new(),
+        });
+        let layout = vec![
+            ("R.p".to_string(), written.clone()),
+            ("R.q".to_string(), dir.path().join("q.lean")),
+            ("R.r".to_string(), dir.path().join("r.lean")),
+        ];
+        let files = proof_files(&session, &layout);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].id, "R.p");
+        assert!(files[0].found);
     }
 
     #[test]
@@ -462,7 +570,7 @@ mod tests {
                 code: json!(-2),
             }],
         };
-        let report = render(&session, &[], Some(&comparison), &[]);
+        let report = render(&session, &[], Some(&comparison), &[], None);
         assert!(
             report.starts_with("✗ R.wrap  differs from ring.py wrap at [7,-3]: spec 1, code -2"),
             "{report}"
@@ -479,7 +587,7 @@ mod tests {
             differed: Vec::new(),
         };
         assert_eq!(
-            render(&session, &[], Some(&comparison), &[]),
+            render(&session, &[], Some(&comparison), &[], None),
             "✓ R.wrap  matches ring.py wrap\n0 of 0 properties hold, 1 of 1 functions match the code"
         );
         assert!(passed(&session, Some(&comparison)));

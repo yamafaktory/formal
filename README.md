@@ -280,8 +280,13 @@ Three things keep the loop cheap:
 It runs the counterexample search, checks each proof it finds at
 `proofs/<Namespace>/<name>.lean`, compares the code's answers when you pass them, and
 exits. It prints one line per property and per compared function, and no log lines. The
-exit code is 0 when everything holds, 1 when something does not, and 2 when formal cannot
-read the spec or the answers.
+exit code is:
+
+- 0 when everything holds.
+- 1 when something does not.
+- 2 when formal cannot run the check: it cannot read the spec or the answers, the answers
+  name a function the spec does not compare or have the wrong count, or formal cannot run
+  Lean.
 
 On the spec of the [worked example](#a-worked-example), before any proof or answer:
 
@@ -301,8 +306,11 @@ $ formal check Ring.lean --answers answers.json
 1 of 1 properties hold, 1 of 1 functions match the code
 ```
 
-`--proofs <dir>` reads the proofs from another directory. A hint that already appeared in
-the run appears again as `hint: as above`.
+- `--proofs <dir>` reads the proofs from another directory. The default, `proofs`, is
+  relative to the current directory, not to the spec.
+- `--inputs <file>` writes the inputs of each compared function to that file, as
+  `{"<function>": [inputs]}`. A function with many inputs prints only their count.
+- A hint that already appeared in the run appears again as `hint: as above`.
 
 ### The spec file
 
