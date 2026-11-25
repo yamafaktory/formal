@@ -81,63 +81,88 @@ formal stop
 
 This is a real session. The responses below come from formal itself.
 
-**The function.** `pricing.py`:
+**The function.** `ring.py`:
 
 ```python
-def apply_discount(price, rate):
-    rate = max(0.0, min(rate, 1.0))
-    return price * (1 - rate)
+def wrap(index, size):
+    return index % size
 ```
 
-**The property.** The agent adds it to `formal.properties.json` and commits the file:
+**The spec.** The agent models the function in Lean and states the property it wants.
+The `code:` line names the code the model describes, and `wrap.inputs` lists the inputs
+to compare the two on. Lean's `%` on `Int` looks like the obvious model:
 
-```json
-{
-  "version": 1,
-  "properties": [
-    {
-      "id": "apply_discount/bounded",
-      "function": "apply_discount",
-      "kind": "invariant",
-      "formal": "forall price rate, 0 <= price -> 0 <= apply_discount price rate /\\ apply_discount price rate <= price",
-      "description": "a discounted price is never negative and never above the original price",
-      "preconditions": ["price is not negative"],
-      "assumptions": ["prices and rates modelled as rationals, not floats"],
-      "source_file": "pricing.py",
-      "function_code": "def apply_discount(price, rate):\n    rate = max(0.0, min(rate, 1.0))\n    return price * (1 - rate)\n"
-    }
-  ]
-}
+```lean
+namespace Ring
+
+/-- code: ring.py wrap -/
+def wrap (input : Int × Int) : Int := input.1 % input.2
+
+def wrap.inputs : List (Int × Int) :=
+  [(7, 3), (-7, 3), (0, 3), (7, -3), (-7, -3)]
+
+def in_range : Prop :=
+  ∀ index size : Int, 0 < size → 0 ≤ wrap (index, size) ∧ wrap (index, size) < size
+
+end Ring
 ```
 
-**The session.** The agent opens a session on the spec file:
+**The session.** The agent opens a session on the spec:
 
 ```sh
 curl -s -X POST localhost:1337/session -H 'content-type: application/json' \
-  -d '{"spec_file": "/abs/path/to/formal.properties.json"}'
+  -d '{"spec": "/abs/path/to/Ring.lean"}'
 ```
 
 ```json
-{ "session_id": "fb2c6e49…", "cached": [], "work": ["apply_discount/bounded"], "stale": [], "complete": false }
+{
+  "session_id": "c4a8585c…", "cached": [], "work": ["Ring.in_range"], "complete": false, "stale": [],
+  "compare": [{
+    "function": "Ring.wrap", "code": "ring.py wrap",
+    "inputs": [[7, 3], [-7, 3], [0, 3], [7, -3], [-7, -3]]
+  }],
+  "refuted": [], "bounded": [], "not_inductive": [], "inductive_together": []
+}
 ```
 
-**A first proof.** The agent models the function over rationals and tries `linarith`:
+**The comparison.** The agent runs `wrap` from `ring.py` on each input and sends the
+answers:
+
+```sh
+curl -s -X POST localhost:1337/session/$SID/compare -H 'content-type: application/json' \
+  -d '{"answers": {"Ring.wrap": [1, 2, 0, -2, -1]}}'
+```
+
+```json
+{ "matched": [], "differed": [{ "function": "Ring.wrap", "input": [7, -3], "spec": 1, "code": -2 }] }
+```
+
+The model is wrong. Python's `%` takes the sign of the divisor, and Lean's `%` on `Int`
+is never negative. A proof about this model would hold, and say nothing about `ring.py`.
+The agent changes the model to `Int.fmod`, Lean's floor modulo, which matches Python:
 
 ```lean
-import Mathlib
+def wrap (input : Int × Int) : Int := Int.fmod input.1 input.2
+```
 
-def applyDiscount (price rate : ℚ) : ℚ :=
-  price * (1 - max 0 (min rate 1))
+It opens the session again and sends the same answers:
 
-theorem apply_discount_bounded (price rate : ℚ) (h : 0 ≤ price) :
-    0 ≤ applyDiscount price rate ∧ applyDiscount price rate ≤ price := by
-  unfold applyDiscount
-  constructor <;> linarith
+```json
+{ "matched": ["Ring.wrap"], "differed": [] }
+```
+
+**A first proof.** The proof leaves the spec out. formal puts the spec before it:
+
+```lean
+theorem Ring.in_range.holds : Ring.in_range := by
+  intro index size h
+  unfold Ring.wrap
+  omega
 ```
 
 ```sh
 curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/json' \
-  -d '{"proof_files": {"apply_discount/bounded": "/abs/path/to/proofs/discount.lean"}}'
+  -d '{"proof_files": {"Ring.in_range": "/abs/path/to/proofs/in_range.lean"}}'
 ```
 
 ```json
@@ -145,51 +170,51 @@ curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/
   "verified": [],
   "recovered": [],
   "failed": [{
-    "id": "apply_discount/bounded",
-    "error": "linarith failed to find a contradiction\ncase left.h\nprice rate : ℚ\nh : 0 ≤ price\na✝ : price * (1 - max 0 (min rate 1)) < 0\n⊢ False\nfailed",
-    "line": 9, "col": 18,
-    "hint": "The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. …"
+    "id": "Ring.in_range",
+    "error": "omega could not prove the goal:\na possible counterexample may satisfy the constraints\n  b ≤ -1\n  a ≥ 1\nwhere\n a := size\n b := (index, size).fst.fmod (index, size).snd",
+    "line": 4, "col": 2,
+    "hint": "`omega` reasons about linear integer arithmetic only — every other subterm is an opaque variable to it, which is why the counterexample it prints mentions terms you expected to have been reduced away. …"
   }],
-  "remaining": ["apply_discount/bounded"],
+  "remaining": ["Ring.in_range"],
   "complete": false
 }
 ```
 
-formal first tried to recover the proof on its own, and failed. The error shows the goal
-Lean could not close. It is nonlinear: it multiplies `price` by a term in `rate`, and
-`linarith` decides only linear arithmetic. The hint says so, and names the two ways out:
-state the needed facts as hypotheses, or use `nlinarith`.
+formal first tried to recover the proof on its own, and failed. The error shows why:
+`omega` treats `fmod` as an unknown value `b`, so it cannot rule out `b ≤ -1`. The hint
+says so, and names the way out: prove the fact as a `have` first.
 
-**The fix.** The agent states the bounds on the clamped rate as hypotheses, and switches
-to `nlinarith`, which multiplies hypotheses together and so reaches nonlinear goals:
+**The fix.** The agent states both bounds with the lemmas core Lean has for `Int.fmod`:
 
 ```lean
-  unfold applyDiscount
-  have lo : 0 ≤ max 0 (min rate 1) := le_max_left _ _
-  have hi : max 0 (min rate 1) ≤ 1 := max_le zero_le_one (min_le_right _ _)
-  constructor <;> nlinarith
+theorem Ring.in_range.holds : Ring.in_range := by
+  intro index size h
+  have lo := Int.fmod_nonneg_of_pos index h
+  have hi := Int.fmod_lt_of_pos index h
+  exact ⟨lo, hi⟩
 ```
 
 ```json
-{ "verified": ["apply_discount/bounded"], "recovered": [], "failed": [], "remaining": [], "complete": true }
+{ "verified": ["Ring.in_range"], "recovered": [], "failed": [], "remaining": [], "complete": true }
 ```
 
-This check took 0.24 s, because the server keeps Mathlib loaded.
+This check took 0.67 s, because the server keeps Mathlib loaded.
 
-**Next time.** formal stores the accepted proof. A later session on the same spec file
-finds it, and reports what was proved:
+**Next time.** formal stores the accepted proof. A later session on the same spec finds
+it:
 
 ```json
 {
-  "cached": [{
-    "id": "apply_discount/bounded",
-    "description": "a discounted price is never negative and never above the original price",
-    "kind": "invariant",
-    "assumptions": ["prices and rates modelled as rationals, not floats"]
-  }],
-  "work": [], "stale": [], "complete": true
+  "session_id": "9a1a53e4…",
+  "cached": [{ "id": "Ring.in_range", "description": "", "kind": "spec", "assumptions": [] }],
+  "work": [], "complete": true, "stale": [],
+  "refuted": [], "bounded": [], "not_inductive": [], "inductive_together": []
 }
 ```
+
+The comparison and the proof check different things. The comparison holds the model to
+the code, on the inputs it lists. The proof holds the property to the model, for every
+input.
 
 ## Using formal from an agent
 
@@ -246,8 +271,28 @@ Three things keep the loop cheap:
 
 ### The spec file
 
-Properties live in a JSON file that you commit next to the code. The
-[worked example](#a-worked-example) shows one entry. `id`, `function`, `kind` and
+Properties live in a JSON file that you commit next to the code. This file holds one entry:
+
+```json
+{
+  "version": 1,
+  "properties": [
+    {
+      "id": "apply_discount/bounded",
+      "function": "apply_discount",
+      "kind": "invariant",
+      "formal": "forall price rate, 0 <= price -> 0 <= apply_discount price rate /\\ apply_discount price rate <= price",
+      "description": "a discounted price is never negative and never above the original price",
+      "preconditions": ["price is not negative"],
+      "assumptions": ["prices and rates modelled as rationals, not floats"],
+      "source_file": "pricing.py",
+      "function_code": "def apply_discount(price, rate):\n    rate = max(0.0, min(rate, 1.0))\n    return price * (1 - rate)\n"
+    }
+  ]
+}
+```
+
+`id`, `function`, `kind` and
 `formal` are required. formal resolves `source_file` against the spec file's directory,
 or against `root` when you pass one. Send `spec_file` as an absolute path: the server
 resolves it, and its working directory is not yours.
@@ -716,8 +761,7 @@ distinguished all of them. That is an observation about that corpus, not a theor
 distinctness of keys rests on SHA-256.
 
 That choice has a cost: two callers can agree on a statement but model it differently.
-So a cache hit reports the description and assumptions recorded with the proof, as in the
-[worked example](#a-worked-example). Read them. If that model is not yours, change the
+So a cache hit reports the description and assumptions recorded with the proof. Read them. If that model is not yours, change the
 `formal` statement so that it says what you mean.
 
 formal caches only proofs that Lean accepted and the audit passed. It never caches a
