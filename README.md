@@ -138,7 +138,7 @@ curl -s -X POST localhost:1337/session/$SID/compare -H 'content-type: applicatio
 ```
 
 The model is wrong. Python's `%` takes the sign of the divisor, and Lean's `%` on `Int`
-is never negative. A proof about this model would hold, and say nothing about `ring.py`.
+is non-negative whenever the divisor is not zero. A proof about this model would hold, and say nothing about `ring.py`.
 The agent changes the model to `Int.fmod`, Lean's floor modulo, which matches Python:
 
 ```lean
@@ -173,7 +173,7 @@ curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/
     "id": "Ring.in_range",
     "error": "omega could not prove the goal:\na possible counterexample may satisfy the constraints\n  b ≤ -1\n  a ≥ 1\nwhere\n a := size\n b := (index, size).fst.fmod (index, size).snd",
     "line": 4, "col": 2,
-    "hint": "`omega` reasons about linear integer arithmetic only — every other subterm is an opaque variable to it, which is why the counterexample it prints mentions terms you expected to have been reduced away. …"
+    "hint": "`omega` reasons about linear integer arithmetic only — every other subterm is an opaque variable to it, which is why the counterexample it prints mentions terms you expected to have been reduced away.\nLook at the `where` block in the error: if the same value appears under two different names (typically an unreduced projection such as `(a, b).2` alongside the `b` it should have become), omega cannot know they are equal. Reduce it before calling omega — `simp` the projection away, rewrite with the lemma that states the equality, or prove the arithmetic fact as a standalone `have` over the already-reduced form and close the goal with `simpa using` it.\nAdding more hypotheses to omega will not help while the terms remain opaque."
   }],
   "remaining": ["Ring.in_range"],
   "complete": false
@@ -182,7 +182,8 @@ curl -s -X POST localhost:1337/session/$SID/check -H 'content-type: application/
 
 formal first tried to recover the proof on its own, and failed. The error shows why:
 `omega` treats `fmod` as an unknown value `b`, so it cannot rule out `b ≤ -1`. The hint
-says so, and names the way out: prove the fact as a `have` first.
+says so, and names three ways out. The fix takes the last one: it proves each bound as a
+`have`, then closes the goal with them.
 
 **The fix.** The agent states both bounds with the lemmas core Lean has for `Int.fmod`:
 
@@ -198,7 +199,7 @@ theorem Ring.in_range.holds : Ring.in_range := by
 { "verified": ["Ring.in_range"], "recovered": [], "failed": [], "remaining": [], "complete": true }
 ```
 
-This check took 0.67 s, because the server keeps Mathlib loaded.
+This check took 0.67 s. The spec and the proof use core Lean only, so Lean loaded no Mathlib.
 
 **Next time.** formal stores the accepted proof. A later session on the same spec finds
 it:
@@ -208,6 +209,10 @@ it:
   "session_id": "9a1a53e4…",
   "cached": [{ "id": "Ring.in_range", "description": "", "kind": "spec", "assumptions": [] }],
   "work": [], "complete": true, "stale": [],
+  "compare": [{
+    "function": "Ring.wrap", "code": "ring.py wrap",
+    "inputs": [[7, 3], [-7, 3], [0, 3], [7, -3], [-7, -3]]
+  }],
   "refuted": [], "bounded": [], "not_inductive": [], "inductive_together": []
 }
 ```
@@ -271,7 +276,8 @@ Three things keep the loop cheap:
 
 ### The spec file
 
-Properties live in a JSON file that you commit next to the code. This file holds one entry:
+Properties live in a JSON file that you commit next to the code. For example, this file
+holds one entry:
 
 ```json
 {
