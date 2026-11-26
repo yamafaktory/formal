@@ -21,6 +21,7 @@ use crate::{
     },
     proof_cache::{
         lean_spec_answers_key,
+        lean_spec_attempt_key,
         lean_spec_key,
         lean_spec_search_key,
     },
@@ -338,6 +339,9 @@ pub struct LeanSpec {
     pub sampled: Vec<String>,
     /// The state machine the spec describes with `init` and `step`, when it has one.
     pub machine: Option<Machine>,
+    /// Each `def` and `abbrev` in the spec's namespace, with the ones formal adds to a machine,
+    /// as `<namespace>.<name>`, in name order.
+    pub definitions: Vec<String>,
 }
 
 /// A state machine: an `init : <State>`, a `step`, and at least one invariant or liveness
@@ -1241,17 +1245,15 @@ impl LeanSpec {
         let defined = definitions(&code, &blocks);
         let machine = machine(&code, &blocks, &defined, &namespace, &stated);
         let running = machine.as_ref().filter(|machine| machine.runs());
-        if let Some(machine) = running {
-            if defined.contains_key("run") {
-                return Err(SpecError::MachineRun(path.to_path_buf()));
-            }
-            properties.extend(
-                machine
-                    .invariants
-                    .iter()
-                    .map(|invariant| format!("{namespace}.{invariant}.{ALWAYS}")),
-            );
+        let always: Vec<String> = running
+            .iter()
+            .flat_map(|machine| &machine.invariants)
+            .map(|invariant| format!("{namespace}.{invariant}.{ALWAYS}"))
+            .collect();
+        if running.is_some() && defined.contains_key("run") {
+            return Err(SpecError::MachineRun(path.to_path_buf()));
         }
+        properties.extend(always.iter().cloned());
         if properties.is_empty() {
             return Err(SpecError::NoLeanProperties(path.to_path_buf()));
         }
@@ -1264,6 +1266,16 @@ impl LeanSpec {
             source.push_str(&machine.definitions(&namespace));
             source.push('\n');
         }
+        let mut definitions: Vec<String> = defined
+            .iter()
+            .filter(|(_, inside)| **inside)
+            .map(|(name, _)| format!("{namespace}.{name}"))
+            .collect();
+        if running.is_some() {
+            definitions.push(format!("{namespace}.run"));
+        }
+        definitions.extend(always);
+        definitions.sort();
         Ok(Self {
             source,
             namespace,
@@ -1271,6 +1283,7 @@ impl LeanSpec {
             compared,
             sampled,
             machine,
+            definitions,
         })
     }
 
@@ -1285,6 +1298,22 @@ impl LeanSpec {
                 ..PropertySpec::default()
             })
             .collect()
+    }
+
+    /// What a tactic chain runs first on a property: it unfolds the property and the
+    /// spec's definitions, then introduces the variables.
+    #[must_use]
+    pub fn opening(&self) -> String {
+        format!(
+            "(try set_option linter.unusedSimpArgs false in simp only [{}]) <;> intros <;> ",
+            self.definitions.join(", ")
+        )
+    }
+
+    /// The cache key of `attempt`, a proof formal's own tactics wrote for a property.
+    #[must_use]
+    pub fn attempt_key(&self, id: &str, attempt: &str) -> String {
+        lean_spec_attempt_key(&self.source, id, attempt)
     }
 
     /// Where the proof of a property lives under `root`: `<root>/<Namespace>/<name>.lean`.
@@ -1866,6 +1895,16 @@ mod tests {
 
     fn demo() -> LeanSpec {
         parse(DEMO).expect("the demo spec parses")
+    }
+
+    #[test]
+    fn the_opening_unfolds_every_definition_of_the_namespace() {
+        let spec = parse(&format!("def outside : Nat := 1\n\n{DEMO}")).expect("it parses");
+        assert_eq!(
+            spec.opening(),
+            "(try set_option linter.unusedSimpArgs false in \
+             simp only [Demo.double, Demo.double_even, Demo.double_mono]) <;> intros <;> "
+        );
     }
 
     #[test]

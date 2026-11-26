@@ -1,0 +1,4 @@
+✓ Discount.never_negative  verified by formal's own tactics
+✗ Discount.never_above_price  refuted: price := -2, rate := 1
+  0 ≤ -2 does not hold
+1 of 2 properties hold, 1 refuted

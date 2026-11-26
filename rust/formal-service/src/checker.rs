@@ -15,6 +15,7 @@ use std::time::{
 use formal_core::{
     hints::Table,
     lean_spec::LeanSpec,
+    proof_cache::is_word_char,
 };
 use formal_lean::{
     audit,
@@ -27,7 +28,9 @@ use formal_lean::{
         LeanResult,
         as_auto_tactic_attempt,
         as_premise_search,
+        auto_tactics,
         check_syntax,
+        imports_mathlib,
         replace_proof,
         suggested_tactic,
     },
@@ -156,8 +159,16 @@ impl Outcome {
 pub fn can_cache(outcome: &Outcome) -> bool {
     outcome.verified()
         && outcome.checked
-        && !outcome.lean_code.contains("sorry")
+        && !mentions_sorry(&outcome.lean_code)
         && check_syntax(&outcome.lean_code).0
+}
+
+fn mentions_sorry(lean_code: &str) -> bool {
+    lean_code.match_indices("sorry").any(|(at, word)| {
+        let before = lean_code[..at].chars().next_back();
+        let after = lean_code[at + word.len()..].chars().next();
+        !before.is_some_and(is_word_char) && !after.is_some_and(is_word_char)
+    })
 }
 
 /// How long something took, for a human reading a log.
@@ -186,6 +197,11 @@ pub trait Verifier {
         entries: &mut [BatchEntry],
         timeout: Option<Duration>,
     ) -> Option<Vec<(String, LeanResult)>>;
+
+    /// The proof with the tactic chain in place of its own, or nothing if that would mean guessing.
+    fn auto_tactic_attempt(&self, lean_code: &str) -> Option<String> {
+        as_auto_tactic_attempt(lean_code)
+    }
 }
 
 impl Verifier for formal_lean::run::Runner {
@@ -226,6 +242,12 @@ impl<V: Verifier> Verifier for Composing<'_, V> {
             .map_lines(|line| composed.proof_line(line))
     }
 
+    fn auto_tactic_attempt(&self, lean_code: &str) -> Option<String> {
+        let composed = self.spec.compose(self.id, lean_code);
+        let chain = auto_tactics(imports_mathlib(&composed.lean_code));
+        replace_proof(lean_code, &format!("{}{chain}", self.spec.opening()))
+    }
+
     fn verify_batch(
         &self,
         _entries: &mut [BatchEntry],
@@ -261,6 +283,29 @@ impl<'a, V: Verifier> Checker<'a, V> {
         Checker::new(&composing, self.table).check_batch(std::slice::from_ref(submission), timeout)
     }
 
+    /// The proof formal's own tactics write for a property of `spec` that has no proof.
+    #[must_use]
+    pub fn attempt(&self, spec: &LeanSpec, id: &str) -> Option<String> {
+        Composing {
+            inner: self.verifier,
+            spec,
+            id,
+        }
+        .auto_tactic_attempt(&format!("theorem {id}.holds : {id} := by\n  sorry\n"))
+    }
+
+    /// Check the proof [`Checker::attempt`] wrote for a property of `spec`.
+    #[must_use]
+    pub fn prove_against(&self, spec: &LeanSpec, id: &str, attempt: &str) -> Outcome {
+        let composing = Composing {
+            inner: self.verifier,
+            spec,
+            id,
+        };
+        let result = composing.verify(attempt, Some(AUTO_TACTIC_TIMEOUT));
+        self.to_outcome(id, attempt, &result, true)
+    }
+
     /// Try the tactic chain, then Mathlib premise search, before paying for a retry.
     ///
     /// Nothing when neither closes the goal, in which case the caller's own verdict
@@ -272,7 +317,7 @@ impl<'a, V: Verifier> Checker<'a, V> {
         proof_code: &str,
         started_at: Instant,
     ) -> Option<(String, LeanResult)> {
-        if let Some(auto_code) = as_auto_tactic_attempt(proof_code) {
+        if let Some(auto_code) = self.verifier.auto_tactic_attempt(proof_code) {
             log(
                 Tag::Verify,
                 &format!("{entry_id} trying auto-tactics before a retry..."),

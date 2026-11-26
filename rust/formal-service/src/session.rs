@@ -307,7 +307,43 @@ impl Session {
                 .collect(),
             None => checker.check_batch(&submissions, None),
         };
-        for outcome in &outcomes {
+        self.accept(cache, &outcomes);
+        Ok(outcomes)
+    }
+
+    /// Prove each property in `ids` that has no accepted proof with formal's own
+    /// tactics, and keep what they prove.
+    pub fn prove<V: Verifier>(
+        &mut self,
+        checker: &Checker<'_, V>,
+        cache: &ProofCache,
+        ids: &[String],
+    ) -> Vec<Outcome> {
+        let Some(spec) = &self.lean_spec else {
+            return Vec::new();
+        };
+        let mut proved = Vec::new();
+        for id in ids {
+            let Some(attempt) = checker.attempt(spec, id) else {
+                continue;
+            };
+            let key = spec.attempt_key(id, &attempt);
+            if cache.load::<Unproved>(&key).is_some() {
+                continue;
+            }
+            let outcome = checker.prove_against(spec, id, &attempt);
+            if outcome.verified() {
+                proved.push(outcome);
+            } else if outcome.line.is_some() {
+                cache.save(&key, &Unproved {});
+            }
+        }
+        self.accept(cache, &proved);
+        proved
+    }
+
+    fn accept(&mut self, cache: &ProofCache, outcomes: &[Outcome]) {
+        for outcome in outcomes {
             if !outcome.verified() {
                 continue;
             }
@@ -328,7 +364,6 @@ impl Session {
                 );
             }
         }
-        Ok(outcomes)
     }
 
     /// Compare the code's answers, by function, with the spec's answers.
@@ -402,6 +437,9 @@ impl Session {
         );
     }
 }
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Unproved {}
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Searched {

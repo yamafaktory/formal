@@ -627,6 +627,89 @@ mod on_a_lean_spec {
         );
     }
 
+    fn proving(dir: &TempDir, cache: &ProofCache, fake: &Fake) -> Vec<String> {
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), cache, lean_spec(dir, SPEC))
+            .expect("Lean evaluates the spec");
+        let mut session = session.lock().expect("a fresh session");
+        session
+            .prove(
+                &Checker::new(fake, table()),
+                cache,
+                &["Demo.double_even".to_string()],
+            )
+            .into_iter()
+            .map(|outcome| outcome.id)
+            .collect()
+    }
+
+    #[test]
+    fn a_property_the_tactics_prove_is_recovered() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::accepting();
+        assert_eq!(proving(&dir, &cache, &fake), ["Demo.double_even"]);
+        let session = Sessions::default()
+            .open_spec(&Fake::default(), &cache, lean_spec(&dir, SPEC))
+            .expect("Lean evaluates the spec");
+        let session = session.lock().expect("a fresh session");
+        assert_eq!(session.origin("Demo.double_even"), Origin::Cache);
+    }
+
+    #[test]
+    fn the_attempt_on_a_core_spec_opens_with_its_definitions_and_holds_no_mathlib_tactic() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let fake = rejecting_at(5);
+        proving(&dir, &cache(&dir), &fake);
+        let seen = fake.seen.borrow();
+        let code = seen.first().expect("Lean was asked");
+        assert!(code.contains("simp only [Demo.double,"), "{code}");
+        assert!(!code.contains("linarith"), "{code}");
+    }
+
+    fn attempt_line(dir: &TempDir) -> u32 {
+        let index = lean_spec(dir, SPEC)
+            .compose(
+                "Demo.double_even",
+                "theorem Demo.double_even.holds : Demo.double_even := by\n  sorry\n",
+            )
+            .lean_code
+            .split('\n')
+            .position(|line| line.starts_with("theorem Demo.double_even.holds"))
+            .expect("the attempt is in the file");
+        u32::try_from(index + 1).expect("a small file")
+    }
+
+    #[test]
+    fn a_property_lean_answered_no_to_is_not_tried_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = rejecting_at(attempt_line(&dir));
+        assert_eq!(proving(&dir, &cache, &fake), Vec::<String>::new());
+        assert_eq!(proving(&dir, &cache, &fake), Vec::<String>::new());
+        assert_eq!(*fake.calls.borrow(), 1);
+    }
+
+    #[test]
+    fn an_error_outside_the_attempt_is_tried_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = rejecting_at(1);
+        proving(&dir, &cache, &fake);
+        proving(&dir, &cache, &fake);
+        assert_eq!(*fake.calls.borrow(), 2);
+    }
+
+    #[test]
+    fn a_property_lean_gave_no_answer_on_is_tried_again() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let cache = cache(&dir);
+        let fake = Fake::default();
+        proving(&dir, &cache, &fake);
+        proving(&dir, &cache, &fake);
+        assert_eq!(*fake.calls.borrow(), 2);
+    }
+
     #[test]
     fn an_error_in_the_proof_names_the_proof_line() {
         let dir = TempDir::new().expect("a temporary directory");

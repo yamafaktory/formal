@@ -20,7 +20,10 @@ use formal_service::{
         Checker,
         Outcome,
     },
-    session::Sessions,
+    session::{
+        Origin,
+        Sessions,
+    },
 };
 use tempfile::TempDir;
 
@@ -189,12 +192,16 @@ fn an_error_names_the_line_of_the_proof() {
         return;
     };
     let dir = TempDir::new().expect("a temporary directory");
-    let lean = "import Mathlib\n\nnamespace Demo\n\ntheorem double_even.holds : double_even := by\n  intro n\n  exact rfl\n\nend Demo\n";
+    let lean = "import Mathlib\n\nnamespace Demo\n\ntheorem total_append.holds : total_append := by\n  intro a b\n  exact rfl\n\nend Demo\n";
     let checked = check(
         &runner,
         &dir,
-        demo_with(&dir, ""),
-        &proof("Demo.double_even", lean),
+        demo_with(
+            &dir,
+            "def total : List Nat → Nat\n  | [] => 0\n  | x :: xs => x + total xs\n\n\
+             def total_append : Prop := ∀ a b : List Nat, total (a ++ b) = total a + total b",
+        ),
+        &proof("Demo.total_append", lean),
     );
     let outcome = checked.outcomes.first().expect("one outcome");
     assert!(!outcome.verified());
@@ -220,6 +227,99 @@ fn a_failed_tactic_is_recovered_and_the_proof_is_kept_without_the_spec() {
     let (_, accepted) = checked.accepted.first().expect("one accepted proof");
     assert!(!accepted.contains("def double"), "{accepted}");
     assert!(accepted.contains("theorem two.holds"), "{accepted}");
+}
+
+#[test]
+fn a_property_of_a_core_spec_is_recovered_through_its_definitions() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let lean = "namespace Demo\n\ntheorem double_even.holds : double_even := by\n  exact Nat.lt_irrefl 0\n\nend Demo\n";
+    let checked = check(
+        &runner,
+        &dir,
+        demo_with(&dir, ""),
+        &proof("Demo.double_even", lean),
+    );
+    let outcome = checked.outcomes.first().expect("one outcome");
+    assert!(outcome.verified(), "{}", outcome.error);
+    assert!(outcome.recovered);
+}
+
+#[test]
+fn a_property_that_needs_mathlib_is_recovered_through_its_definitions() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let lean = "import Mathlib\n\nnamespace Demo\n\ntheorem never_negative.holds : never_negative := by\n  exact Nat.lt_irrefl 0\n\nend Demo\n";
+    let checked = check(
+        &runner,
+        &dir,
+        demo_with(
+            &dir,
+            "def discounted (price rate : Int) : Int := price * (1 - rate)\n\n\
+             def never_negative : Prop :=\n  \
+             ∀ price rate : Int, 0 ≤ price → 0 ≤ rate → rate ≤ 1 → 0 ≤ discounted price rate",
+        ),
+        &proof("Demo.never_negative", lean),
+    );
+    let outcome = checked.outcomes.first().expect("one outcome");
+    assert!(outcome.verified(), "{}", outcome.error);
+    assert!(outcome.recovered);
+}
+
+#[test]
+fn formal_proves_a_property_without_a_proof_and_leaves_the_rest_as_work() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let table = Table::shipped().expect("the shipped table is valid");
+    let spec = demo_with(
+        &dir,
+        "def wrap (input : Int × Int) : Int := Int.fmod input.1 input.2\n\n\
+         def in_range : Prop :=\n  \
+         ∀ index size : Int, 0 < size → 0 ≤ wrap (index, size) ∧ wrap (index, size) < size",
+    );
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, spec)
+        .expect("Lean evaluates the spec");
+    let mut session = session.lock().expect("a fresh session");
+    let ids = ["Demo.double_even".to_string(), "Demo.in_range".to_string()];
+    let proved = session.prove(&Checker::new(&runner, table), &cache, &ids);
+    let proved: Vec<&str> = proved.iter().map(|outcome| outcome.id.as_str()).collect();
+    assert_eq!(proved, ["Demo.double_even"]);
+    assert!(session.recovered.contains(&"Demo.double_even".to_string()));
+    assert!(!session.verified.contains_key("Demo.in_range"));
+}
+
+#[test]
+fn a_definition_named_after_sorry_does_not_fail_the_tactics() {
+    let Some(runner) = runner() else {
+        return;
+    };
+    let dir = TempDir::new().expect("a temporary directory");
+    let cache = ProofCache::new(dir.path().join("cache"), Duration::from_hours(1));
+    let table = Table::shipped().expect("the shipped table is valid");
+    let spec = demo_with(&dir, "def a_sorry_warning : Nat := 1");
+    let session = Sessions::default()
+        .open_spec(&runner, &cache, spec.clone())
+        .expect("Lean evaluates the spec");
+    let mut session = session.lock().expect("a fresh session");
+    let proved = session.prove(
+        &Checker::new(&runner, table),
+        &cache,
+        &["Demo.double_even".to_string()],
+    );
+    assert_eq!(proved.len(), 1, "{proved:?}");
+    let again = Sessions::default()
+        .open_spec(&runner, &cache, spec)
+        .expect("Lean evaluates the spec");
+    let again = again.lock().expect("a fresh session");
+    assert_eq!(again.origin("Demo.double_even"), Origin::Cache);
 }
 
 #[test]

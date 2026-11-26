@@ -97,20 +97,6 @@ def replaceProofOn.inputs : List (List Char × List Char) :=
   (Pystr.sentences (["theorem t ", ":= by", " simp", "\n", "def", "lemma x", " ", "α", "　", "\r",
     "abbrev_"].map String.toList) 4).map (·, "rfl".toList)
 
-def autoTactics : List Char :=
-  ("first | " ++ " | ".intercalate
-    (["rfl", "omega", "norm_num", "linarith", "ring", "decide", "simp"].map
-      fun step => "(" ++ step ++ "; done)")).toList
-
-/-- code: rust/formal-lean/src/verifier.rs with_auto_tactics -/
-def withAutoTactics (s : List Char) : List Char :=
-  ProofCache.replaceAll "by\n  sorry".toList ("by ".toList ++ autoTactics)
-    (ProofCache.replaceAll ":= by sorry".toList (":= by ".toList ++ autoTactics) s)
-
-def withAutoTactics.inputs : List (List Char) :=
-  Pystr.sentences ([":= by sorry", "by\n  sorry", ":= by", " sorry", "by", "\n", "  ", "x"].map
-    String.toList) 4
-
 def trimQuotes (s : List Char) : List Char := trimBy (· == '"') s
 
 def tacticOf (captured : List Char) : List Char :=
@@ -168,9 +154,6 @@ def replace_proof_the_statement_is_never_rewritten : Prop :=
 def replace_proof_nothing_of_the_old_proof_survives : Prop :=
   ∀ code tactic result, replaceProof code tactic = some result →
     marker ++ ' ' :: tactic ++ ['\n'] <:+ result
-
-def with_auto_tactics_text_without_a_placeholder_is_untouched : Prop :=
-  ∀ s, ¬ ":= by sorry".toList <:+: s → ¬ "by\n  sorry".toList <:+: s → withAutoTactics s = s
 
 def suggested_tactic_only_the_first_line_of_a_suggestion_is_taken : Prop :=
   tacticOf "exact Nat.le_refl n\u2028exact foo".toList = "exact Nat.le_refl n".toList

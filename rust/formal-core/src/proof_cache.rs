@@ -186,6 +186,17 @@ pub fn lean_spec_search_key(spec: &str, helpers: &str, command: &str) -> String 
     ))
 }
 
+/// The cache key of a proof formal's own tactics wrote for one property.
+///
+/// It covers the proof, so a change to the tactics tries again.
+#[must_use]
+pub fn lean_spec_attempt_key(spec: &str, id: &str, attempt: &str) -> String {
+    sha256_hex(&format!(
+        "lean-spec-attempt:{}",
+        framed(&[spec, id, attempt])
+    ))
+}
+
 /// The SHA-256 digest of `text`, in lowercase hex.
 #[must_use]
 pub fn sha256_hex(text: &str) -> String {

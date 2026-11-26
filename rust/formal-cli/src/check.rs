@@ -102,13 +102,16 @@ fn check(env: &Env, paths: &Paths<'_>) -> Result<(String, bool), String> {
                 .map_err(|e| format!("{}: {e}", proof.path.display()))
         })
         .collect::<Result<_, _>>()?;
-    let outcomes = session
-        .check(
-            &Checker::new(&state.runner, state.table),
-            &state.cache,
-            &submitted,
-        )
+    let checker = Checker::new(&state.runner, state.table);
+    let mut outcomes = session
+        .check(&checker, &state.cache, &submitted)
         .map_err(|e| e.to_string())?;
+    let missing: Vec<String> = files
+        .iter()
+        .filter(|proof| !proof.found)
+        .map(|proof| proof.id.clone())
+        .collect();
+    outcomes.extend(session.prove(&checker, &state.cache, &missing));
 
     Ok((
         render(

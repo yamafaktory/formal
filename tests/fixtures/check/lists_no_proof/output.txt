@@ -1,0 +1,3 @@
+✓ Lists.append_lengths  verified by formal's own tactics
+· Lists.total_append  no proof: write proofs/Lists/total_append.lean declaring `theorem Lists.total_append.holds : Lists.total_append`
+1 of 2 properties hold

@@ -1,8 +1,10 @@
-✗ Lists.append_lengths  proofs/Lists/append_lengths.lean:1:61
+✗ Sum.total_append  proofs/Sum/total_append.lean:5:17
     unsolved goals
-    a b c d : List Nat
-    h1 : a.length = b.length
-    h2 : c.length = d.length
-    ⊢ a.length + c.length = b.length + d.length
+    case cons
+    b : List Nat
+    x : Nat
+    xs : List Nat
+    ih : total (xs ++ b) = total xs + total b
+    ⊢ x + total (xs ++ b) = x + total xs + total b
   hint: Goals remain after the last tactic, and the error shows them. Close each one: `omega` for linear arithmetic over `Nat` or `Int`, or `simp [f]` to unfold a definition `f`.
 0 of 1 properties hold
