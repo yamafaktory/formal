@@ -24,6 +24,7 @@ runs:
   using: composite
   steps:
     - if: inputs.formal == ''
+      id: install
       shell: bash
       env:
         VERSION: ${{ inputs.version }}
@@ -35,9 +36,26 @@ runs:
         esac
         FORMAL_VERSION="$VERSION" sh "$GITHUB_ACTION_PATH/install.sh"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        echo "FORMAL_HOME=$HOME/.local/share/formal" >> "$GITHUB_ENV"
+        echo "installed=$("$HOME/.local/bin/formal" --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+    - if: inputs.formal == ''
+      id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.elan
+          ~/.local/share/formal/lean_project
+        key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.install.outputs.installed }}
     - if: inputs.formal == ''
       shell: bash
       run: formal setup < /dev/null
+    - if: inputs.formal == '' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.elan
+          ~/.local/share/formal/lean_project
+        key: ${{ steps.restore.outputs.cache-primary-key }}
     - shell: bash
       env:
         FORMAL_BIN: ${{ inputs.formal }}
