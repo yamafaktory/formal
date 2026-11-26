@@ -270,7 +270,11 @@ pub(crate) fn install_lean(paths: &Paths, toolchain: &Toolchain, prompt: &dyn Pr
     if !materialize_lean_project(paths, prompt) {
         return false;
     }
-    if !ensure_elan(toolchain, prompt) || !ensure_toolchain(paths, toolchain, prompt) {
+    if !ensure_elan(toolchain, prompt) {
+        return false;
+    }
+    let toolchain = &Toolchain::new(toolchain.elan_home.clone(), &toolchain.search_path);
+    if !ensure_toolchain(paths, toolchain, prompt) {
         return false;
     }
 

@@ -186,6 +186,21 @@ mod tests {
     }
 
     #[test]
+    fn an_elan_installed_after_the_lookup_is_found_by_a_new_lookup() {
+        let dir = TempDir::new().expect("a temporary directory");
+        let before = toolchain(dir.path(), "/nonexistent");
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).expect("the bin directory is creatable");
+        let elan = bin.join("elan");
+        fs::write(&elan, "#!/bin/sh\n").expect("the file is writable");
+        fs::set_permissions(&elan, fs::Permissions::from_mode(0o755))
+            .expect("the mode is settable");
+        assert_eq!(before.which("elan"), None);
+        let after = Toolchain::new(before.elan_home.clone(), &before.search_path);
+        assert_eq!(after.which("elan"), Some(elan));
+    }
+
+    #[test]
     fn the_environment_keeps_its_other_variables() {
         let (dir, _) = with_elan_bin();
         let env = toolchain(dir.path(), "/usr/bin").env();
