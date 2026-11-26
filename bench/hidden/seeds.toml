@@ -47,3 +47,23 @@ replace = "arr.length - size"
 file = "takeWhile.ts"
 find = "      break;"
 replace = "      continue;"
+
+[rs-div-ceil-rare]
+file = "num-integer/src/lib.rs"
+find = "                let (d, r) = self.div_rem(other);\n                if (r > 0 && *other > 0) || (r < 0 && *other < 0) {\n                    d + 1\n                } else {\n                    d\n                }\n"
+replace = "                -(-*self).div_floor(other)\n"
+
+[ts-clamp-rare]
+file = "clamp.ts"
+find = "return Math.min(Math.max(value, bound1), bound2);"
+replace = "return bound1 + Math.min(Math.max(value - bound1, 0), bound2 - bound1);"
+
+[rs-sqrt-u128]
+file = "num-integer/src/roots.rs"
+find = "    if ((u << 32) | a0) < q * q {"
+replace = "    if ((u << 32) | a0) <= q * q {"
+
+[py-heap]
+file = "heapq.py"
+find = "        if rightpos < endpos and not heap[childpos] < heap[rightpos]:"
+replace = "        if rightpos < endpos - 1 and not heap[childpos] < heap[rightpos]:"

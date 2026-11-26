@@ -16,13 +16,35 @@ test breaks the property. That is the number formal must bring down.
 
 ## The corpus
 
-`tasks.toml` lists 20 functions from well-known open-source projects: six in
-Python, seven in Rust and seven in TypeScript. `vendor/` holds their code, pinned
+`tasks.toml` lists 24 tasks from well-known open-source projects: seven in Python,
+nine in Rust and eight in TypeScript. `vendor/` holds their code, pinned
 to one commit, and `vendor/README.md` says where each file comes from.
 
 Each task states its property in plain words, from the function's own
-documentation. In 10 tasks, the code breaks its property in one place:
-`hidden/seeds.toml` plants that bug before the agent sees the code.
+documentation. In 10 of the first 20 tasks, the code breaks its property in one
+place: `hidden/seeds.toml` plants that bug before the agent sees the code. The
+four tasks below are seeded too.
+
+Three tasks have a bug that only rare inputs reach:
+
+- `rs-div-ceil-rare` reuses `div_ceil` and its property. `-a` overflows only at
+  `a = i64::MIN`.
+- `ts-clamp-rare` reuses `clamp` and its property. The float rounding of
+  `value - minimum` changes the result, but small integer inputs never show it.
+- `rs-sqrt-u128` is wrong only on perfect squares above `2^64`, in the Karatsuba
+  step of the 128-bit square root.
+
+Over `ℤ` or `ℝ`, the first two seeded functions satisfy their property. So an
+agent that proves the property about an ideal model of the code reaches a wrong
+verified.
+
+One task, `py-heap`, needs a sequence of calls to reach its bug. It drives
+`heappush` and `heappop` from an empty list. Its bug in `_siftup` shows only
+after a pop on a heap whose last item is a smaller right child.
+
+In a run on Claude Haiku 5.5 with the `lean` arm, the agent was right on all four
+of these tasks, twice each. It found the bugs by reading the code and by running
+it on boundary inputs and short sequences of calls.
 
 `hidden/` holds one property test per task: Hypothesis for Python, proptest for
 Rust and fast-check for TypeScript.
