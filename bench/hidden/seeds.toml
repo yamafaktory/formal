@@ -57,3 +57,13 @@ replace = "                -(-*self).div_floor(other)\n"
 file = "clamp.ts"
 find = "return Math.min(Math.max(value, bound1), bound2);"
 replace = "return bound1 + Math.min(Math.max(value - bound1, 0), bound2 - bound1);"
+
+[rs-sqrt-u128]
+file = "num-integer/src/roots.rs"
+find = "    if ((u << 32) | a0) < q * q {"
+replace = "    if ((u << 32) | a0) <= q * q {"
+
+[py-heap]
+file = "heapq.py"
+find = "        if rightpos < endpos and not heap[childpos] < heap[rightpos]:"
+replace = "        if rightpos < endpos - 1 and not heap[childpos] < heap[rightpos]:"

@@ -151,3 +151,17 @@ language = "typescript"
 files = ["es-toolkit/clamp.ts"]
 function = "`clamp` in `clamp.ts`, called with three arguments"
 property = "For all finite numbers `value`, `minimum` and `maximum` with `minimum <= maximum`, `clamp(value, minimum, maximum)` equals `minimum` when `value < minimum`, `maximum` when `value > maximum`, and `value` otherwise."
+
+[[task]]
+id = "rs-sqrt-u128"
+language = "rust"
+files = ["num-integer"]
+function = "`Roots::sqrt` for `u128`, in `num-integer/src/roots.rs`"
+property = "For every `u128` value `n`, `r = n.sqrt()` satisfies `r * r <= n < (r + 1) * (r + 1)`, computed without overflow."
+
+[[task]]
+id = "py-heap"
+language = "python"
+files = ["cpython/heapq.py"]
+function = "`heappush` and `heappop` in `heapq.py`, called on one list that starts empty"
+property = "For every sequence of `heappush` calls with integers and `heappop` calls on a list that starts empty, each `heappop` on a non-empty list returns the smallest item the list holds."
