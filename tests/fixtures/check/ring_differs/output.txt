@@ -1,0 +1,3 @@
+· Ring.in_range  no proof: write proofs/Ring/in_range.lean declaring `theorem Ring.in_range.holds : Ring.in_range`
+✗ Ring.wrap  differs from ring.py wrap at [7,-3]: spec 1, code -2
+0 of 1 properties hold, 0 of 1 functions match the code
