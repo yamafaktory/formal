@@ -154,7 +154,6 @@ struct FunctionExpectedLemma {
 #[serde(deny_unknown_fields)]
 struct TacticFailed {
     template: String,
-    suffix: String,
     patterns: Vec<String>,
     tactics: BTreeMap<String, String>,
     #[serde(skip)]
@@ -530,7 +529,6 @@ impl Table {
             hint.push(' ');
             hint.push_str(specific);
         }
-        hint.push_str(&config.suffix);
         Some(hint)
     }
 }
@@ -606,7 +604,7 @@ mod tests {
     fn with_patterns(patterns: &str) -> Result<Table, HintTableError> {
         Table::parse(&format!(
             "version = 1\nfallback = 'x'\n[handler.tactic_failed]\npatterns = {patterns}\n\
-             template = 'The `{{name}}` tactic failed.'\nsuffix = ''\n[handler.tactic_failed.tactics]\n\
+             template = 'The `{{name}}` tactic failed.'\n[handler.tactic_failed.tactics]\n\
              [[rule]]\nid = 'a'\nhandler = 'tactic_failed'"
         ))
     }
@@ -689,7 +687,7 @@ mod tests {
     #[test]
     fn a_rule_that_matches_but_answers_nothing_falls_through_to_the_next() {
         let table = Table::parse(
-            "version = 1\nfallback = 'x'\n[handler.tactic_failed]\npatterns = []\ntemplate = 't'\nsuffix = ''\n\
+            "version = 1\nfallback = 'x'\n[handler.tactic_failed]\npatterns = []\ntemplate = 't'\n\
              [handler.tactic_failed.tactics]\n[[rule]]\nid = 'a'\nall = ['boom']\nhandler = 'tactic_failed'\n\
              [[rule]]\nid = 'b'\nall = ['boom']\nhint = 'the next one'",
         )
