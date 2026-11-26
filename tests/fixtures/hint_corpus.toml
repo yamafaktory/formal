@@ -335,14 +335,21 @@ Tactic `rfl` failed: The left-hand side
   a
 is not definitionally'''
 hint = '''
-The `rfl` tactic ran and failed to close the goal. The two sides are not definitionally equal, so no amount of unfolding will close this. Prove it by `induction` or `simp` with the relevant lemmas, or check the statement is actually true — `rfl` failing on something you expected to be trivial usually means the model does not say what you meant.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `rfl` tactic ran and failed to close the goal. The two sides are not definitionally equal, so no amount of unfolding will close this. Prove it by `induction` or `simp` with the relevant lemmas, or check the statement is actually true — `rfl` failing on something you expected to be trivial usually means the model does not say what you meant.'''
 
 [tactic_decide]
 error = 'Tactic `decide` failed: could not decide'
 hint = '''
-The `decide` tactic ran and failed to close the goal. The proposition is not closed, or deciding it exhausts the recursion budget. `decide` only works on ground decidable propositions; case-split the free variables first, and prefer explicit `rcases`/`by_cases` over `decide` on anything ranging over a large type such as `Char`.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `decide` tactic ran and failed to close the goal. The proposition is not closed, or deciding it exhausts the recursion budget. `decide` only works on ground decidable propositions; case-split the free variables first, and prefer explicit `rcases`/`by_cases` over `decide` on anything ranging over a large type such as `Char`.'''
+
+[unsolved_goals]
+error = '''
+unsolved goals
+a b c d : List Nat
+h1 : a.length = b.length
+h2 : c.length = d.length
+⊢ a.length + c.length = b.length + d.length'''
+hint = '''Goals remain after the last tactic, and the error shows them. Close each one: `omega` for linear arithmetic over `Nat` or `Int`, or `simp [f]` to unfold a definition `f`.'''
 
 [unmatched]
 error = 'some completely unknown lean complaint'
@@ -378,8 +385,7 @@ a✝ : p * r < 0
 ⊢ False
 failed'''
 hint = '''
-The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. `nlinarith` reports its failures as `linarith` too: if the proof already used it, give it the products it needs as hypotheses, such as `mul_nonneg ha hb`.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `linarith` tactic ran and failed to close the goal. `linarith` needs the goal and hypotheses to be linear arithmetic over an ordered field. Introduce the facts it should use as hypotheses first, or use `nlinarith` for products. `nlinarith` reports its failures as `linarith` too: if the proof already used it, give it the products it needs as hypotheses, such as `mul_nonneg ha hb`.'''
 
 [aesop_failed_in_quotes]
 # Lean 4.29 quotes the tactic name instead of backticks.
@@ -390,15 +396,13 @@ Initial goal:
   h : P
   ⊢ Q'''
 hint = '''
-The `aesop` tactic ran and failed to close the goal.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `aesop` tactic ran and failed to close the goal.'''
 
 [gcongr_did_not_make_progress]
 error = '''
 gcongr did not make progress'''
 hint = '''
-The `gcongr` tactic ran and failed to close the goal.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `gcongr` tactic ran and failed to close the goal.'''
 
 [gcongr_did_not_make_progress_in_backticks]
 # Mathlib for Lean 4.35 quotes the tactic name and prints the goal.
@@ -408,19 +412,16 @@ error = '''
 a b : ℕ
 ⊢ a ≤ b'''
 hint = '''
-The `gcongr` tactic ran and failed to close the goal.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `gcongr` tactic ran and failed to close the goal.'''
 
 [dsimp_made_no_progress]
 error = '''
 `dsimp` made no progress'''
 hint = '''
-The `dsimp` tactic ran and failed to close the goal.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `dsimp` tactic ran and failed to close the goal.'''
 
 [simp_all_made_no_progress]
 error = '''
 simp_all made no progress'''
 hint = '''
-The `simp_all` tactic ran and failed to close the goal.
-The error prints the goal state after the failure — read it before rewriting the proof; it usually shows the goal is not the one you think you are proving.'''
+The `simp_all` tactic ran and failed to close the goal.'''
