@@ -65,6 +65,14 @@ jobs:
       - run: shellcheck install.sh scripts/release.sh scripts/check-specs.sh scripts/check-specs.test.sh
       - run: scripts/check-specs.test.sh
 
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./
+        with:
+          specs: tests/fixtures/lean_spec/Demo.lean
+
   lean:
     runs-on: ubuntu-latest
     env:

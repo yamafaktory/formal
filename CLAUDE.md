@@ -186,7 +186,9 @@ CI runs all eight in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
 
 The same job then runs the GitHub Action in `action.yml` on `spec/`, with a formal
-built from the checkout, so it never runs the action's install step. The action calls
+built from the checkout. The `action` job runs it the way another repository would: it
+installs the latest release, sets up Lean through the action's cache, and checks
+`tests/fixtures/lean_spec/Demo.lean`, whose properties formal proves on its own. The action calls
 `scripts/check-specs.sh`, which `scripts/check-specs.test.sh` tests with a stub
 formal in the `installer` job. Its `answers` command is
 `rust/formal-lean/examples/answers.rs`, which shares the answer table with

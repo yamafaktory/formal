@@ -335,7 +335,9 @@ runs it on `spec/` like this:
 Another repository uses `yamafaktory/formal@<tag>` in place of `./`, and leaves
 out `formal` so that the action installs a release.
 
-The action installs formal and Lean, then checks each spec. formal never runs your
+The action installs formal and Lean, then checks each spec. It caches Lean and
+Mathlib between runs, keyed on the formal version, so only the first run of a version
+downloads them. formal never runs your
 code. For a spec that compares functions with the code, the action runs the
 `answers` command you give. That command reads the inputs formal writes to
 `$FORMAL_INPUTS`, runs your code on them, and writes the answers to
