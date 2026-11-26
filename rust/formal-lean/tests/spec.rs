@@ -86,9 +86,6 @@ fn answer(code: &str, input: &Value) -> Value {
                 .expect("an input of replace_proof is a pair");
             json!(verifier::replace_proof(text(&pair[0]), text(&pair[1])))
         }
-        "rust/formal-lean/src/verifier.rs with_auto_tactics" => {
-            json!(verifier::with_auto_tactics(text(input)))
-        }
         "rust/formal-core/src/proof_cache.rs is_word_char" => {
             json!(proof_cache::is_word_char(character(input)))
         }
@@ -143,10 +140,6 @@ fn the_specs_compare_these_functions() {
         (
             "Verifier.replaceProofOn",
             "rust/formal-lean/src/verifier.rs replace_proof",
-        ),
-        (
-            "Verifier.withAutoTactics",
-            "rust/formal-lean/src/verifier.rs with_auto_tactics",
         ),
     ];
 
@@ -209,7 +202,6 @@ fn the_rust_answers_what_each_spec_answers() {
             ("Pystr.splitlines", 54_241),
             ("Verifier.isWhitespace", 1_112_064),
             ("Verifier.replaceProofOn", 16_105),
-            ("Verifier.withAutoTactics", 4_681),
         ]
     );
     assert!(differences.is_empty(), "{}", differences.join("\n"));

@@ -18,23 +18,41 @@ use std::{
 
 use formal_core::{
     hints::Table,
-    lean_text::runs_code,
+    lean_text::{
+        self,
+        runs_code,
+    },
     pystr,
 };
 use regex::Regex;
 use serde::Deserialize;
 
-/// Tried before asking anyone to write a proof.
+/// Tried before asking anyone to write a proof, each marked with whether it needs Mathlib.
 ///
 /// Ordered fastest-first: `rfl` (instant), `omega` (linear Nat/Int), `norm_num`
 /// (numeric), `linarith`/`ring` (rational and real arithmetic — the usual
-/// modelling of floats), `decide` (finite decidable), `simp` (last resort).
+/// modelling of floats), `decide` (finite decidable), `simp`, `simp_all` (which
+/// also rewrites with the hypotheses) and `grind`, then `positivity` and
+/// `nlinarith`, the slowest.
 ///
 /// Each alternative is followed by `done`: `first` commits to whichever branch
 /// succeeds, and `norm_num` and `simp` succeed by making progress without closing
 /// the goal, which would shadow every later alternative.
-const AUTO_TACTIC_STEPS: [&str; 7] = [
-    "rfl", "omega", "norm_num", "linarith", "ring", "decide", "simp",
+///
+/// A Mathlib tactic in a file without Mathlib is a parse error, which fails the
+/// whole chain, so a file without Mathlib gets only the others.
+const AUTO_TACTIC_STEPS: [(&str, bool); 11] = [
+    ("rfl", false),
+    ("omega", false),
+    ("norm_num", true),
+    ("linarith", true),
+    ("ring", true),
+    ("decide", false),
+    ("simp", false),
+    ("simp_all", false),
+    ("grind", false),
+    ("positivity", true),
+    ("nlinarith", true),
 ];
 
 /// A scratch file older than this was stranded by a killed run.
@@ -43,17 +61,28 @@ const STALE_TEMP_AGE: Duration = Duration::from_hours(1);
 /// The keywords a Lean file must contain at least one of to be worth running.
 const REQUIRED_KEYWORDS: [&str; 5] = ["import", "theorem", "lemma", "def", "example"];
 
-/// The tactic chain, as it is written into a proof.
+/// The tactic chain, as it is written into a proof, for a file with or without Mathlib.
 #[must_use]
-pub fn auto_tactics() -> &'static str {
-    static CHAIN: OnceLock<String> = OnceLock::new();
-    CHAIN.get_or_init(|| {
+pub fn auto_tactics(mathlib: bool) -> &'static str {
+    static CORE: OnceLock<String> = OnceLock::new();
+    static MATHLIB: OnceLock<String> = OnceLock::new();
+    let cell = if mathlib { &MATHLIB } else { &CORE };
+    cell.get_or_init(|| {
         let alternatives: Vec<String> = AUTO_TACTIC_STEPS
             .iter()
-            .map(|step| format!("({step}; done)"))
+            .filter(|(_, needs_mathlib)| mathlib || !needs_mathlib)
+            .map(|(step, _)| format!("({step}; done)"))
             .collect();
         format!("first | {}", alternatives.join(" | "))
     })
+}
+
+/// Whether `lean_code` imports all of Mathlib, or all of its tactics.
+#[must_use]
+pub fn imports_mathlib(lean_code: &str) -> bool {
+    lean_text::imports(lean_code)
+        .iter()
+        .any(|import| import.module == "Mathlib" || import.module == "Mathlib.Tactic")
 }
 
 /// Where in a file Lean says something is wrong.
@@ -267,7 +296,7 @@ pub fn replace_proof(lean_code: &str, tactic: &str) -> Option<String> {
 /// arithmetic and `simp` goals.
 #[must_use]
 pub fn as_auto_tactic_attempt(lean_code: &str) -> Option<String> {
-    replace_proof(lean_code, auto_tactics())
+    replace_proof(lean_code, auto_tactics(imports_mathlib(lean_code)))
 }
 
 /// `exact?` searches Mathlib for a term closing the goal, and names what it finds.
@@ -278,14 +307,6 @@ pub fn as_auto_tactic_attempt(lean_code: &str) -> Option<String> {
 #[must_use]
 pub fn as_premise_search(lean_code: &str) -> Option<String> {
     replace_proof(lean_code, "exact?")
-}
-
-/// Replace `sorry` placeholders with the tactic chain for a quick attempt.
-#[must_use]
-pub fn with_auto_tactics(lean_code: &str) -> String {
-    lean_code
-        .replace(":= by sorry", &format!(":= by {}", auto_tactics()))
-        .replace("by\n  sorry", &format!("by {}", auto_tactics()))
 }
 
 fn suggestion_pattern() -> &'static Regex {
@@ -745,11 +766,38 @@ mod tests {
         }
 
         #[test]
-        fn the_rewritten_proof_uses_the_closing_chain() {
+        fn a_file_with_mathlib_gets_its_tactics() {
+            let result =
+                as_auto_tactic_attempt("import Mathlib\n\ntheorem t : True := by trivial\n")
+                    .expect("one proof");
+            assert!(result.contains("(linarith; done)"), "{result}");
+            assert!(result.contains("(nlinarith; done)"), "{result}");
+            assert!(result.contains("(grind; done)"), "{result}");
+        }
+
+        #[test]
+        fn a_file_without_mathlib_gets_no_mathlib_tactic() {
             let result =
                 as_auto_tactic_attempt("theorem t : True := by trivial\n").expect("one proof");
-            assert!(result.contains("(linarith; done)"));
-            assert!(result.contains("(ring; done)"));
+            assert!(result.contains("(omega; done)"), "{result}");
+            assert!(result.contains("(grind; done)"), "{result}");
+            for (step, needs_mathlib) in AUTO_TACTIC_STEPS {
+                if needs_mathlib {
+                    assert!(!result.contains(&format!("({step}; done)")), "{result}");
+                }
+            }
+        }
+
+        #[test]
+        fn only_all_of_mathlib_or_all_of_its_tactics_counts_as_mathlib() {
+            assert!(imports_mathlib(
+                "import Mathlib\ntheorem t : True := trivial"
+            ));
+            assert!(imports_mathlib("/- c -/\nimport Mathlib.Tactic\n"));
+            assert!(!imports_mathlib("import Mathlib.Tactic.Linarith\n"));
+            assert!(!imports_mathlib(
+                "-- import Mathlib\ntheorem t : True := trivial"
+            ));
         }
 
         #[test]
@@ -767,18 +815,6 @@ mod tests {
                 result.trim_end().ends_with(":= by exact trivial"),
                 "{result}"
             );
-        }
-
-        #[test]
-        fn a_sorry_placeholder_is_swapped_inline_and_in_a_block() {
-            assert!(!with_auto_tactics("theorem foo : 1 = 1 := by sorry").contains("sorry"));
-            assert!(!with_auto_tactics("theorem foo : 1 = 1 := by\n  sorry").contains("sorry"));
-        }
-
-        #[test]
-        fn a_proof_with_no_sorry_is_left_alone() {
-            let code = "theorem foo : 1 = 1 := by rfl";
-            assert_eq!(with_auto_tactics(code), code);
         }
     }
 

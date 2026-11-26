@@ -102,6 +102,10 @@ before the proof, so no notation or variable in the proof can change what it doe
 `Checker::check_against` composes at the Lean boundary, so the screen, the recovery
 chain and the cache all see the proof alone. Each proof of a spec costs its own Lean
 run: one file cannot hold the spec once per proof, so spec proofs are never batched.
+On a spec property the recovery chain starts with `LeanSpec::opening`, which unfolds the
+property and the spec's definitions. A Mathlib tactic in a file without Mathlib fails the
+whole chain, so the chain holds one only when the composed file imports Mathlib.
+`formal check` runs the chain on each property that has no proof file.
 
 A spec function that names its code in a `code:` line of its doc comment is compared
 with that code. `def <name>.inputs` lists the inputs, and a spec without it is refused.

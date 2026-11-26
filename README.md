@@ -270,16 +270,21 @@ Three things keep the loop cheap:
 - **A failure comes back short.** formal returns the first error and a hint, never Lean's
   full output, which for a Mathlib failure runs to thousands of tokens.
 - **formal recovers what it can.** Before it reports a failure, it replaces the proof
-  with an automatic tactic chain (`rfl`, `omega`, `norm_num`, `linarith`, `ring`,
-  `decide`, `simp`), then with a premise search (`exact?`). A proof recovered this way
-  appears under `recovered` and never goes back to the agent.
+  with an automatic tactic chain, then with a premise search (`exact?`). On a spec
+  property, the chain first unfolds the property and the spec's definitions, and
+  introduces the variables. It tries `rfl`, `omega`, `decide`, `simp`, `simp_all` and
+  `grind`. When the file imports Mathlib, it also tries `norm_num`, `linarith`, `ring`,
+  `positivity` and `nlinarith`. A proof recovered this way appears under `recovered`
+  and never goes back to the agent.
 
 ### One command: `formal check`
 
 `formal check <spec>` runs the whole loop on a Lean spec in one process, with no server.
 It runs the counterexample search, checks each proof it finds at
 `proofs/<Namespace>/<name>.lean`, compares the code's answers when you pass them, and
-exits. It prints one line per property and per compared function, and no log lines. The
+exits. For a property with no proof file, it tries the tactic chain first. A property
+the chain proves prints `verified by formal's own tactics`, and the agent writes no proof
+for it. It prints one line per property and per compared function, and no log lines. The
 exit code is:
 
 - 0 when everything holds.

@@ -394,6 +394,16 @@ mod caching {
     }
 
     #[test]
+    fn a_name_that_holds_sorry_is_not_sorry() {
+        assert!(can_cache(&Outcome {
+            lean_code:
+                "theorem t : True := by simp only [Run.a_sorry_warning, sorry_free]; trivial"
+                    .to_string(),
+            ..outcome()
+        }));
+    }
+
+    #[test]
     fn a_proof_containing_sorry_can_never_be_cached() {
         assert!(!can_cache(&Outcome {
             lean_code: "theorem t : True := by sorry".to_string(),
