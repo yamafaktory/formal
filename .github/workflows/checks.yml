@@ -62,7 +62,8 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
-      - run: shellcheck install.sh scripts/release.sh
+      - run: shellcheck install.sh scripts/release.sh scripts/check-specs.sh scripts/check-specs.test.sh
+      - run: scripts/check-specs.test.sh
 
   lean:
     runs-on: ubuntu-latest
@@ -96,6 +97,14 @@ jobs:
           -- --test-threads=1
       - run: cargo +stable test --locked -p formal-service --test spec_sessions -- --test-threads=1
       - run: cargo +stable test --locked -p formal-cli --test budget -- --test-threads=1
+      - run: |
+          cargo +stable build --locked -p formal-cli
+          cargo +stable build --locked -p formal-lean --example answers
+      - uses: ./
+        with:
+          formal: rust/target/debug/formal
+          specs: spec/*.lean
+          answers: rust/target/debug/examples/answers "$FORMAL_SPEC" "$FORMAL_INPUTS" "$FORMAL_ANSWERS"
 
   msrv:
     runs-on: ubuntu-latest
