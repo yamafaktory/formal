@@ -1,0 +1,47 @@
+name: formal check
+description: Check Lean specs and their proofs with formal, and compare them with the code.
+inputs:
+  specs:
+    description: The Lean specs to check, separated by spaces. A glob such as spec/*.lean works.
+    required: true
+  proofs:
+    description: Where the proofs are, as <dir>/<Namespace>/<name>.lean, from the repository root.
+    default: proofs
+  answers:
+    description: >-
+      A command that answers for the functions a spec compares. It reads the inputs from
+      $FORMAL_INPUTS and writes the answers to $FORMAL_ANSWERS, for the spec in $FORMAL_SPEC.
+    default: ""
+  formal:
+    description: A formal binary to use instead of installing a release.
+    default: ""
+  version:
+    description: >-
+      The formal release to install, such as v1.15.0. Empty means the release of the
+      action's own tag, or the latest release when the action is not used through a tag.
+    default: ""
+runs:
+  using: composite
+  steps:
+    - if: inputs.formal == ''
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        case "$VERSION:$ACTION_REF" in
+          :v[0-9]*) VERSION="$ACTION_REF" ;;
+          :*) VERSION=latest ;;
+        esac
+        FORMAL_VERSION="$VERSION" sh "$GITHUB_ACTION_PATH/install.sh"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - if: inputs.formal == ''
+      shell: bash
+      run: formal setup < /dev/null
+    - shell: bash
+      env:
+        FORMAL_BIN: ${{ inputs.formal }}
+        FORMAL_SPECS: ${{ inputs.specs }}
+        FORMAL_PROOFS: ${{ inputs.proofs }}
+        FORMAL_ANSWERS_COMMAND: ${{ inputs.answers }}
+      run: "$GITHUB_ACTION_PATH/scripts/check-specs.sh"

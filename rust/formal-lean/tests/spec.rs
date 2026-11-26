@@ -5,26 +5,21 @@ use std::{
     time::Duration,
 };
 
-use formal_core::{
-    lean_spec::{
-        Answer,
-        Compared,
-        LeanSpec,
-        Refutation,
-        read_evaluation,
-        read_search,
-    },
-    proof_cache,
-    pystr,
+use formal_core::lean_spec::{
+    Answer,
+    Compared,
+    LeanSpec,
+    Refutation,
+    read_evaluation,
+    read_search,
 };
-use formal_lean::{
-    run::Runner,
-    verifier,
-};
-use serde_json::{
-    Value,
-    json,
-};
+use formal_lean::run::Runner;
+use serde_json::Value;
+
+#[path = "support/answer.rs"]
+mod answer;
+
+use answer::answer;
 
 fn runner() -> Option<Runner> {
     let runner = Runner::from_env();
@@ -62,47 +57,6 @@ fn searched(runner: &Runner, spec: &LeanSpec) -> Vec<Answer> {
         .verify(&search.lean_code, Some(Duration::from_mins(5)))
         .said();
     read_search(&search, &said)
-}
-
-fn text(input: &Value) -> &str {
-    input.as_str().expect("every input of the specs is text")
-}
-
-fn character(input: &Value) -> char {
-    let mut chars = text(input).chars();
-    let (Some(c), None) = (chars.next(), chars.next()) else {
-        panic!("{input} is not one character");
-    };
-    c
-}
-
-fn answer(code: &str, input: &Value) -> Value {
-    match code {
-        "rust/formal-core/src/pystr.rs is_space" => json!(pystr::is_space(character(input))),
-        "core char::is_whitespace" => json!(character(input).is_whitespace()),
-        "rust/formal-lean/src/verifier.rs replace_proof" => {
-            let pair = input
-                .as_array()
-                .expect("an input of replace_proof is a pair");
-            json!(verifier::replace_proof(text(&pair[0]), text(&pair[1])))
-        }
-        "rust/formal-core/src/proof_cache.rs is_word_char" => {
-            json!(proof_cache::is_word_char(character(input)))
-        }
-        "rust/formal-core/src/proof_cache.rs normalise_kind" => {
-            json!(proof_cache::normalise_kind(text(input)))
-        }
-        "rust/formal-core/src/pystr.rs strip" => json!(pystr::strip(text(input))),
-        "rust/formal-core/src/pystr.rs rstrip" => json!(pystr::rstrip(text(input))),
-        "rust/formal-core/src/pystr.rs splitlines" => json!(pystr::splitlines(text(input))),
-        "rust/formal-core/src/proof_cache.rs normalise_code" => {
-            json!(proof_cache::normalise_code(text(input)))
-        }
-        "rust/formal-core/src/proof_cache.rs normalise_formal" => {
-            json!(proof_cache::normalise_formal(text(input)))
-        }
-        other => panic!("a spec names {other}, which this test does not run"),
-    }
 }
 
 #[test]

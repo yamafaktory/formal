@@ -162,8 +162,8 @@ opens and caches each answer Lean gave. A refuted property stays work.
 `formal-service/tests/spec_sessions.rs` checks every proof of every spec in `spec/`
 through a session, and holds the check to proofs that try to cheat.
 `formal-lean/tests/spec.rs` runs that evaluation on each spec and compares the Rust with
-each answer. A new `code:` line needs a row in its `answer` table. The specs use core
-Lean only.
+each answer. A new `code:` line needs a row in the `answer` table of
+`formal-lean/tests/support/answer.rs`. The specs use core Lean only.
 
 ## Lean
 
@@ -184,6 +184,13 @@ cargo test -p formal-cli --test budget             # formal check prints what wa
 
 CI runs all eight in the `lean` job, sandboxed, and fails before them if Lean or
 the REPL is missing, so none of them can pass by skipping.
+
+The same job then runs the GitHub Action in `action.yml` on `spec/`, with a formal
+built from the checkout, so it never runs the action's install step. The action calls
+`scripts/check-specs.sh`, which `scripts/check-specs.test.sh` tests with a stub
+formal in the `installer` job. Its `answers` command is
+`rust/formal-lean/examples/answers.rs`, which shares the answer table with
+`formal-lean/tests/spec.rs`.
 
 ## Benchmark
 

@@ -317,6 +317,35 @@ $ formal check Ring.lean --answers answers.json
   `{"<function>": [inputs]}`. A function with many inputs prints only their count.
 - A hint that already appeared in the run appears again as `hint: as above`.
 
+### In CI: the GitHub Action
+
+The repository is also a GitHub Action that runs `formal check` on each change. It
+fails when a property is refuted, when a proof no longer holds, or when the code no
+longer matches its spec. Each spec's output goes to the job summary. formal's own CI
+runs it on `spec/` like this:
+
+```yaml
+- uses: ./
+  with:
+    formal: rust/target/debug/formal
+    specs: spec/*.lean
+    answers: rust/target/debug/examples/answers "$FORMAL_SPEC" "$FORMAL_INPUTS" "$FORMAL_ANSWERS"
+```
+
+Another repository uses `yamafaktory/formal@<tag>` in place of `./`, and leaves
+out `formal` so that the action installs a release.
+
+The action installs formal and Lean, then checks each spec. formal never runs your
+code. For a spec that compares functions with the code, the action runs the
+`answers` command you give. That command reads the inputs formal writes to
+`$FORMAL_INPUTS`, runs your code on them, and writes the answers to
+`$FORMAL_ANSWERS` as `{"<function>": [answers]}`. The action skips the command for a
+spec that compares no function.
+
+`formal` takes a binary to use instead of a release. `version` picks the release to
+install, and defaults to the release of the action's own tag. `proofs` defaults to `proofs`. formal's own `answers` command
+is `rust/formal-lean/examples/answers.rs`.
+
 ### The spec file
 
 Properties live in a JSON file that you commit next to the code. For example, this file
