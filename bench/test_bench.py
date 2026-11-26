@@ -8,8 +8,10 @@ import pytest
 import bench
 
 
-def entry(task, arm, grade, tokens=100, seconds=10.0, cost=0.5):
-    return {"task": task, "arm": arm, "grade": grade, "tokens": tokens, "seconds": seconds, "cost": cost}
+def entry(task, arm, grade, tokens=100, seconds=10.0, cost=0.5, turns=4):
+    return {
+        "task": task, "arm": arm, "grade": grade, "tokens": tokens, "seconds": seconds, "cost": cost, "turns": turns,
+    }
 
 
 def result(**fields):
@@ -65,6 +67,7 @@ def test_usage_comes_from_the_result_when_the_run_ends():
             json.dumps({"type": "system"}),
             result(
                 total_cost_usd=1.25,
+                num_turns=6,
                 modelUsage={
                     "a": {"inputTokens": 1, "outputTokens": 2, "cacheReadInputTokens": 3, "cacheCreationInputTokens": 4},
                     "b": {"inputTokens": 10, "outputTokens": 20},
@@ -74,6 +77,7 @@ def test_usage_comes_from_the_result_when_the_run_ends():
     )
     spent = bench.usage(output)
     assert (spent["tokens"], spent["output_tokens"], spent["cost"], spent["models"]) == (40, 22, 1.25, ["a", "b"])
+    assert spent["turns"] == 6
 
 
 def test_usage_adds_the_messages_of_a_run_cut_before_its_result():
@@ -116,10 +120,10 @@ def test_a_run_the_agent_could_not_finish_is_an_error(tmp_path, output, returnco
 def test_the_summary_counts_each_grade_per_arm_and_leaves_errors_out_of_the_means():
     table = bench.summary(
         [
-            entry("t", "lean", "wrong verified", tokens=100, seconds=10),
-            entry("t", "lean", "right", tokens=300, seconds=30),
-            entry("t", "lean", "error", tokens=0, seconds=1, cost=None),
-            entry("t", "formal", "right"),
+            entry("t", "lean", "wrong verified", tokens=100, seconds=10, turns=6),
+            entry("t", "lean", "right", tokens=300, seconds=30, turns=8),
+            entry("t", "lean", "error", tokens=0, seconds=1, cost=None, turns=None),
+            entry("t", "formal", "wrong verified"),
         ]
     )
     assert table["lean"] == {
@@ -131,9 +135,19 @@ def test_the_summary_counts_each_grade_per_arm_and_leaves_errors_out_of_the_mean
         "error": 1,
         "tokens": 200,
         "seconds": 20,
+        "turns": 7,
         "cost": 1.0,
+        "cost per right": 1.0,
     }
     assert table["formal"]["runs"] == 1
+    assert table["formal"]["cost per right"] is None
+
+
+def test_a_record_from_before_turns_were_kept_counts_without_them():
+    old = entry("t", "lean", "right")
+    del old["turns"]
+    table = bench.summary([old])
+    assert (table["lean"]["turns"], table["lean"]["tokens"]) == (None, 100)
 
 
 def test_a_task_splits_when_its_arms_are_right_at_different_rates():
@@ -150,11 +164,11 @@ def test_a_task_splits_when_its_arms_are_right_at_different_rates():
 
 def test_only_the_formal_arm_is_told_about_formal():
     task = bench.tasks()[0]
-    lean = bench.prompt(task, "lean", Path("/tmp/run/lean"), 14000)
-    formal = bench.prompt(task, "formal", Path("/tmp/run/lean"), 14000)
+    lean = bench.prompt(task, "lean", Path("/tmp/run/lean"))
+    formal = bench.prompt(task, "formal", Path("/tmp/run/lean"))
     assert task.property in lean
     assert "formal" not in lean
-    assert "curl -s localhost:14000/guide" in formal
+    assert "run `formal check <spec>`" in formal
     assert lean.split("\n\n")[:4] == formal.split("\n\n")[:4]
 
 
@@ -168,20 +182,24 @@ def from_repository(argv):
 
 def test_the_agent_sees_its_run_and_only_mathlib_from_the_repository():
     run = Path("/tmp/formal-bench-x")
-    argv = bench.command(bench.tasks()[0], "lean", "m", "high", run, 14000)
+    argv = bench.command(bench.tasks()[0], "lean", "m", "high", run)
     assert (str(run / "agent"), str(run / "agent")) in binds(argv)
     assert from_repository(argv) == [str(bench.LEAN_PROJECT / ".lake" / "packages")]
     assert "--clearenv" in argv
+    assert "FORMAL_HOME" not in argv
     assert argv[argv.index("--chdir") + 1] == str(run / "agent" / "work")
     assert argv[-2:] == ["--effort", "high"]
 
 
-def test_formal_sees_the_agent_s_files_read_only_and_only_mathlib_and_itself_from_the_repository():
+def test_the_formal_arm_also_sees_formal_and_only_formal():
     run = Path("/tmp/formal-bench-x")
-    argv = bench.formal_sandbox(run, 14000)
-    assert ("--ro-bind", str(run / "agent" / "work")) in [(argv[i], argv[i + 1]) for i in range(len(argv) - 1)]
+    argv = bench.command(bench.tasks()[0], "formal", "m", None, run)
     assert from_repository(argv) == sorted([str(bench.LEAN_PROJECT / ".lake" / "packages"), str(bench.FORMAL)])
-    assert str(run / "agent") not in [target for _, target in binds(argv)]
+    assert (str(bench.FORMAL), str(run / "agent" / "bin" / "formal")) in binds(argv)
+    assert argv[argv.index("LEAN_PROJECT_DIR") + 1] == str(run / "agent" / "lean")
+    assert argv[argv.index("FORMAL_HOME") + 1].startswith(str(run / "agent"))
+    assert argv[argv.index("FORMAL_SANDBOX") + 1] == "off"
+    assert argv[argv.index("PATH") + 1].startswith(str(run / "agent" / "bin") + ":")
 
 
 needs_bwrap = pytest.mark.skipif(
@@ -201,17 +219,16 @@ def test_inside_the_agent_sandbox_the_repository_is_gone_and_the_tools_work(tmp_
             *(["cargo --version"] if (bench.HOME / ".rustup").exists() else []),
         ]
     )
-    done = subprocess.run(bench.agent_sandbox(tmp_path) + ["sh", "-c", script], capture_output=True, text=True)
+    done = subprocess.run(bench.agent_sandbox(tmp_path, "lean") + ["sh", "-c", script], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
 
 
 @needs_bwrap
 @pytest.mark.skipif(not bench.FORMAL.exists(), reason="needs a release build of formal")
-def test_inside_formal_s_sandbox_formal_runs_and_the_seeds_are_gone(tmp_path):
+def test_inside_the_formal_arm_s_sandbox_formal_runs_and_the_seeds_are_gone(tmp_path):
     bench.start(tmp_path)
-    serve = bench.formal_sandbox(tmp_path, 14000)
-    probe = serve[:-2] + ["sh", "-c", f"{serve[-2]} --version && test ! -e {bench.HIDDEN / 'seeds.toml'}"]
-    done = subprocess.run(probe, capture_output=True, text=True)
+    script = f"formal --version && test ! -e {bench.HIDDEN / 'seeds.toml'}"
+    done = subprocess.run(bench.agent_sandbox(tmp_path, "formal") + ["sh", "-c", script], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
 
 
@@ -225,7 +242,7 @@ def test_a_run_keeps_its_files_and_records_its_answer(tmp_path, monkeypatch):
     )
     stub.chmod(0o755)
     monkeypatch.setattr(bench, "CLAUDE", str(stub))
-    monkeypatch.setattr(bench, "agent_sandbox", lambda run: [])
+    monkeypatch.setattr(bench, "agent_sandbox", lambda run, arm: [])
     task = next(task for task in bench.tasks() if task.id in bench.seeds())
     entry_ = bench.run_once(task, bench.seeds()[task.id], "lean", 1, SETUP, tmp_path / "out")
     assert (entry_["verdict"], entry_["grade"], entry_["cost"], entry_["output_tokens"]) == ("refuted", "right", 0.25, 3)

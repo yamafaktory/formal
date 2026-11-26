@@ -6,14 +6,12 @@ import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tomllib
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +27,6 @@ HOME = Path.home()
 CARGO_TARGET = Path(tempfile.gettempdir()) / "formal-bench-target"
 CLAUDE = "claude"
 TIME_LIMIT = 20 * 60
-SERVER_START = 120
 MODEL = "claude-opus-5-5"
 ARMS = ("lean", "formal")
 TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
@@ -67,8 +64,12 @@ LEAN_TOOLS = (
 )
 
 FORMAL_TOOLS = (
-    "formal checks Lean proofs for you, and it runs at http://127.0.0.1:{port}. "
-    "Run `curl -s localhost:{port}/guide` and follow the workflow it returns."
+    "formal checks a Lean spec for you: run `formal check <spec>`. "
+    "A spec is a Lean file with one `namespace`, the model of the code as `def`s, "
+    "and each property as `def <name> : Prop`. "
+    "formal searches for a counterexample, proves what it can, and prints what is left. "
+    "Write each proof that is left in `proofs/<Namespace>/<name>.lean`, declaring "
+    "`theorem <Namespace>.<name>.holds : <Namespace>.<name>`, then run `formal check` again."
 )
 
 
@@ -110,10 +111,10 @@ def prepare(task: Task, seed: dict[str, str] | None, work: Path) -> None:
         target.write_text(seeded(target.read_text(), seed))
 
 
-def prompt(task: Task, arm: str, lean_project: Path, port: int) -> str:
+def prompt(task: Task, arm: str, lean_project: Path) -> str:
     tools = LEAN_TOOLS.format(lean_project=lean_project)
     if arm == "formal":
-        tools = f"{tools}\n\n{FORMAL_TOOLS.format(port=port)}"
+        tools = f"{tools}\n\n{FORMAL_TOOLS}"
     return TASK.format(function=task.function, property=task.property, tools=tools)
 
 
@@ -137,8 +138,9 @@ def toolchains() -> list[tuple[str, Path, Path]]:
     return [("--ro-bind-try", HOME / name, HOME / name) for name in (".elan", ".rustup")]
 
 
-def agent_sandbox(run: Path) -> list[str]:
+def agent_sandbox(run: Path, arm: str) -> list[str]:
     agent = run / "agent"
+    environment = {"TERM": "dumb"}
     binds = [
         *toolchains(),
         ("--bind", agent, agent),
@@ -147,36 +149,26 @@ def agent_sandbox(run: Path) -> list[str]:
         ("--bind-try", HOME / ".claude" / ".credentials.json", HOME / ".claude" / ".credentials.json"),
         ("--bind", agent / "home" / ".claude.json", HOME / ".claude.json"),
     ]
-    return confined({"TERM": "dumb"}, binds) + ["--chdir", str(agent / "work")]
+    if arm == "formal":
+        environment |= {
+            "PATH": f"{agent / 'bin'}:{PATH}",
+            "FORMAL_HOME": str(agent / "home" / "formal"),
+            "LEAN_PROJECT_DIR": str(agent / "lean"),
+            "FORMAL_SANDBOX": "off",
+        }
+        binds.append(("--ro-bind", FORMAL, agent / "bin" / "formal"))
+    return confined(environment, binds) + ["--chdir", str(agent / "work")]
 
 
-def formal_sandbox(run: Path, port: int) -> list[str]:
-    agent, server = run / "agent", run / "formal"
-    environment = {
-        "FORMAL_HOME": str(server / "home"),
-        "LEAN_PROJECT_DIR": str(server / "lean"),
-        "FORMAL_PORT": str(port),
-    }
-    binds = [
-        *toolchains(),
-        ("--bind", server, server),
-        ("--ro-bind", LEAN_PROJECT / ".lake" / "packages", server / "lean" / ".lake" / "packages"),
-        ("--ro-bind", FORMAL, server / "formal"),
-        ("--ro-bind", agent / "work", agent / "work"),
-        ("--ro-bind", agent / "lean", agent / "lean"),
-    ]
-    return confined(environment, binds) + [str(server / "formal"), "serve"]
-
-
-def command(task: Task, arm: str, model: str, effort: str | None, run: Path, port: int) -> list[str]:
+def command(task: Task, arm: str, model: str, effort: str | None, run: Path) -> list[str]:
     agent = [
-        CLAUDE, "-p", prompt(task, arm, run / "agent" / "lean", port), "--safe-mode",
+        CLAUDE, "-p", prompt(task, arm, run / "agent" / "lean"), "--safe-mode",
         "--no-session-persistence", "--output-format", "stream-json", "--verbose",
         "--model", model, "--tools", TOOLS, "--dangerously-skip-permissions",
     ]
     if effort is not None:
         agent += ["--effort", effort]
-    return agent_sandbox(run) + agent
+    return agent_sandbox(run, arm) + agent
 
 
 def hidden_test(task: Task, work: Path) -> list[str]:
@@ -273,6 +265,7 @@ def usage(output: str) -> dict:
             ),
             "output_tokens": sum(model.get("outputTokens", 0) for model in models.values()),
             "cost": result.get("total_cost_usd"),
+            "turns": result.get("num_turns"),
             "models": sorted(models),
             "error": bool(result.get("is_error")),
             "subtype": result.get("subtype"),
@@ -291,6 +284,7 @@ def usage(output: str) -> dict:
         ),
         "output_tokens": sum(part.get("output_tokens", 0) for part in counted),
         "cost": None,
+        "turns": None,
         "models": sorted({message["model"] for message in messages if "model" in message}),
         "error": False,
         "subtype": None,
@@ -336,26 +330,19 @@ def record(task: Task, arm: str, number: int, setup: Setup, held: bool, outcome:
         "tokens": spent["tokens"],
         "output_tokens": spent["output_tokens"],
         "cost": spent["cost"],
+        "turns": spent["turns"],
         "timed_out": outcome.timed_out,
         "returncode": outcome.returncode,
         "subtype": spent["subtype"],
     }
 
 
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 def start(run: Path) -> None:
-    for name in ("agent/work", "agent/lean/.lake/packages", "agent/home/.claude", "formal/home", "formal/lean/.lake/packages"):
+    for name in ("agent/work", "agent/lean/.lake/packages", "agent/home/.claude"):
         (run / name).mkdir(parents=True, exist_ok=True)
-    for project in ("agent/lean", "formal/lean"):
-        for name in LEAN_METADATA:
-            shutil.copy2(LEAN_PROJECT / name, run / project / name)
+    for name in LEAN_METADATA:
+        shutil.copy2(LEAN_PROJECT / name, run / "agent" / "lean" / name)
     (run / "agent" / "home" / ".claude" / ".credentials.json").touch()
-    (run / "formal" / "formal").touch()
     shutil.copy2(HOME / ".claude.json", run / "agent" / "home" / ".claude.json")
 
 
@@ -379,17 +366,6 @@ def stop_all() -> None:
         running = list(RUNNING)
     for process in running:
         stop(process)
-
-
-def serving(port: int, server: subprocess.Popen) -> None:
-    deadline = time.monotonic() + SERVER_START
-    while time.monotonic() < deadline and server.poll() is None:
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/guide", timeout=1).close()
-            return
-        except OSError:
-            time.sleep(0.5)
-    raise OSError(f"formal did not answer on port {port}")
 
 
 def agent(argv: list[str], work: Path) -> tuple[Outcome, str]:
@@ -416,16 +392,7 @@ def run_once(task: Task, seed: dict | None, arm: str, number: int, setup: Setup,
         start(run)
         work = run / "agent" / "work"
         prepare(task, seed, work)
-        port = free_port()
-        server = None
-        try:
-            if arm == "formal":
-                server = spawn(formal_sandbox(run, port), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                serving(port, server)
-            outcome, errors = agent(command(task, arm, setup.model, setup.effort, run, port), work)
-        finally:
-            if server is not None:
-                stop(server)
+        outcome, errors = agent(command(task, arm, setup.model, setup.effort, run), work)
         result = record(task, arm, number, setup, seed is None, outcome, work / "answer.json")
         shutil.copytree(run / "agent", kept / "agent", symlinks=True, ignore=shutil.ignore_patterns("home", ".lake"))
         (kept / "claude.jsonl").write_text(outcome.output)
@@ -458,8 +425,11 @@ def summary(every: list[dict]) -> dict[str, dict]:
             **{name: grades.count(name) for name in GRADES},
             "tokens": mean([entry["tokens"] for entry in counted]),
             "seconds": mean([entry["seconds"] for entry in counted]),
+            "turns": mean([entry.get("turns") for entry in counted]),
             "cost": sum(entry["cost"] or 0 for entry in mine),
         }
+        right = table[arm]["right"]
+        table[arm]["cost per right"] = table[arm]["cost"] / right if right else None
     return table
 
 
@@ -557,7 +527,7 @@ def cell(value) -> str:
 
 def report(arguments: argparse.Namespace) -> None:
     every = records(Path(arguments.out))
-    columns = ["runs", *GRADES, "tokens", "seconds", "cost"]
+    columns = ["runs", *GRADES, "tokens", "seconds", "turns", "cost", "cost per right"]
     print("| arm | " + " | ".join(columns) + " |")
     print("|---" * (len(columns) + 1) + "|")
     for arm, row in summary(every).items():

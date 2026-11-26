@@ -52,7 +52,8 @@ uv run bench/bench.py report
 ```
 
 `run` appends one record per run to `bench/results/records.jsonl`, and `report`
-prints one row per arm. `report` also names the tasks where the arms disagree.
+prints one row per arm. Its `cost per right` column is the total cost of the arm
+divided by its right answers, so a failed run still counts in the cost. `report` also names the tasks where the arms disagree.
 Run those tasks again, and the new runs count with the old ones:
 
 ```sh
@@ -60,6 +61,24 @@ uv run bench/bench.py run --only rs-gcd ts-chunk
 ```
 
 `run` refuses to start when a hidden test disagrees with its seed.
+
+Before formal 1.14.1, the `formal` arm reached a formal server and its `/guide`
+rather than running `formal check`. Records from those runs are a different arm.
+Write new runs to a new `--out` folder rather than adding them to old records.
+
+## The canary
+
+The canary is a small, cheap run that says whether formal costs less than plain
+Lean. It runs three tasks once in each arm, with a small model, and its results go
+to their own folder:
+
+```sh
+uv run bench/bench.py run --only py-median py-leapdays rs-div-floor --runs 1 \
+  --model claude-haiku-5-5 --jobs 3 --out bench/results/canary
+uv run bench/bench.py report --out bench/results/canary
+```
+
+Run it only when the offline numbers move, such as `tests/fixtures/check/budget.toml`.
 
 ## How a run works
 
@@ -73,16 +92,18 @@ uv run bench/bench.py run --only rs-gcd ts-chunk
   and its own folder. That folder holds the task's code, seeded when the task
   has a seed, and a Lean project that shares Mathlib read only. The repository,
   the seeds, the hidden tests and the other runs stay out of sight.
-- **formal's sandbox.** The `formal` arm starts its own formal server under
-  bubblewrap too. It sees the agent's code and Lean project read only, and its
-  own home, proof cache and Lean project. So formal cannot read what the agent
-  cannot read, the agent cannot touch formal's cache, and no run reuses a proof
-  from another run. The prompt tells the agent where formal runs. The `lean` arm
-  has no formal.
+- **formal in the sandbox.** In the `formal` arm, the agent also has the
+  `formal` binary, and the prompt tells it to run `formal check` on a spec it
+  writes. formal runs inside the agent's sandbox, with its home and proof cache
+  in the run's folder, so no run reuses a proof from another run. formal's own
+  confinement is off there, because the agent's sandbox already confines Lean.
+  The agent can read and change formal's cache, and the axiom audit formal
+  builds in the agent's Lean project. The hidden test grades the verdict, so
+  neither changes a grade. The `lean` arm has no formal.
 - **The limit** is 20 minutes. A run that reaches it counts as no claim, and its
   whole sandbox stops. Ctrl-C stops the runs in progress and cancels the rest.
 - **The record** holds the verdict, the evidence, its grade, the tokens, the
-  cost, the wall time, the effort, the Claude Code and formal versions, the
+  cost, the turns, the wall time, the effort, the Claude Code and formal versions, the
   commit, and the models that answered. A run that fails on the agent's side,
   such as an API error, is graded `error` and stays out of the means.
 - **The kept files.** Each run's folder, without its home and Mathlib, stays in
@@ -93,8 +114,6 @@ The sandbox has limits:
 
 - The agent keeps network access, because Claude Code needs it. It can download
   the original code of a well-known project, and it may know that code already.
-- With `--jobs` above 1, a `lean` run can reach a `formal` run's server by
-  guessing its port. Keep `--jobs 1` for strict arms.
 - The agent runs with `--dangerously-skip-permissions` inside the sandbox. The
   sandbox writes only to its run folder and your Claude login, but it shares the
   network with the machine.
